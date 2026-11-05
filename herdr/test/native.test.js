@@ -732,15 +732,20 @@ test('New thread without a project opens the native folder picker; launcher pass
   assert.deepEqual(closed, ['popup']);
 });
 test('empty projects stay empty until an agent is explicitly chosen', async () => {
+  const ui = fakeElements();
   const saved = ['/Code/new'];
   let catalog = projectCatalog([], saved, {}, 'project:/Code/new');
   assert.equal(catalog[0].pending, true);
   assert.deepEqual(catalog[0].tabs, []);
   const commands = [], overlays = [];
-  const View = await viewFor({ spaces: () => [], shared: key => key === 'devkits.projects' ? saved : key === 'devkits.selected-project' ? 'project:/Code/new' : undefined,
-    props: () => ({ space: null, folder: '/Code/new', projectName: 'new', overlay: 'popup' }),
+  const View = await viewFor({ ...ui, spaces: () => [], shared: key => key === 'devkits.projects' ? saved : key === 'devkits.selected-project' ? 'project:/Code/new' : undefined,
+    props: () => ({ view: 'project-empty', space: null, folder: '/Code/new', projectName: 'new', overlay: 'popup' }), theme: () => ({}),
     run: (...args) => commands.push(args), openOverlay: value => overlays.push(value), closeOverlay() {} });
   const view = new View();
+  view.render();
+  assert.deepEqual(ui.texts, []);
+  assert.deepEqual(ui.assets, []);
+  assert.equal(ui.nodes.size, 0);
   view.newThread({});
   assert.deepEqual(commands, []);
   assert.equal(overlays[0].props.space, null);
@@ -783,6 +788,16 @@ test('all projects and thread states remain visible without search or filters', 
   assert.deepEqual(groups.map(g => g.space.id), ['api', 'app']);
   assert.equal(groups.flatMap(g => g.threads).length, 5);
   assert.deepEqual(projectGroups([], []), []);
+});
+test('sidebar leaves the project list blank when no workspace is open', async () => {
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => [], agents: () => [],
+    theme: () => ({}), setAgentOrder() {}, run() {} });
+  const view = new View(); view.init(); view.render();
+  assert.ok(!ui.nodes.has('open-first-project'));
+  assert.ok(!ui.texts.includes('Open a project'));
+  assert.ok(!ui.texts.includes('Open folder…'));
+  assert.ok(ui.nodes.has('settings'));
 });
 test('native sidebar renders project/thread nesting and a shell row can be selected', async () => {
   const ui = fakeElements(), { nodes } = ui, commands = [], memory = {};
