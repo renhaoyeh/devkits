@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, quotaResetLabel } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const agents = [
@@ -25,7 +25,7 @@ const projects = [
 ];
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
-  const components = await Promise.all(['button', 'checkbox', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu']
+  const components = await Promise.all(['button', 'checkbox', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), components.join('\n')
@@ -34,7 +34,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, quotaResetLabel, props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -50,6 +50,7 @@ function fakeElements() {
       return (...args) => {
         if (key === 'id') nodes.set(args[0], data);
         if (key === 'on_click') data.click = args[0];
+        if (key === 'tooltip') data.tooltip = args[0];
         if (key === 'on_change') data.change = args[0];
         if (key === 'disabled') data.disabled = args[0];
         if (key === 'on_key_down') data.keyDown = args[0];
@@ -59,6 +60,10 @@ function fakeElements() {
         if (key === 'overflow_y_scrollbar') data.scrollbar = true;
         if (key === 'on_hover') data.hover = args[0];
         if (key === 'h') data.height = args[0];
+        if (key === 'w') data.width = args[0];
+        if (key === 'bg') data.background = args[0];
+        if (key === 'value') data.value = args[0];
+        if (key === 'indeterminate') data.indeterminate = args[0];
         if (key === 'h_auto') data.height = 'auto';
         if (key === 'opacity') data.opacity = args[0];
         if (key === 'checked') data.checked = args[0];
@@ -347,6 +352,157 @@ test('header anchors the project picker below its actual trigger', async () => {
   assert.equal(overlays[0].frame, 'none');
   ui.nodes.get('project-switcher').click({}, cx);
   assert.equal(overlays[1].at, undefined);
+});
+test('usage follows Add session visibility and order, shows actual quota windows, always has meters, and opens details', async () => {
+  const ui = fakeElements(), overlays = [];
+  const memory = { 'devkits.hidden-launchers': ['terminal', 'agent:work'],
+    'devkits.launcher-order': ['agent:claude', 'agent:codex'] };
+  const View = await viewFor({ ...ui, spaces: () => projects, shared: key => memory[key],
+    openOverlay: overlay => overlays.push(overlay), settings: () => ({ zoom: 1 }),
+    window: () => ({}), layout: () => ({ children: [] }) });
+  const view = new View(); view.usageMachine = null;
+  view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] },
+    { key: 'work', name: 'Codex · 工作', run: ['codex'] },
+    { key: 'claude', name: 'Claude Code', run: ['claude'] }];
+  view.usage = [{ key: 'codex', name: 'Codex', windows: [
+    { bucket: 'codex', minutes: 300, usedPercent: 0, resetsAt: Date.now() / 1000 + 83 * 60 },
+    { bucket: 'codex', minutes: 10080, usedPercent: 42 }], fetchedAt: 5678 }];
+  view.header({});
+  assert.ok(ui.nodes.has('usage-meter-agent:codex-300'));
+  assert.ok(ui.nodes.has('usage-meter-agent:codex-10080'));
+  assert.equal(ui.nodes.get('usage-meter-agent:codex-300-fill').width, '0%');
+  assert.equal(ui.nodes.get('usage-meter-agent:codex-10080-fill').width, '42%');
+  assert.ok(ui.nodes.has('usage-reset-agent:codex-300'));
+  assert.ok(ui.nodes.has('usage-reset-agent:codex-10080'));
+  assert.equal(ui.nodes.get('usage-agent:codex').tooltip, undefined);
+  assert.equal(ui.nodes.get('usage-reset-agent:codex-300').tooltip, undefined);
+  assert.equal(ui.nodes.get('usage-reset-agent:codex-10080').tooltip, undefined);
+  assert.ok(ui.texts.includes('1h 23m'));
+  assert.ok(ui.texts.includes('Week'));
+  assert.ok(ui.nodes.has('usage-meter-agent:claude'));
+  assert.ok(!ui.nodes.has('usage-agent:work'));
+  assert.ok(!ui.nodes.has('usage-terminal'));
+  assert.ok(ui.texts.includes('Not supported'));
+  assert.ok(ui.texts.includes('0%'));
+  assert.deepEqual([...ui.nodes.keys()].filter(key => key.startsWith('usage-agent:')), ['usage-agent:claude', 'usage-agent:codex']);
+  ui.nodes.get('usage-agent:codex').click();
+  assert.equal(overlays[0].props.view, 'usage-details');
+  assert.equal(overlays[0].modal, false);
+  assert.equal(overlays[0].props.account.windows.length, 2);
+  assert.equal(overlays[0].props.account.fetchedAt, 5678);
+  view.usage[0].windows = view.usage[0].windows.filter(window => window.minutes !== 300);
+  ui.nodes.clear(); ui.texts.length = 0; view.header({});
+  assert.ok(ui.nodes.has('usage-meter-agent:codex-10080'));
+  assert.ok(!ui.nodes.has('usage-meter-agent:codex-300'));
+  assert.ok(!ui.nodes.has('usage-reset-agent:codex-300'));
+  assert.ok(!ui.texts.includes('5h'));
+  assert.ok(!ui.texts.includes('5h —'));
+  assert.ok(ui.texts.includes('Week'));
+  ui.nodes.get('usage-agent:claude').click();
+  assert.equal(overlays[1].props.account.supported, false);
+  assert.ok(!ui.nodes.has('usage-settings'));
+  memory['devkits.hidden-launchers'] = ['agent:codex'];
+  ui.nodes.clear(); view.header({});
+  assert.ok(ui.nodes.has('usage-agent:work'));
+  assert.ok(ui.nodes.has('usage-meter-agent:work'));
+  assert.ok(ui.nodes.has('usage-terminal'));
+  assert.ok(!ui.nodes.has('usage-agent:codex'));
+});
+test('usage meters use the percentage for fill and color at both warning thresholds in header and details', async () => {
+  const ui = fakeElements(), colors = { border: '#111111', working: '#008800', blocked: '#aa8800', ansi1: '#cc0000' };
+  const account = { key: 'codex', name: 'Codex', supported: true, windows: [] };
+  const View = await viewFor({ ...ui, props: () => ({ account }), spaces: () => projects,
+    settings: () => ({ zoom: 1 }), window: () => ({}), layout: () => ({ children: [] }) });
+  const view = new View(); view.usageMachine = null;
+  view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] }]; view.usage = [account];
+  for (const [value, color] of [[0, colors.working], [69, colors.working], [70, colors.blocked],
+    [89, colors.blocked], [90, colors.ansi1], [100, colors.ansi1]]) {
+    account.windows = [{ bucket: 'codex', name: 'codex', minutes: 10080, usedPercent: value }];
+    view.header(colors); view.usageDetails(colors);
+    for (const id of ['usage-meter-agent:codex-10080', 'usage-detail-meter-0']) {
+      assert.equal(ui.nodes.get(id).value, value);
+      assert.equal(ui.nodes.get(`${id}-fill`).width, `${value}%`);
+      assert.equal(ui.nodes.get(`${id}-fill`).background, color);
+    }
+  }
+  assert.equal(ui.nodes.get('usage-meter-terminal').indeterminate, true);
+  assert.ok(!ui.nodes.has('usage-meter-terminal-fill'));
+});
+test('usage details show all durations and errors, and Done or Escape close only the dialog', async () => {
+  const ui = fakeElements(), closed = [];
+  const account = { name: '工作', supported: true, fetchedAt: 5678, windows: [
+    { name: 'codex', minutes: 300, usedPercent: 0, resetsAt: Date.now() / 1000 + 83 * 60 },
+    { name: 'codex', minutes: 10080, usedPercent: 42, resetsAt: Date.now() / 1000 + (6 * 24 + 21) * 3600 },
+    { name: 'custom', minutes: null, usedPercent: 20 },
+  ] };
+  const View = await viewFor({ ...ui, props: () => ({ account, overlay: 'details' }), closeOverlay: id => closed.push(id) });
+  const view = new View(); view.usageDetails({});
+  assert.ok(ui.texts.includes('codex · 5h'));
+  assert.ok(ui.texts.includes('codex · 7d'));
+  assert.ok(ui.texts.includes('custom · Unknown duration'));
+  assert.ok(ui.texts.includes('42% used · 58% remaining'));
+  assert.ok(ui.texts.includes('Resets in 1h 23m'));
+  assert.ok(ui.texts.includes('Resets in 6d 21h'));
+  account.windows[0].resetsAt = Date.now() / 1000 - 60;
+  view.usageDetails({});
+  assert.ok(ui.texts.includes('Reset due · awaiting refresh'));
+  ui.nodes.get('usage-details-done').click();
+  ui.nodes.get('usage-details').keyDown({ key: 'escape' }, { stop_propagation() {} });
+  assert.deepEqual(closed, ['details', 'details']);
+  account.error = 'Not signed in'; view.usageDetails({});
+  assert.ok(ui.texts.includes('Not signed in'));
+  account.supported = false; account.windows = []; view.usageDetails({});
+  assert.ok(ui.texts.includes('Not supported'));
+});
+test('usage details refresh the reset countdown every minute while open', async () => {
+  let tick, notified = 0;
+  const View = await viewFor({ props: () => ({ view: 'usage-details' }) });
+  const cx = { timer: { every(ms, callback) { assert.equal(ms, 60000); tick = callback; } },
+    focus_handle: () => ({ focus() {} }), notify() { notified++; } };
+  new View().init({}, cx);
+  assert.equal(typeof tick, 'function');
+  tick(cx);
+  assert.equal(notified, 1);
+});
+test('usage queries only visible local Codex launchers and refreshes on selection changes', async () => {
+  let pending, failed = false, calls = [], discovered = 0;
+  const memory = { 'devkits.hidden-launchers': ['agent:work'] };
+  const View = await viewFor({ spaces: () => projects, shared: key => memory[key], knownAgents: async () => {
+    discovered++;
+    return [{ key: 'codex', installed: true, run: ['codex'] },
+      { key: 'work', installed: true, run: ['env', 'CODEX_HOME=/accounts/work', 'codex', '--no-daemon'] },
+      { key: 'claude', installed: true, run: ['claude'] }];
+  }, appHome: () => '/herdr', exec: async (...args) => {
+    calls.push(args);
+    return failed ? { code: 1 } : { code: 0, stdout: '[{"key":"codex","windows":[{"usedPercent":42}]}]' };
+  } });
+  const cx = { spawn(task) { pending = task(cx); }, notify() {} };
+  const view = new View();
+  view.refreshUsage(cx); view.refreshUsage(cx); await pending;
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0][1][1]).map(account => account.key), ['codex']);
+  assert.equal(view.usage[0].windows[0].usedPercent, 42);
+  view.refreshUsage(cx, false); assert.equal(discovered, 1);
+  memory['devkits.hidden-launchers'] = [];
+  view.refreshUsage(cx, false); await pending;
+  assert.deepEqual(JSON.parse(calls[1][1][1]).map(account => account.key), ['codex', 'work']);
+  failed = true; view.refreshUsage(cx); await pending;
+  assert.deepEqual(view.usage, []);
+  assert.ok(view.usageError);
+  assert.equal(view.usageLoading, false);
+});
+test('remote usage never queries local credentials or shows local account entries', async () => {
+  let pending;
+  const View = await viewFor({ spaces: () => [{ ...projects[0], machine: 'remote' }],
+    knownAgents: async options => {
+      assert.equal(options.on, 'remote');
+      return [{ key: 'codex', installed: true, run: ['codex'] },
+        { key: 'devkits-codex-work', installed: true, run: ['codex'] }];
+    }, exec: () => assert.fail('Must not query a local account for a remote project') });
+  const cx = { spawn(task) { pending = task(cx); }, notify() {} };
+  const view = new View(); view.refreshUsage(cx); await pending;
+  assert.deepEqual(view.usageAgents.map(agent => agent.key), ['codex']);
+  assert.deepEqual(view.usage, []);
 });
 test('status bar Files toggles an empty project browser without creating sessions; header has no file action', async () => {
   const ui = fakeElements(), commands = [];

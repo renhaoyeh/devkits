@@ -1,3 +1,12 @@
+export function quotaResetLabel(window, now = Date.now()) {
+  if (!Number.isFinite(window.resetsAt) || window.resetsAt <= 0) return 'Reset time unavailable';
+  const minutes = Math.ceil((window.resetsAt * 1000 - now) / 60000);
+  if (minutes <= 0) return 'Reset due · awaiting refresh';
+  const hours = Math.floor(minutes / 60);
+  if (hours >= 24) return `Resets in ${Math.floor(hours / 24)}d ${hours % 24}h`;
+  return `Resets in ${hours ? `${hours}h ` : ''}${minutes % 60}m`;
+}
+
 export function launcherChoices(agents, order = []) {
   const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
     ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,
