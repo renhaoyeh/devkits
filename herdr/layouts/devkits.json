@@ -26,6 +26,7 @@
         { "id": "header", "type": "block", "size": { "px": 56 }, "window_drag": true,
           "content": { "mod": "devkits", "props": { "view": "header" } } },
         { "id": "workspace-view", "type": "stack", "active": "main", "children": [
+        { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
         { "id": "main", "type": "block", "padding": 16,
           "content": { "tab": "active", "pane": {

@@ -348,6 +348,29 @@ test('header anchors the project picker below its actual trigger', async () => {
   ui.nodes.get('project-switcher').click({}, cx);
   assert.equal(overlays[1].at, undefined);
 });
+test('status bar Files toggles an empty project browser without creating sessions; header has no file action', async () => {
+  const ui = fakeElements(), commands = [];
+  const memory = { 'devkits.projects': ['/Code/new'], 'devkits.selected-project': 'project:/Code/new' };
+  let target = {};
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => [], agents: () => [], theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    window: () => ({ platform: 'macos' }), settings: () => ({ zoom: 1 }), layout: () => ({ children: [] }),
+    setAgentOrder() {}, run: (...args) => commands.push(args) });
+  const sidebar = new View(); sidebar.init(); sidebar.render();
+  target = { view: 'header' };
+  const header = new View(); header.render();
+  assert.ok(!ui.nodes.has('open-files'));
+  target = { view: 'status' };
+  const status = new View(); status.render();
+  assert.ok(!ui.nodes.has('commands'));
+  ui.nodes.get('open-files').click();
+  target = {}; sidebar.render();
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
+  target = { view: 'status' }; status.render(); ui.nodes.get('open-files').click();
+  target = {}; sidebar.render();
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'project-empty' }]);
+  assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new' || name === 'terminal.kill'));
+});
 test('sidebar menus align below the right edge of each button at the current zoom', async () => {
   const ui = fakeElements(), overlays = [];
   const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], theme: () => ({}),
