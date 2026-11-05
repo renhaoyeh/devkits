@@ -12,3 +12,8 @@ Read and follow [design.md](design.md) before making UI or interaction changes. 
 ## Herdr Development
 
 Follow [herdr/DEVELOPMENT.md](herdr/DEVELOPMENT.md) for native API references, implementation, safe live updates, and validation.
+
+## Commit Messages
+
+- Use Conventional Commits: `<type>(<optional scope>): <description>`.
+- Use an English imperative description and a type such as `feat`, `fix`, `refactor`, `docs`, `test`, or `chore`; for example, `refactor(herdr): extract shared dropdown menu components`.
