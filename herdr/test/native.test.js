@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const agents = [
@@ -25,7 +25,7 @@ const projects = [
 ];
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
-  const components = await Promise.all(['button', 'alert-dialog', 'empty', 'sidebar', 'dropdown-menu']
+  const components = await Promise.all(['button', 'checkbox', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), components.join('\n')
@@ -34,7 +34,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -42,6 +42,7 @@ async function viewFor(host) {
 function fakeElements() {
   const nodes = new Map();
   const texts = [];
+  const assets = [];
   const element = () => {
     const data = { children: [] };
     const el = new Proxy(data, { get(target, key) {
@@ -49,11 +50,18 @@ function fakeElements() {
       return (...args) => {
         if (key === 'id') nodes.set(args[0], data);
         if (key === 'on_click') data.click = args[0];
+        if (key === 'on_change') data.change = args[0];
+        if (key === 'disabled') data.disabled = args[0];
         if (key === 'on_key_down') data.keyDown = args[0];
         if (key === 'on_mouse_down') data.mouseDown = args[1];
+        if (key === 'on_mouse_up') data.mouseUp = args[1];
+        if (key === 'on_mouse_move') data.mouseMove = args[0];
+        if (key === 'overflow_y_scrollbar') data.scrollbar = true;
         if (key === 'on_hover') data.hover = args[0];
         if (key === 'h') data.height = args[0];
+        if (key === 'h_auto') data.height = 'auto';
         if (key === 'opacity') data.opacity = args[0];
+        if (key === 'checked') data.checked = args[0];
         if (key === 'child') data.children.push(args[0]);
         if (key === 'child' && typeof args[0] === 'string') texts.push(args[0]);
         if (key === 'children') data.children.push(...args[0]);
@@ -63,8 +71,9 @@ function fakeElements() {
     data.element = el;
     return el;
   };
-  return { nodes, texts, element, div: element, svg: element, image: element, h_flex: element, v_flex: element,
-    NativeButton: { new: id => element().id(id) } };
+  const asset = path => { assets.push(path); return element(); };
+  return { nodes, texts, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
+    NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) } };
 }
 test('closing an empty project only removes its saved folder', async () => {
   const commands = [], memory = { 'devkits.projects': ['/Code/one', '/Code/two'], 'devkits.selected-project': 'project:/Code/one' };
@@ -113,7 +122,7 @@ test('closing a live workspace requires confirmation; cancel leaves all sessions
   assert.deepEqual(commands, [['space.close', { id: 'api', confirmed: true }]]);
   assert.deepEqual(memory['devkits.projects'], []);
 });
-test('launcher shows only installed agents and keeps the scrolling list visible', async () => {
+test('launcher shows installed agents at content height without a scroll container', async () => {
   const ui = fakeElements(), commands = [];
   let pending, options;
   const choices = [{ key: 'codex-work', name: 'Codex · work', installed: true, run: ['codex'] },
@@ -124,13 +133,202 @@ test('launcher shows only installed agents and keeps the scrolling list visible'
   const cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { pending = task(cx); } };
   const view = new View(); view.init({}, cx); await pending; view.render();
   assert.deepEqual(options, { on: undefined });
-  assert.ok(ui.nodes.get('thread-launcher').height >= 110);
+  assert.equal(ui.nodes.get('thread-launcher').height, 'auto');
+  assert.ok(!ui.nodes.get('thread-launchers').scrollbar);
   assert.ok(ui.nodes.has('start-codex-work'));
   assert.ok(!ui.nodes.has('start-claude'));
   assert.equal(view.launchers.length, 1);
   assert.deepEqual(commands, []);
   ui.nodes.get('start-codex-work').click();
   assert.ok(commands.some(([name, args]) => name === 'tab.new' && args.argv[0] === 'codex'));
+  ui.nodes.clear();
+  view.launchers = Array.from({ length: 20 }, (_, index) => ({ key: `account-${index}`, name: `Account ${index}`, installed: true }));
+  view.render();
+  assert.equal(ui.nodes.get('thread-launcher').height, 'auto');
+  assert.ok(!ui.nodes.get('thread-launchers').scrollbar);
+  assert.ok(ui.nodes.has('start-account-19'));
+  assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
+});
+test('Manage persists visibility, retains hidden choices, and numbers only visible launchers', async () => {
+  const ui = fakeElements(), memory = {}, commands = [], overlays = [], closed = [];
+  let target = { view: 'launcher', space: 'api', overlay: 'menu' }, pending;
+  const choices = [{ key: 'codex-work', name: 'Codex · work', installed: true, run: ['codex'] },
+    { key: 'claude', name: 'Claude', installed: true, run: ['claude'] }];
+  const View = await viewFor({ ...ui, props: () => target, knownAgents: async () => choices,
+    spaces: () => projects, theme: () => ({}), shared: key => memory[key],
+    setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args),
+    closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
+  const cx = { notify() {}, stop_propagation() {}, focus_handle: () => ({ focus() {} }),
+    spawn(task) { pending = task(cx); } };
+  const view = new View(); view.launchers = choices; view.render();
+  assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
+  ui.nodes.get('manage-launchers-open').click({}, cx);
+  assert.deepEqual(closed, ['menu']);
+  assert.equal(overlays[0].kind, 'dialog');
+  assert.equal(overlays[0].width, 680);
+  assert.equal(overlays[0].height, 0.8);
+  assert.equal(overlays[0].modal, true);
+  assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
+  target = { ...overlays[0].props, overlay: 'manage-dialog' };
+  const dialog = new View(); dialog.init({}, cx); await pending; dialog.render();
+  assert.equal(ui.nodes.get('show-agent:codex-work').checked, true);
+  ui.nodes.get('show-agent:codex-work').change(false, cx);
+  ui.nodes.get('show-terminal').change(false, cx);
+  assert.deepEqual(commands, []);
+  ui.nodes.get('manage-launchers-done').click({}, cx);
+  assert.equal(closed.at(-1), 'manage-dialog');
+  target = { view: 'launcher', space: 'api', overlay: 'menu' };
+  ui.nodes.clear(); view.render();
+  assert.ok(!ui.nodes.has('start-codex-work'));
+  assert.ok(!ui.nodes.has('new-terminal'));
+  assert.ok(ui.nodes.has('start-claude'));
+  ui.nodes.get('thread-launcher').keyDown({ key: '1', modifiers: {} });
+  assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'claude');
+  commands.length = 0;
+  const reopened = new View(); reopened.launchers = choices; reopened.render();
+  ui.nodes.get('manage-launchers-open').click({}, cx);
+  target = { ...overlays.at(-1).props, overlay: 'manage-dialog-2' };
+  const reopenedDialog = new View(); reopenedDialog.init({}, cx); await pending; reopenedDialog.render();
+  assert.equal(ui.nodes.get('show-agent:codex-work').checked, false);
+  assert.equal(ui.nodes.get('show-terminal').checked, false);
+  ui.nodes.get('manage-launchers').keyDown({ key: 'space' }, cx);
+  ui.nodes.get('manage-launchers').keyDown({ key: 'down' }, cx);
+  ui.nodes.get('manage-launchers').keyDown({ key: 'enter' }, cx);
+  ui.nodes.get('manage-launchers').keyDown({ key: 'escape' }, cx);
+  assert.equal(closed.at(-1), 'manage-dialog-2');
+  target = { view: 'launcher', space: 'api', overlay: 'menu' };
+  ui.nodes.clear(); reopened.render();
+  assert.ok(ui.nodes.has('start-codex-work'));
+  assert.ok(ui.nodes.has('new-terminal'));
+  assert.deepEqual(memory['devkits.hidden-launchers'], []);
+  assert.deepEqual(commands, []);
+});
+test('saved launcher order tolerates unavailable agents and appends new entries without mutating inputs', () => {
+  const agents = [{ key: 'codex', name: 'Codex' }, { key: 'claude', name: 'Claude' }];
+  const saved = ['agent:claude', 'agent:missing', 'terminal', 'agent:codex'];
+  assert.deepEqual(launcherChoices(agents).map(choice => choice.key), ['terminal', 'agent:codex', 'agent:claude']);
+  assert.deepEqual(launcherChoices(agents, saved).map(choice => choice.key), ['terminal', 'agent:claude', 'agent:codex']);
+  assert.deepEqual(launcherChoices([...agents, { key: 'new', name: 'New' }], saved).map(choice => choice.key),
+    ['terminal', 'agent:claude', 'agent:codex', 'agent:new']);
+  assert.deepEqual(agents.map(agent => agent.key), ['codex', 'claude']);
+  assert.deepEqual(saved, ['agent:claude', 'agent:missing', 'terminal', 'agent:codex']);
+});
+test('Manage groups Terminal, agents and accounts; dragging stays within each section', async () => {
+  const ui = fakeElements(), commands = [], memory = {
+    'devkits.hidden-launchers': ['agent:claude'],
+    'devkits.launcher-order': ['agent:missing', 'terminal', 'agent:codex', 'agent:claude', 'agent:pi',
+      'agent:devkits-codex-one', 'agent:devkits-codex-two'],
+  };
+  let target = { view: 'manage-launchers', overlay: 'dialog' };
+  const choices = [{ key: 'codex', name: 'Codex', installed: true, run: ['codex'], icon: 'icons/codex.svg' },
+    { key: 'claude', name: 'Claude', installed: true, run: ['claude'], icon: 'icons/claude.svg', tint: true },
+    { key: 'pi', name: 'Pi', installed: true, run: ['pi'] },
+    { key: 'devkits-codex-one', name: 'Codex · one', installed: true, run: ['one'] },
+    { key: 'devkits-codex-two', name: 'Codex · two', installed: true, run: ['two'] }];
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => [], theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), closeOverlay() {} });
+  const cx = { notify() {}, stop_propagation() {} };
+  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.render();
+  assert.ok(ui.assets.includes('icons/codex.svg')); assert.ok(ui.assets.includes('icons/claude.svg'));
+  assert.ok(ui.assets.includes('mods/devkits/assets/icons/terminal.svg'));
+  for (const group of [0, 1, 2]) assert.ok(ui.nodes.has(`manage-section-${group}`));
+  assert.ok(!ui.nodes.has('drag-terminal'));
+  assert.ok(!ui.nodes.get('manage-launchers-list').scrollbar);
+  const original = [...memory['devkits.launcher-order']];
+  ui.nodes.get('drag-agent:codex').mouseDown({}, cx);
+  ui.nodes.get('manage-terminal').mouseUp({}, cx); view.render();
+  assert.deepEqual(memory['devkits.launcher-order'], original);
+  ui.nodes.get('drag-agent:codex').mouseDown({}, cx);
+  ui.nodes.get('manage-agent:devkits-codex-one').mouseUp({}, cx); view.render();
+  assert.deepEqual(memory['devkits.launcher-order'], original);
+  ui.nodes.get('drag-agent:codex').mouseDown({}, cx);
+  ui.nodes.get('manage-agent:pi').mouseMove({}, cx); view.render();
+  assert.deepEqual(memory['devkits.launcher-order'], original);
+  ui.nodes.get('manage-agent:pi').mouseUp({}, cx); view.render();
+  assert.deepEqual(memory['devkits.launcher-order'].slice(0, 5),
+    ['agent:missing', 'terminal', 'agent:claude', 'agent:pi', 'agent:codex']);
+  assert.equal(view.dragKey, null);
+  ui.nodes.get('drag-agent:devkits-codex-two').mouseDown({}, cx);
+  ui.nodes.get('manage-agent:devkits-codex-one').mouseUp({}, cx); view.render();
+  assert.deepEqual(memory['devkits.launcher-order'].slice(-2), ['agent:devkits-codex-two', 'agent:devkits-codex-one']);
+  const saved = [...memory['devkits.launcher-order']];
+  ui.nodes.get('drag-agent:pi').mouseDown({}, cx);
+  ui.nodes.get('manage-agent:codex').mouseMove({}, cx);
+  ui.nodes.get('manage-launchers').keyDown({ key: 'escape' }, cx);
+  assert.equal(view.dragKey, null);
+  ui.nodes.get('manage-agent:codex').mouseUp({}, cx);
+  assert.deepEqual(memory['devkits.launcher-order'], saved);
+  ui.nodes.get('drag-agent:pi').mouseDown({}, cx);
+  ui.nodes.get('manage-launchers').hover(false, cx);
+  ui.nodes.get('manage-agent:codex').mouseUp({}, cx);
+  assert.deepEqual(memory['devkits.launcher-order'], saved);
+  assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:claude']);
+  assert.equal(ui.nodes.get('show-agent:claude').checked, false);
+  assert.deepEqual(commands, []);
+  target = { view: 'launcher', overlay: 'menu', space: 'api' };
+  const reopened = new View(); reopened.launchers = choices; ui.nodes.clear(); reopened.render();
+  const rows = ui.nodes.get('thread-launchers').children;
+  assert.equal(rows[0], ui.nodes.get('new-terminal').element);
+  assert.ok(rows.indexOf(ui.nodes.get('start-pi').element) < rows.indexOf(ui.nodes.get('start-codex').element));
+  assert.ok(rows.indexOf(ui.nodes.get('start-codex').element) < rows.indexOf(ui.nodes.get('launcher-section-2').element));
+  assert.ok(!ui.nodes.has('start-claude'));
+  ui.nodes.get('thread-launcher').keyDown({ key: '1', modifiers: {} });
+  assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'pi');
+});
+test('account removal requires confirmation, blocks duplicate requests, and cleans only the removed preferences', async () => {
+  const ui = fakeElements(), overlays = [], closed = [], removed = [], memory = {
+    'devkits.hidden-launchers': ['agent:devkits-codex-work', 'agent:codex'],
+    'devkits.launcher-order': ['terminal', 'agent:devkits-codex-work', 'agent:devkits-codex-personal'],
+  };
+  let target = { view: 'manage-launchers', space: 'api', overlay: 'manage' }, release, pending;
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    openOverlay: value => overlays.push(value), closeOverlay: id => closed.push(id),
+    removeCodexAccount: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
+  const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
+  view.manageIndex = 0; view.render();
+  assert.ok(!ui.nodes.has('remove-codex'));
+  ui.nodes.get('remove-devkits-codex-work').click();
+  assert.deepEqual(removed, []);
+  assert.equal(overlays[0].props.view, 'remove-account');
+  target = { ...overlays[0].props, overlay: 'confirm' };
+  const prompt = new View(); prompt.render();
+  ui.nodes.get('cancel-remove-account').click();
+  assert.deepEqual(removed, []); assert.equal(overlays.at(-1).props.view, 'manage-launchers');
+  ui.nodes.get('confirm-remove-account').click({}, cx); prompt.render();
+  ui.nodes.get('confirm-remove-account').click({}, cx);
+  ui.nodes.get('cancel-remove-account').click();
+  assert.deepEqual(removed, ['devkits-codex-work']);
+  assert.equal(ui.nodes.get('confirm-remove-account').disabled, true);
+  release(); await pending;
+  assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:codex']);
+  assert.deepEqual(memory['devkits.launcher-order'], ['terminal', 'agent:devkits-codex-personal']);
+  assert.equal(overlays.at(-1).props.view, 'manage-launchers');
+});
+test('failed account removal stays in the confirmation dialog and preserves preferences for retry', async () => {
+  const ui = fakeElements(); let pending;
+  const View = await viewFor({ ...ui, props: () => ({ view: 'remove-account', account: { key: 'devkits-codex-work', name: 'Work' } }),
+    theme: () => ({}), setShared: () => assert.fail('must not clean preferences'),
+    closeOverlay: () => assert.fail('must not close'),
+    removeCodexAccount: async () => { throw Error('Could not sign out'); } });
+  const view = new View(); view.render();
+  const cx = { notify() {}, spawn(fn) { pending = fn(cx); } };
+  ui.nodes.get('confirm-remove-account').click({}, cx); await pending; view.render();
+  assert.equal(view.removeError, 'Could not sign out');
+  assert.equal(ui.nodes.get('confirm-remove-account').disabled, false);
+  assert.ok(ui.nodes.has('remove-account-error'));
+});
+test('hiding every agent keeps Manage available so the menu can be restored', async () => {
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, props: () => ({ view: 'launcher' }), spaces: () => [], theme: () => ({}),
+    shared: () => ['terminal', 'agent:codex'] });
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', installed: true }]; view.render();
+  assert.ok(!ui.nodes.has('new-terminal'));
+  assert.ok(!ui.nodes.has('start-codex'));
+  assert.ok(ui.nodes.has('manage-launchers-open'));
+  assert.ok(ui.texts.includes('All agents are hidden. Use Manage to show them.'));
 });
 test('header anchors the project picker below its actual trigger', async () => {
   const ui = fakeElements(), overlays = [];
@@ -165,6 +363,36 @@ test('sidebar menus align below the right edge of each button at the current zoo
   }
   assert.equal(overlays[0].props.view, 'launcher');
   assert.equal(overlays[1].props.view, 'project-menu');
+});
+test('only the base Codex row offers Add account, including when Codex is hidden from the launcher', async () => {
+  const ui = fakeElements(), overlays = [], closed = [];
+  const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects,
+    theme: () => ({}), shared: key => key === 'devkits.hidden-launchers' ? ['agent:codex'] : undefined,
+    closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
+  view.manageIndex = 0; view.render();
+  const codexRow = ui.nodes.get('manage-agent:codex'), accountRow = ui.nodes.get('manage-agent:devkits-codex-work');
+  assert.ok(codexRow.children.includes(ui.nodes.get('add-codex-account').element));
+  assert.ok(!accountRow.children.includes(ui.nodes.get('add-codex-account').element));
+  ui.nodes.get('add-codex-account').click();
+  assert.deepEqual(closed, ['manage-dialog']);
+  assert.equal(overlays[0].props.view, 'codex-login');
+  assert.equal(overlays[0].modal, true);
+  assert.deepEqual(overlays[0].props.returnTo, { view: 'manage-launchers', space: 'api' });
+  ui.nodes.clear(); view.launcher({});
+  assert.ok(!ui.nodes.has('add-codex-account'));
+});
+test('local account profiles and their login action stay out of remote project menus', async () => {
+  const ui = fakeElements(); let pending;
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', space: 'remote' }),
+    spaces: () => [{ id: 'remote', machine: 'server' }], theme: () => ({}), knownAgents: async () => [
+      { key: 'devkits-codex-work', installed: true }, { key: 'codex', name: 'Codex', installed: true },
+    ] });
+  const cx = { notify() {}, focus_handle: () => ({ focus() {} }), spawn(task) { pending = task(cx); } };
+  const view = new View(); view.init({}, cx); await pending; view.render();
+  assert.deepEqual(view.launchers.map(agent => agent.key), ['codex']);
+  assert.ok(!ui.nodes.has('add-codex-account'));
 });
 test('project dropdown switches projects and opens the native folder chooser without starting a session', async () => {
   const ui = fakeElements(), commands = [], closed = [], memory = {};

@@ -1,3 +1,11 @@
+export function launcherChoices(agents, order = []) {
+  const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
+    ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,
+      group: agent.key.startsWith('devkits-codex-') ? 2 : 1 }))];
+  const ranks = new Map(order.map((key, index) => [key, index]));
+  return choices.sort((a, b) => a.group - b.group || (ranks.get(a.key) ?? order.length) - (ranks.get(b.key) ?? order.length));
+}
+
 export function threadTitle(tab, agent, space) {
   const providers = agent ? ['Codex', agent.program?.name, agent.app].filter(Boolean) : [];
   const folders = [agent?.space_name, space?.name, space?.folder,

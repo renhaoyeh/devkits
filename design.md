@@ -1,11 +1,17 @@
 # Design Guidelines
 
+
 - Use a consistent **shadcn/ui visual language across the entire interface**, including menus, dialogs, sidebars, headers, and empty states. Styling a few controls is not enough.
 - Follow shadcn Neutral colors, semantic theme tokens, subtle borders, modest corner radii, and restrained shadows. Keep hover, focus, and selection states consistent.
 - Prefer compact layouts, aligned edges, and clear visual hierarchy. Avoid redundant labels when an icon or nearby context already conveys the information.
+- Open session visibility and ordering management in a large modal dialog from the bottom of Add session (680px wide, 80% of the window height). Keep Terminal, built-in agents, and user-added accounts in separate sections in both Manage and Add session, in that order. Show each entry's program icon beside a shadcn-style checkbox (solid primary fill and contrasting check when selected). Reorder within a section using drag handles or Alt + Up/Down; commit on drop and cancel a drag on Escape or leaving the dialog. Terminal stays in its own section. Avoid a persistent scrollbar; scroll only when the list exceeds the available height. Save changes immediately; Done and Escape close the dialog when no drag is active.
+- Put Add account on the base Codex row in Manage, only for local projects. Account sign-in returns to Manage after completion or cancellation, refreshing the account list. Keep account creation out of the Add session menu and individual account rows.
+- Label the outlined button on user-added account rows Remove; explain sign-out in the confirmation dialog. Sign out the account's dedicated credentials before removing its program entry; preserve history, project files, other accounts and running sessions. Show failures and retain the entry for retry when removal cannot complete.
 - Open dropdowns 4px below their trigger: align project pickers and primary actions to the left edge, and sidebar icon menus to the right edge. Use the trigger's measured bounds and native window-edge fitting.
+- Let Add session expand to its content height, including every visible section and the Manage action. Do not cap its height or put its session list in a scroll container.
 - Use Zed as the reference for project, workspace, and thread interactions. Follow its placement and behavior when relevant, rather than loosely borrowing its appearance.
 - Implement the design with Herdr's native GPUI components. Do not introduce React, a webview, or runtime UI dependencies just to reproduce the style.
 - Define reusable UI components in independent files under `herdr/mods/devkits/components/`, grouped by shadcn component family (for example, `dropdown-menu.js`). Screens compose these components rather than duplicating their styling.
 - Follow shadcn's component names and composition: use PascalCase exports such as `DropdownMenuContent`, `DropdownMenuItem`, `DropdownMenuLabel`, and `DropdownMenuSeparator`. Use the name that matches the part's role; the menu surface is `DropdownMenuContent`, not a generic `menu` helper. Keep project and session actions in their callers.
 - Reuse these components for every instance of the same UI pattern. Keep shared colors, spacing, borders, radii, and interaction states in the component file; use the installed Herdr API for native behavior and accessibility.
+- Account names are display labels and support Chinese and uppercase letters. Keep the stored account ID and credentials path independent of the label so naming or renaming cannot change which account runs.
