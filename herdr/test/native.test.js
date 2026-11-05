@@ -25,9 +25,10 @@ const projects = [
 ];
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
-  const dropdownMenu = await readFile(new URL('../mods/devkits/components/dropdown-menu.js', import.meta.url), 'utf8');
+  const components = await Promise.all(['button', 'alert-dialog', 'empty', 'sidebar', 'dropdown-menu']
+    .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
-  return new Function('View', ...Object.keys(host), dropdownMenu
+  return new Function('View', ...Object.keys(host), components.join('\n')
     .replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\n' + source
     .replace(/^import .*;\n/gm, '').replace('export default class', 'return class'));
 }
@@ -49,6 +50,7 @@ function fakeElements() {
         if (key === 'id') nodes.set(args[0], data);
         if (key === 'on_click') data.click = args[0];
         if (key === 'on_key_down') data.keyDown = args[0];
+        if (key === 'on_mouse_down') data.mouseDown = args[1];
         if (key === 'on_hover') data.hover = args[0];
         if (key === 'h') data.height = args[0];
         if (key === 'opacity') data.opacity = args[0];
@@ -61,7 +63,8 @@ function fakeElements() {
     data.element = el;
     return el;
   };
-  return { nodes, texts, element, div: element, svg: element, image: element, h_flex: element, v_flex: element };
+  return { nodes, texts, element, div: element, svg: element, image: element, h_flex: element, v_flex: element,
+    NativeButton: { new: id => element().id(id) } };
 }
 test('closing an empty project only removes its saved folder', async () => {
   const commands = [], memory = { 'devkits.projects': ['/Code/one', '/Code/two'], 'devkits.selected-project': 'project:/Code/one' };
@@ -71,6 +74,21 @@ test('closing an empty project only removes its saved folder', async () => {
   assert.deepEqual(memory['devkits.projects'], ['/Code/two']);
   assert.equal(memory['devkits.selected-project'], null);
   assert.deepEqual(commands, []);
+});
+test('button input stays inside its action instead of reaching a parent row or dialog', async () => {
+  const ui = fakeElements(), commands = [];
+  const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
+    panes: () => [{ pane: 'pane-1' }], run: (...args) => commands.push(args) });
+  new View().paneHeader({});
+  const button = ui.nodes.get('close-pane-1');
+  let stopped = 0;
+  const cx = { stop_propagation() { stopped++; } };
+  button.mouseDown({}, cx);
+  for (const key of ['enter', 'space', 'escape']) button.keyDown({ key }, cx);
+  assert.equal(stopped, 3);
+  assert.deepEqual(commands, []);
+  button.click();
+  assert.deepEqual(commands, [['pane.close', { pane: 'pane-1' }]]);
 });
 test('closing a live workspace requires confirmation; cancel leaves all sessions and saved projects intact', async () => {
   const ui = fakeElements(), commands = [], overlays = [], closed = [];
@@ -261,8 +279,8 @@ test('all projects and thread states remain visible without search or filters', 
   assert.deepEqual(projectGroups([], []), []);
 });
 test('native sidebar renders project/thread nesting and a shell row can be selected', async () => {
-  const { nodes, element } = fakeElements(), commands = [], memory = {};
-  const View = await viewFor({ div: element, svg: element, image: element, h_flex: element, v_flex: element,
+  const ui = fakeElements(), { nodes } = ui, commands = [], memory = {};
+  const View = await viewFor({ ...ui,
     props: () => ({}), window: () => ({ platform: 'macos' }),
     spaces: () => projects, agents: () => agents, projectGroups,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
@@ -327,8 +345,10 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(layout.children[0].id, 'sidebar');
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
-  assert.equal(await readFile(join(mod, 'components', 'dropdown-menu.js'), 'utf8'),
-    await readFile(new URL('../mods/devkits/components/dropdown-menu.js', import.meta.url), 'utf8'));
+  for (const name of (await readdir(new URL('../mods/devkits/components/', import.meta.url))).filter(name => name.endsWith('.js'))) {
+    assert.equal(await readFile(join(mod, 'components', name), 'utf8'),
+      await readFile(new URL(`../mods/devkits/components/${name}`, import.meta.url), 'utf8'));
+  }
   assert.ok(!(await readdir(mod)).some(name => name.endsWith('.svg')));
   assert.ok((await readdir(join(mod, 'assets', 'icons'))).includes('close.svg'));
   assert.ok(!(await readdir(join(mod, 'assets', 'icons'))).includes('pin.svg'));
