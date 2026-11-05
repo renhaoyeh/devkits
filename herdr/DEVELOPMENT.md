@@ -14,6 +14,7 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | --- | --- |
 | Window structure and block sizes | `layouts/devkits.json` |
 | Native views and interactions | `mods/devkits/main.js` |
+| Shared native UI components | `mods/devkits/components/` |
 | Project and thread data transformations | `mods/devkits/model.js` |
 | Semantic colors | `themes/devkits.json`, `themes/devkits-light.json` |
 | Icons and preview | `mods/devkits/assets/` |

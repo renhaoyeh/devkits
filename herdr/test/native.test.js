@@ -25,8 +25,10 @@ const projects = [
 ];
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
+  const dropdownMenu = await readFile(new URL('../mods/devkits/components/dropdown-menu.js', import.meta.url), 'utf8');
   // Run native actions with a fake host; no real Herdr session is touched.
-  return new Function('View', ...Object.keys(host), source
+  return new Function('View', ...Object.keys(host), dropdownMenu
+    .replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\n' + source
     .replace(/^import .*;\n/gm, '').replace('export default class', 'return class'));
 }
 async function viewFor(host) {
@@ -104,7 +106,7 @@ test('launcher shows only installed agents and keeps the scrolling list visible'
   const cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { pending = task(cx); } };
   const view = new View(); view.init({}, cx); await pending; view.render();
   assert.deepEqual(options, { on: undefined });
-  assert.ok(ui.nodes.get('thread-launcher').height >= 140);
+  assert.ok(ui.nodes.get('thread-launcher').height >= 110);
   assert.ok(ui.nodes.has('start-codex-work'));
   assert.ok(!ui.nodes.has('start-claude'));
   assert.equal(view.launchers.length, 1);
@@ -169,6 +171,8 @@ test('New thread targets the chosen project and its saved root, not the current 
   const View = await viewFor({ spaces: () => projects, shared: key => key === 'devkits.project-roots' ? { app: '/original/app' } : undefined, openOverlay: value => overlays.push(value) });
   const view = new View();
   view.newThread({}, 'app');
+  assert.equal(overlays[0].frame, 'none');
+  assert.equal(overlays[0].height, undefined);
   assert.deepEqual(overlays[0].props, { view: 'launcher', space: 'app', folder: '/original/app', projectName: 'App' });
   view.newThread({});
   assert.equal(overlays[1].props.space, 'api');
@@ -323,6 +327,8 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(layout.children[0].id, 'sidebar');
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
+  assert.equal(await readFile(join(mod, 'components', 'dropdown-menu.js'), 'utf8'),
+    await readFile(new URL('../mods/devkits/components/dropdown-menu.js', import.meta.url), 'utf8'));
   assert.ok(!(await readdir(mod)).some(name => name.endsWith('.svg')));
   assert.ok((await readdir(join(mod, 'assets', 'icons'))).includes('close.svg'));
   assert.ok(!(await readdir(join(mod, 'assets', 'icons'))).includes('pin.svg'));
