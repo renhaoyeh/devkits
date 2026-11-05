@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, quotaResetLabel } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isCodexLauncher, launcherArgv, quotaResetLabel } from '../mods/devkits/model.js';
 import { install } from '../install.js';
+
+const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
 
 const agents = [
   { address: 't1', title: '✳ Fix login', space_name: 'api', status: 'working', program: { name: 'Claude Code' } },
@@ -25,7 +27,7 @@ const projects = [
 ];
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
-  const components = await Promise.all(['button', 'checkbox', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress']
+  const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), components.join('\n')
@@ -34,7 +36,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, quotaResetLabel, props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, codexPermissionModes, isCodexLauncher, launcherArgv, quotaResetLabel, props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -52,9 +54,12 @@ function fakeElements() {
         if (key === 'on_click') data.click = args[0];
         if (key === 'tooltip') data.tooltip = args[0];
         if (key === 'on_change') data.change = args[0];
+        if (key === 'on_open_change') data.openChange = args[0];
+        if (key === 'text_color') data.textColor = args[0];
         if (key === 'disabled') data.disabled = args[0];
         if (key === 'on_key_down') data.keyDown = args[0];
         if (key === 'on_mouse_down') data.mouseDown = args[1];
+        if (key === 'on_mouse_down_out') data.mouseDownOut = args[0];
         if (key === 'on_mouse_up') data.mouseUp = args[1];
         if (key === 'on_mouse_move') data.mouseMove = args[0];
         if (key === 'overflow_y_scrollbar') data.scrollbar = true;
@@ -78,6 +83,7 @@ function fakeElements() {
   };
   const asset = path => { assets.push(path); return element(); };
   return { nodes, texts, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
+    NativeSelect: { new: id => element().id(id) }, NativePopup: { new: (_id, trigger) => element().child(trigger) },
     NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) } };
 }
 test('closing an empty project only removes its saved folder', async () => {
@@ -165,7 +171,7 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   const cx = { notify() {}, stop_propagation() {}, focus_handle: () => ({ focus() {} }),
     spawn(task) { pending = task(cx); } };
-  const view = new View(); view.launchers = choices; view.render();
+  const view = new View(); view.launchers = choices; view.render(renderContext);
   assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
   ui.nodes.get('manage-launchers-open').click({}, cx);
   assert.deepEqual(closed, ['menu']);
@@ -175,7 +181,7 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   assert.equal(overlays[0].modal, true);
   assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
   target = { ...overlays[0].props, overlay: 'manage-dialog' };
-  const dialog = new View(); dialog.init({}, cx); await pending; dialog.render();
+  const dialog = new View(); dialog.init({}, cx); await pending; dialog.render(renderContext);
   assert.equal(ui.nodes.get('show-agent:codex-work').checked, true);
   ui.nodes.get('show-agent:codex-work').change(false, cx);
   ui.nodes.get('show-terminal').change(false, cx);
@@ -183,17 +189,17 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   ui.nodes.get('manage-launchers-done').click({}, cx);
   assert.equal(closed.at(-1), 'manage-dialog');
   target = { view: 'launcher', space: 'api', overlay: 'menu' };
-  ui.nodes.clear(); view.render();
+  ui.nodes.clear(); view.render(renderContext);
   assert.ok(!ui.nodes.has('start-codex-work'));
   assert.ok(!ui.nodes.has('new-terminal'));
   assert.ok(ui.nodes.has('start-claude'));
   ui.nodes.get('thread-launcher').keyDown({ key: '1', modifiers: {} });
   assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'claude');
   commands.length = 0;
-  const reopened = new View(); reopened.launchers = choices; reopened.render();
+  const reopened = new View(); reopened.launchers = choices; reopened.render(renderContext);
   ui.nodes.get('manage-launchers-open').click({}, cx);
   target = { ...overlays.at(-1).props, overlay: 'manage-dialog-2' };
-  const reopenedDialog = new View(); reopenedDialog.init({}, cx); await pending; reopenedDialog.render();
+  const reopenedDialog = new View(); reopenedDialog.init({}, cx); await pending; reopenedDialog.render(renderContext);
   assert.equal(ui.nodes.get('show-agent:codex-work').checked, false);
   assert.equal(ui.nodes.get('show-terminal').checked, false);
   ui.nodes.get('manage-launchers').keyDown({ key: 'space' }, cx);
@@ -202,7 +208,7 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   ui.nodes.get('manage-launchers').keyDown({ key: 'escape' }, cx);
   assert.equal(closed.at(-1), 'manage-dialog-2');
   target = { view: 'launcher', space: 'api', overlay: 'menu' };
-  ui.nodes.clear(); reopened.render();
+  ui.nodes.clear(); reopened.render(renderContext);
   assert.ok(ui.nodes.has('start-codex-work'));
   assert.ok(ui.nodes.has('new-terminal'));
   assert.deepEqual(memory['devkits.hidden-launchers'], []);
@@ -234,7 +240,7 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     run: (...args) => commands.push(args), closeOverlay() {} });
   const cx = { notify() {}, stop_propagation() {} };
-  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.render();
+  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
   assert.ok(ui.assets.includes('icons/codex.svg')); assert.ok(ui.assets.includes('icons/claude.svg'));
   assert.ok(ui.assets.includes('mods/devkits/assets/icons/terminal.svg'));
   for (const group of [0, 1, 2]) assert.ok(ui.nodes.has(`manage-section-${group}`));
@@ -242,20 +248,20 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
   assert.ok(!ui.nodes.get('manage-launchers-list').scrollbar);
   const original = [...memory['devkits.launcher-order']];
   ui.nodes.get('drag-agent:codex').mouseDown({}, cx);
-  ui.nodes.get('manage-terminal').mouseUp({}, cx); view.render();
+  ui.nodes.get('manage-terminal').mouseUp({}, cx); view.render(renderContext);
   assert.deepEqual(memory['devkits.launcher-order'], original);
   ui.nodes.get('drag-agent:codex').mouseDown({}, cx);
-  ui.nodes.get('manage-agent:devkits-codex-one').mouseUp({}, cx); view.render();
+  ui.nodes.get('manage-agent:devkits-codex-one').mouseUp({}, cx); view.render(renderContext);
   assert.deepEqual(memory['devkits.launcher-order'], original);
   ui.nodes.get('drag-agent:codex').mouseDown({}, cx);
-  ui.nodes.get('manage-agent:pi').mouseMove({}, cx); view.render();
+  ui.nodes.get('manage-agent:pi').mouseMove({}, cx); view.render(renderContext);
   assert.deepEqual(memory['devkits.launcher-order'], original);
-  ui.nodes.get('manage-agent:pi').mouseUp({}, cx); view.render();
+  ui.nodes.get('manage-agent:pi').mouseUp({}, cx); view.render(renderContext);
   assert.deepEqual(memory['devkits.launcher-order'].slice(0, 5),
     ['agent:missing', 'terminal', 'agent:claude', 'agent:pi', 'agent:codex']);
   assert.equal(view.dragKey, null);
   ui.nodes.get('drag-agent:devkits-codex-two').mouseDown({}, cx);
-  ui.nodes.get('manage-agent:devkits-codex-one').mouseUp({}, cx); view.render();
+  ui.nodes.get('manage-agent:devkits-codex-one').mouseUp({}, cx); view.render(renderContext);
   assert.deepEqual(memory['devkits.launcher-order'].slice(-2), ['agent:devkits-codex-two', 'agent:devkits-codex-one']);
   const saved = [...memory['devkits.launcher-order']];
   ui.nodes.get('drag-agent:pi').mouseDown({}, cx);
@@ -272,7 +278,7 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
   assert.equal(ui.nodes.get('show-agent:claude').checked, false);
   assert.deepEqual(commands, []);
   target = { view: 'launcher', overlay: 'menu', space: 'api' };
-  const reopened = new View(); reopened.launchers = choices; ui.nodes.clear(); reopened.render();
+  const reopened = new View(); reopened.launchers = choices; ui.nodes.clear(); reopened.render(renderContext);
   const rows = ui.nodes.get('thread-launchers').children;
   assert.equal(rows[0], ui.nodes.get('new-terminal').element);
   assert.ok(rows.indexOf(ui.nodes.get('start-pi').element) < rows.indexOf(ui.nodes.get('start-codex').element));
@@ -285,6 +291,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   const ui = fakeElements(), overlays = [], closed = [], removed = [], memory = {
     'devkits.hidden-launchers': ['agent:devkits-codex-work', 'agent:codex'],
     'devkits.launcher-order': ['terminal', 'agent:devkits-codex-work', 'agent:devkits-codex-personal'],
+    'devkits.codex-permissions': { 'devkits-codex-work': 'workspace-write', 'devkits-codex-personal': 'read-only' },
   };
   let target = { view: 'manage-launchers', space: 'api', overlay: 'manage' }, release, pending;
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
@@ -293,16 +300,16 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
     removeCodexAccount: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
   const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
-  view.manageIndex = 0; view.render();
+  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
   assert.ok(!ui.nodes.has('remove-codex'));
   ui.nodes.get('remove-devkits-codex-work').click();
   assert.deepEqual(removed, []);
   assert.equal(overlays[0].props.view, 'remove-account');
   target = { ...overlays[0].props, overlay: 'confirm' };
-  const prompt = new View(); prompt.render();
+  const prompt = new View(); prompt.render(renderContext);
   ui.nodes.get('cancel-remove-account').click();
   assert.deepEqual(removed, []); assert.equal(overlays.at(-1).props.view, 'manage-launchers');
-  ui.nodes.get('confirm-remove-account').click({}, cx); prompt.render();
+  ui.nodes.get('confirm-remove-account').click({}, cx); prompt.render(renderContext);
   ui.nodes.get('confirm-remove-account').click({}, cx);
   ui.nodes.get('cancel-remove-account').click();
   assert.deepEqual(removed, ['devkits-codex-work']);
@@ -310,7 +317,76 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   release(); await pending;
   assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:codex']);
   assert.deepEqual(memory['devkits.launcher-order'], ['terminal', 'agent:devkits-codex-personal']);
+  assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-personal': 'read-only' });
   assert.equal(overlays.at(-1).props.view, 'manage-launchers');
+});
+test('Manage saves Codex permissions per launcher and applies them to new tabs and projects only', async () => {
+  const ui = fakeElements(), memory = {}, overlays = [], commands = [];
+  let target = { view: 'manage-launchers', overlay: 'manage', space: 'api' };
+  const codex = { key: 'codex', name: 'Codex', run: ['codex'] };
+  const work = { key: 'devkits-codex-work', name: 'Codex · Work', run: ['env', 'CODEX_HOME=/accounts/work', 'codex', '--no-daemon'] };
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({ muted: '#888888', done: '#0000ff', working: '#008000', ansi1: '#ff0000' }), spaces: () => [],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    openOverlay: value => overlays.push(value), closeOverlay() {}, run: (...args) => commands.push(args) });
+  const view = new View(); view.launchers = [codex, work, { key: 'claude', name: 'Claude' }];
+  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  assert.ok(ui.nodes.has('permissions-codex')); assert.ok(ui.nodes.has('permissions-devkits-codex-work'));
+  assert.ok(!ui.nodes.has('permissions-claude')); assert.ok(!ui.nodes.has('permissions-terminal'));
+  const cx = renderContext;
+  ui.nodes.get('permissions-codex').mouseDown({}, cx);
+  ui.nodes.get('permissions-codex').click({}, cx); view.render(cx);
+  assert.equal(view.permissionSelects.get('codex').open, true);
+  ui.nodes.get('permissions-codex-options').mouseDownOut({}, cx); view.render(cx);
+  assert.equal(view.permissionSelects.get('codex').open, false);
+  assert.deepEqual(memory['devkits.codex-permissions'], undefined);
+  ui.nodes.get('permissions-codex').click({}, cx); view.render(cx);
+  ui.nodes.get('permissions-codex-option-read-only').click({}, cx); view.render(cx);
+  assert.equal(view.permissionSelects.get('codex').open, false);
+  assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only' });
+  assert.ok(ui.nodes.get('permissions-codex').children.includes('Read only'));
+  assert.equal(ui.nodes.get('permissions-codex').textColor, '#0000ff');
+  assert.ok(ui.nodes.get('permissions-devkits-codex-work').children.includes('Default'));
+  ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
+  assert.equal(view.permissionSelects.get('devkits-codex-work').open, true);
+  ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
+  assert.equal(view.permissionSelects.get('devkits-codex-work').open, false);
+  ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
+  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'escape' }, cx); view.render(cx);
+  assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only' });
+  ui.nodes.get('permissions-devkits-codex-work-select').openChange(true, cx); view.render(cx);
+  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'down' }, cx); view.render(cx);
+  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'down' }, cx); view.render(cx);
+  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'enter' }, cx); view.render(cx);
+  assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only', 'devkits-codex-work': 'workspace-write' });
+  assert.equal(ui.nodes.get('permissions-devkits-codex-work').textColor, '#008000');
+  assert.deepEqual(overlays, []);
+  assert.ok(!ui.texts.includes('Applies to new sessions only. Existing sessions keep their permissions.'));
+  assert.deepEqual(commands, []);
+  target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
+  assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
+    ['codex', '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+  target = { ...target, space: null, projectName: 'New project' }; view.startThread(work);
+  assert.deepEqual(commands.find(([name]) => name === 'space.new')[1].argv,
+    ['env', 'CODEX_HOME=/accounts/work', 'codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--no-daemon']);
+  commands.length = 0;
+  target = { view: 'manage-launchers', overlay: 'manage', space: 'api' }; view.render(cx);
+  ui.nodes.get('permissions-codex-select').openChange(true, cx); view.render(cx);
+  ui.nodes.get('permissions-codex-option-danger-full-access').click({}, cx); view.render(cx);
+  assert.equal(ui.nodes.get('permissions-codex').textColor, '#ff0000');
+  assert.ok(codexPermissionModes.every(mode => !ui.texts.includes(mode.description)));
+  ui.nodes.get('permissions-codex-select').openChange(true, cx); view.render(cx);
+  ui.nodes.get('permissions-codex-option-default').click({}, cx); view.render(cx);
+  assert.equal(ui.nodes.get('permissions-codex').textColor, '#888888');
+  assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-work': 'workspace-write' });
+  assert.deepEqual(commands, []);
+});
+test('an old permissions dialog returns to Manage after a live update', async () => {
+  const ui = fakeElements(), closed = [], overlays = [];
+  const View = await viewFor({ ...ui, props: () => ({ view: 'codex-permissions', overlay: 'old-dialog', space: 'api' }),
+    closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
+  new View().init({}, renderContext);
+  assert.deepEqual(closed, ['old-dialog']);
+  assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
 });
 test('failed account removal stays in the confirmation dialog and preserves preferences for retry', async () => {
   const ui = fakeElements(); let pending;
@@ -550,7 +626,7 @@ test('only the base Codex row offers Add account, including when Codex is hidden
     theme: () => ({}), shared: key => key === 'devkits.hidden-launchers' ? ['agent:codex'] : undefined,
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
-  view.manageIndex = 0; view.render();
+  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
   const codexRow = ui.nodes.get('manage-agent:codex'), accountRow = ui.nodes.get('manage-agent:devkits-codex-work');
   assert.ok(codexRow.children.includes(ui.nodes.get('add-codex-account').element));
   assert.ok(!accountRow.children.includes(ui.nodes.get('add-codex-account').element));
@@ -569,7 +645,7 @@ test('local account profiles and their login action stay out of remote project m
       { key: 'devkits-codex-work', installed: true }, { key: 'codex', name: 'Codex', installed: true },
     ] });
   const cx = { notify() {}, focus_handle: () => ({ focus() {} }), spawn(task) { pending = task(cx); } };
-  const view = new View(); view.init({}, cx); await pending; view.render();
+  const view = new View(); view.init({}, cx); await pending; view.render(renderContext);
   assert.deepEqual(view.launchers.map(agent => agent.key), ['codex']);
   assert.ok(!ui.nodes.has('add-codex-account'));
 });

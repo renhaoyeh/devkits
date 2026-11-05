@@ -7,6 +7,35 @@ export function quotaResetLabel(window, now = Date.now()) {
   return `Resets in ${hours ? `${hours}h ` : ''}${minutes % 60}m`;
 }
 
+export const codexPermissionModes = [
+  { key: 'default', label: 'Default', description: 'Use this launcher’s existing Codex settings.', args: [] },
+  { key: 'read-only', label: 'Read only', description: 'Read files. Request approval when additional access is needed.',
+    args: ['--sandbox', 'read-only', '--ask-for-approval', 'on-request'] },
+  { key: 'workspace-write', label: 'Workspace', description: 'Write in the workspace. Request approval for additional access.',
+    args: ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'] },
+  { key: 'danger-full-access', label: 'Full access', description: 'Write outside the workspace and run commands without sandboxing or approval.',
+    args: ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never'] },
+];
+
+export const isCodexLauncher = agent => agent?.key === 'codex' || Boolean(agent?.key?.startsWith('devkits-codex-'));
+
+export function launcherArgv(agent, permission) {
+  const mode = codexPermissionModes.find(mode => mode.key === permission);
+  if (!isCodexLauncher(agent) || !mode?.args.length) return agent?.run;
+  const executable = agent.run.findIndex(arg => !arg.includes('=') && /(?:^|[/\\])codex(?:\.exe)?$/i.test(arg));
+  if (executable < 0) throw new Error('Could not find Codex in this launcher. Choose Default to keep its existing command.');
+  const rest = [];
+  for (let i = executable + 1; i < agent.run.length; i++) {
+    const arg = agent.run[i];
+    if (arg === '--') { rest.push(...agent.run.slice(i)); break; }
+    if (['--sandbox', '-s', '--ask-for-approval', '-a'].includes(arg)) { i++; continue; }
+    if (/^--(?:sandbox|ask-for-approval)=|^-[sa]=|^-[sa](?:read-only|workspace-write|danger-full-access|never|on-request)$/.test(arg) ||
+        ['--full-auto', '--approve-for-me', '--not-so-yolo', '--yolo', '--dangerously-bypass-approvals-and-sandbox'].includes(arg)) continue;
+    rest.push(arg);
+  }
+  return [...agent.run.slice(0, executable + 1), ...mode.args, ...rest];
+}
+
 export function launcherChoices(agents, order = []) {
   const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
     ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,
