@@ -232,7 +232,7 @@ export default class CodexLogin {
 
   finish() {
     closeOverlay(this.target.overlay);
-    if (this.target.returnTo) openOverlay({ mod: 'devkits', kind: 'dialog', modal: true, width: 680, height: 0.8,
+    if (this.target.returnTo) openOverlay({ mod: 'devkits', kind: 'dialog', modal: false, width: 680, height: 0.8,
       props: this.target.returnTo });
   }
 

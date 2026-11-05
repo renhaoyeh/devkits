@@ -178,7 +178,7 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   assert.equal(overlays[0].kind, 'dialog');
   assert.equal(overlays[0].width, 680);
   assert.equal(overlays[0].height, 0.8);
-  assert.equal(overlays[0].modal, true);
+  assert.equal(overlays[0].modal, false);
   assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
   target = { ...overlays[0].props, overlay: 'manage-dialog' };
   const dialog = new View(); dialog.init({}, cx); await pending; dialog.render(renderContext);
@@ -309,6 +309,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   const prompt = new View(); prompt.render(renderContext);
   ui.nodes.get('cancel-remove-account').click();
   assert.deepEqual(removed, []); assert.equal(overlays.at(-1).props.view, 'manage-launchers');
+  assert.equal(overlays.at(-1).modal, false);
   ui.nodes.get('confirm-remove-account').click({}, cx); prompt.render(renderContext);
   ui.nodes.get('confirm-remove-account').click({}, cx);
   ui.nodes.get('cancel-remove-account').click();
@@ -386,6 +387,7 @@ test('an old permissions dialog returns to Manage after a live update', async ()
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   new View().init({}, renderContext);
   assert.deepEqual(closed, ['old-dialog']);
+  assert.equal(overlays[0].modal, false);
   assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
 });
 test('failed account removal stays in the confirmation dialog and preserves preferences for retry', async () => {

@@ -83,7 +83,7 @@ test('finishing, cancelling, or escaping account sign-in returns to the large Ma
   assert.deepEqual(closed, ['login', 'login', 'login']);
   assert.equal(overlays.length, 3);
   for (const spec of overlays) {
-    assert.deepEqual(spec, { mod: 'devkits', kind: 'dialog', modal: true, width: 680, height: 0.8,
+    assert.deepEqual(spec, { mod: 'devkits', kind: 'dialog', modal: false, width: 680, height: 0.8,
       props: { view: 'manage-launchers', space: 'api' } });
   }
 });
