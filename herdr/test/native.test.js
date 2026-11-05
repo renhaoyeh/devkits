@@ -132,18 +132,39 @@ test('launcher shows only installed agents and keeps the scrolling list visible'
   ui.nodes.get('start-codex-work').click();
   assert.ok(commands.some(([name, args]) => name === 'tab.new' && args.argv[0] === 'codex'));
 });
-test('header has no agent tabs or Add session button', async () => {
+test('header anchors the project picker below its actual trigger', async () => {
   const ui = fakeElements(), overlays = [];
   const View = await viewFor({ ...ui, spaces: () => projects,
     openOverlay: value => overlays.push(value),
+    settings: () => ({ zoom: 1.5 }),
     window: () => ({ platform: 'macos' }), layout: () => ({ children: [], traffic_lights: [12, 21] }) });
   new View().header({});
   assert.ok(!ui.nodes.has('new-tab'));
   assert.ok(!ui.nodes.has('tab-strip'));
-  ui.nodes.get('project-switcher').click();
+  const cx = { stop_propagation() {} };
+  ui.nodes.get('project-switcher').mouseDown({ bounds: { x: 453, y: 18, width: 150, height: 48 } }, cx);
+  ui.nodes.get('project-switcher').click({}, cx);
   assert.equal(overlays[0].props.view, 'project-picker');
-  assert.equal(overlays[0].at.y, 48);
+  assert.deepEqual(overlays[0].at, { x: 453, y: 72 });
   assert.equal(overlays[0].frame, 'none');
+  ui.nodes.get('project-switcher').click({}, cx);
+  assert.equal(overlays[1].at, undefined);
+});
+test('sidebar menus align below the right edge of each button at the current zoom', async () => {
+  const ui = fakeElements(), overlays = [];
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], theme: () => ({}),
+    settings: () => ({ zoom: 1.5 }), setAgentOrder() {}, run() {},
+    openOverlay: value => overlays.push(value) });
+  const view = new View(); view.init(); view.render();
+  const cx = { stop_propagation() {} };
+  for (const [id, width] of [['new-thread-api', 280], ['project-menu-api', 200]]) {
+    const button = ui.nodes.get(id);
+    button.mouseDown({ bounds: { x: 350, y: 105, width: 42, height: 42 } }, cx);
+    button.click({}, cx);
+    assert.deepEqual(overlays.at(-1).at, { x: 392 - width * 1.5, y: 153 });
+  }
+  assert.equal(overlays[0].props.view, 'launcher');
+  assert.equal(overlays[1].props.view, 'project-menu');
 });
 test('project dropdown switches projects and opens the native folder chooser without starting a session', async () => {
   const ui = fakeElements(), commands = [], closed = [], memory = {};
