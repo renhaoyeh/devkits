@@ -128,7 +128,7 @@ function fakeElements() {
   };
   const asset = path => { assets.push(path); return element(); };
   return { nodes, texts, textOf, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
-    NativeSelect: { new: id => element().id(id) }, NativePopup: { new: (_id, trigger) => element().child(trigger) },
+    NativeSelect: { new: id => element().id(id) }, NativePopup: { new: (_id, trigger) => element().child(trigger) }, Popup: { new: (_id, trigger) => element().child(trigger) },
     NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) },
     NativeSwitch: { new: id => element().id(id) }, NativeToggleGroup: { new: id => element().id(id) }, NativeToggle: { new: id => element().id(id) } };
 }
@@ -439,8 +439,8 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
-  assert.ok(!ui.nodes.has('remove-codex'));
-  ui.nodes.get('remove-devkits-codex-work').click();
+  assert.ok(!ui.nodes.has('account-menu-codex'));
+  ui.nodes.get('account-actions-devkits-codex-work-remove').click({}, renderContext);
   assert.deepEqual(removed, []);
   assert.equal(overlays[0].props.view, 'remove-account');
   target = { ...overlays[0].props, overlay: 'confirm' };
@@ -532,11 +532,11 @@ test('Codex sharing is manual, scoped to a local saved account, reports results 
     { key: 'devkits-claude-work', name: 'Claude · Work', run: ['claude'] }];
   view.manageIndex = 0;
   const cx = { ...renderContext, spawn: task => { pending = task(cx); } };
-  view.render(cx);
+  view.preparePermissionSelects(cx); view.render(cx);
   assert.deepEqual(calls, []);
-  assert.ok(!ui.nodes.has('sync-codex'));
-  assert.ok(!ui.nodes.has('sync-devkits-claude-work'));
-  ui.nodes.get(`sync-${work.key}`).click({}, cx);
+  assert.ok(!ui.nodes.has('account-actions-codex-sync'));
+  assert.ok(!ui.nodes.has('account-actions-devkits-claude-work-sync'));
+  ui.nodes.get(`account-actions-${work.key}-sync`).click({}, cx);
   assert.deepEqual(calls, []);
   target = { ...overlays.at(-1).props, overlay: 'picker' };
   const picker = new View(); picker.init(null, cx);
@@ -932,7 +932,7 @@ test('the base Claude row offers Add account and Claude accounts join Your accou
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
   assert.ok(ui.textOf('manage-agent:claude').includes('Add account'));
   assert.ok(ui.nodes.has('manage-section-2'));
-  assert.ok(ui.nodes.has('rename-devkits-claude-work')); assert.ok(ui.nodes.has('remove-devkits-claude-work'));
+  assert.ok(ui.nodes.has('account-actions-devkits-claude-work-rename')); assert.ok(ui.nodes.has('account-actions-devkits-claude-work-remove'));
   assert.ok(ui.nodes.has('permissions-devkits-claude-work')); assert.ok(ui.nodes.has('permissions-claude'));
   ui.nodes.get('permissions-claude-select').openChange(true, renderContext); view.render(renderContext);
   ui.nodes.get('permissions-claude-option-acceptEdits').click({}, renderContext);
