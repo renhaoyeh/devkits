@@ -48,20 +48,21 @@ export function threadTitle(tab, agent, space) {
   const providers = agent ? ['Codex', agent.program?.name, agent.app].filter(Boolean) : [];
   const folders = [agent?.space_name, space?.name, space?.folder,
     space?.folder?.split(/[\\/]/).filter(Boolean).at(-1)].filter(Boolean);
+  let fallback;
   for (const value of [tab.named ? tab.name : '', agent?.title, agent?.tab_name, tab.name]) {
     let title = (value || '').replace(/^[\u2800-\u28ff✳✻✽✶✢✦✴✹✺]\s*/u, '').trim();
     if (!title || (/^\d+$/.test(title) && !(tab.named && value === tab.name))) continue;
     for (const provider of providers) {
       if (title.toLowerCase() === provider.toLowerCase()) { title = ''; break; }
       if (title.toLowerCase().startsWith(`${provider.toLowerCase()} · `)) {
-        title = title.slice(provider.length + 3).trim(); break;
+        fallback ||= title.slice(provider.length + 3).trim(); title = ''; break;
       }
     }
     const named = tab.named && value === tab.name;
     if (!named && (folders.includes(title) || /^(?:[~/\\]|[A-Za-z]:[\\/])/.test(title))) continue;
     if (title) return title;
   }
-  return agent ? 'New thread' : 'Terminal';
+  return fallback || (agent ? 'New thread' : 'Terminal');
 }
 
 // shortcut: compare path spellings; resolve aliases if symlinked project roots need deduplication.
@@ -86,5 +87,6 @@ export function projectGroups(spaces, agents) {
       title: threadTitle(tab, agent, space),
       status: tab.status || agent?.status || 'idle',
       active: space.active && tab.active };
-  }) }));
+  }).sort((a, b) => Number(b.agents.some(agent => agent.status === 'working') || b.status === 'working')
+    - Number(a.agents.some(agent => agent.status === 'working') || a.status === 'working')) }));
 }

@@ -25,6 +25,22 @@ const projects = [
     { id: 'tab-1', name: '2', status: 'blocked' }, { id: 'tab-3', name: 'Plan', named: true },
   ] },
 ];
+test('working threads rise within their project and return to tab order when finished', () => {
+  const spaces = [{ id: 'one', tabs: [
+    { id: 'idle', status: 'idle' }, { id: 'busy', status: 'working' },
+    { id: 'blocked', status: 'blocked' }, { id: 'busy-split', status: 'blocked' },
+  ] }, { id: 'two', tabs: [{ id: 'other', status: 'working' }] }];
+  const members = [{ space: 'one', tab: 'busy-split', status: 'working' }];
+  const ordered = projectGroups(spaces, members);
+  assert.deepEqual(ordered.map(group => group.space.id), ['one', 'two']);
+  assert.deepEqual(ordered[0].threads.map(thread => thread.tab.id), ['busy', 'busy-split', 'idle', 'blocked']);
+  assert.deepEqual(spaces[0].tabs.map(tab => tab.id), ['idle', 'busy', 'blocked', 'busy-split']);
+  spaces[0].tabs[1].status = 'done';
+  members[0].status = 'idle';
+  assert.deepEqual(projectGroups(spaces, members)[0].threads.map(thread => thread.tab.id),
+    ['idle', 'busy', 'blocked', 'busy-split']);
+});
+
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress']
@@ -886,6 +902,12 @@ test('sidebar thread names omit redundant agent labels while preserving tasks an
   assert.equal(threadTitle({ name: 'Codex', named: true }, codex), 'New thread');
   assert.equal(threadTitle({ name: 'Codex', named: true }, { ...codex, tab_name: '1' }), 'New thread');
   assert.equal(threadTitle({ name: 'Codex · rickyeh', named: true }, codex), 'rickyeh');
+  assert.equal(threadTitle({ name: 'Codex · rickyeh', named: true },
+    { ...codex, title: 'Fix thread names' }), 'Fix thread names');
+  assert.equal(threadTitle({ name: 'Codex · rickyeh', named: true },
+    { title: 'Fix thread names', program: { name: 'Codex · rickyeh' } }), 'Fix thread names');
+  assert.equal(threadTitle({ name: 'Custom thread', named: true },
+    { ...codex, title: 'Terminal title' }), 'Custom thread');
   assert.equal(threadTitle({ name: 'Codex · rickyeh', named: true }, { program: { name: 'Codex · rickyeh' } }), 'rickyeh');
   assert.equal(threadTitle({ name: 'Codex', named: true }, { ...codex, title: 'Fix authentication' }), 'Fix authentication');
   assert.equal(threadTitle({ name: 'Fix Codex login', named: true }, codex), 'Fix Codex login');
