@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, isCodexLauncher, launcherArgv, quotaResetLabel } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, isCodexLauncher, launcherArgv, quotaResetLabel, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -442,7 +442,7 @@ test('Manage saves Codex permissions per launcher and applies them to new tabs a
   const view = new View(); view.launchers = [codex, work, { key: 'claude', name: 'Claude' }];
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
   assert.ok(ui.nodes.has('permissions-codex')); assert.ok(ui.nodes.has('permissions-devkits-codex-work'));
-  assert.ok(!ui.nodes.has('permissions-claude')); assert.ok(!ui.nodes.has('permissions-terminal'));
+  assert.ok(ui.nodes.has('permissions-claude')); assert.ok(!ui.nodes.has('permissions-terminal'));
   const cx = renderContext;
   ui.nodes.get('permissions-codex').mouseDown({}, cx);
   ui.nodes.get('permissions-codex').click({}, cx); view.render(cx);
@@ -780,17 +780,21 @@ test('only the base Codex row offers Add account, including when Codex is hidden
   ui.nodes.clear(); view.launcher({});
   assert.ok(!ui.nodes.has('add-codex-account'));
 });
-test('the base Claude row offers Add account and Claude accounts join Your accounts without Codex permissions', async () => {
-  const ui = fakeElements(), overlays = [];
+test('the base Claude row offers Add account and Claude accounts join Your accounts with Claude permissions', async () => {
+  const ui = fakeElements(), overlays = [], memory = {};
   const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
   const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     closeOverlay() {}, openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
   assert.ok(ui.nodes.get('manage-agent:claude').children.includes(ui.nodes.get('add-claude-account').element));
   assert.ok(ui.nodes.has('manage-section-2'));
   assert.ok(ui.nodes.has('rename-devkits-claude-work')); assert.ok(ui.nodes.has('remove-devkits-claude-work'));
-  assert.ok(!ui.nodes.has('permissions-devkits-claude-work')); assert.ok(!ui.nodes.has('permissions-claude'));
+  assert.ok(ui.nodes.has('permissions-devkits-claude-work')); assert.ok(ui.nodes.has('permissions-claude'));
+  ui.nodes.get('permissions-claude-select').openChange(true, renderContext); view.render(renderContext);
+  ui.nodes.get('permissions-claude-option-acceptEdits').click({}, renderContext);
+  assert.deepEqual(memory['devkits.codex-permissions'], { claude: 'acceptEdits' });
   ui.nodes.get('add-claude-account').click();
   assert.equal(overlays[0].props.view, 'account-login');
   assert.equal(overlays[0].props.provider, 'claude');

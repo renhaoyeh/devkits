@@ -17,21 +17,42 @@ export const codexPermissionModes = [
     args: ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never'] },
 ];
 
+export const claudePermissionModes = [
+  { key: 'default', label: 'Default', description: 'Use this launcher’s existing Claude Code settings.', args: [] },
+  { key: 'plan', label: 'Plan', description: 'Read files and plan. Ask before editing files or running commands.',
+    args: ['--permission-mode', 'plan'] },
+  { key: 'acceptEdits', label: 'Accept edits', description: 'Edit files without asking. Ask before running commands.',
+    args: ['--permission-mode', 'acceptEdits'] },
+  { key: 'bypassPermissions', label: 'Full access', description: 'Edit files and run commands without permission prompts.',
+    args: ['--permission-mode', 'bypassPermissions'] },
+];
+
 export const isAccountLauncher = agent => /^devkits-(?:codex|claude)-/.test(agent?.key || '');
 export const isCodexLauncher = agent => agent?.key === 'codex' || Boolean(agent?.key?.startsWith('devkits-codex-'));
+export const isClaudeLauncher = agent => agent?.key === 'claude' || Boolean(agent?.key?.startsWith('devkits-claude-'));
+export const permissionModes = agent => isCodexLauncher(agent) ? codexPermissionModes
+  : isClaudeLauncher(agent) ? claudePermissionModes : null;
+
+const permissionFlags = {
+  codex: { name: 'Codex', executable: /(?:^|[/\\])codex(?:\.exe)?$/i, valued: ['--sandbox', '-s', '--ask-for-approval', '-a'],
+    drop: arg => /^--(?:sandbox|ask-for-approval)=|^-[sa]=|^-[sa](?:read-only|workspace-write|danger-full-access|never|on-request)$/.test(arg) ||
+      ['--full-auto', '--approve-for-me', '--not-so-yolo', '--yolo', '--dangerously-bypass-approvals-and-sandbox'].includes(arg) },
+  claude: { name: 'Claude', executable: /(?:^|[/\\])claude(?:\.exe|\.cmd)?$/i, valued: ['--permission-mode'],
+    drop: arg => arg.startsWith('--permission-mode=') || arg === '--dangerously-skip-permissions' },
+};
 
 export function launcherArgv(agent, permission) {
-  const mode = codexPermissionModes.find(mode => mode.key === permission);
-  if (!isCodexLauncher(agent) || !mode?.args.length) return agent?.run;
-  const executable = agent.run.findIndex(arg => !arg.includes('=') && /(?:^|[/\\])codex(?:\.exe)?$/i.test(arg));
-  if (executable < 0) throw new Error('Could not find Codex in this launcher. Choose Default to keep its existing command.');
+  const mode = permissionModes(agent)?.find(mode => mode.key === permission);
+  if (!mode?.args.length) return agent?.run;
+  const flags = permissionFlags[isCodexLauncher(agent) ? 'codex' : 'claude'];
+  const executable = agent.run.findIndex(arg => !arg.includes('=') && flags.executable.test(arg));
+  if (executable < 0) throw new Error(`Could not find ${flags.name} in this launcher. Choose Default to keep its existing command.`);
   const rest = [];
   for (let i = executable + 1; i < agent.run.length; i++) {
     const arg = agent.run[i];
     if (arg === '--') { rest.push(...agent.run.slice(i)); break; }
-    if (['--sandbox', '-s', '--ask-for-approval', '-a'].includes(arg)) { i++; continue; }
-    if (/^--(?:sandbox|ask-for-approval)=|^-[sa]=|^-[sa](?:read-only|workspace-write|danger-full-access|never|on-request)$/.test(arg) ||
-        ['--full-auto', '--approve-for-me', '--not-so-yolo', '--yolo', '--dangerously-bypass-approvals-and-sandbox'].includes(arg)) continue;
+    if (flags.valued.includes(arg)) { i++; continue; }
+    if (flags.drop(arg)) continue;
     rest.push(arg);
   }
   return [...agent.run.slice(0, executable + 1), ...mode.args, ...rest];
