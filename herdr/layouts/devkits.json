@@ -2,7 +2,7 @@
   "id": "root",
   "type": "row",
   "titlebar": "none",
-  "traffic_lights": [12, 16],
+  "traffic_lights": [12, 9],
   "theme": { "light": "devkits-light", "dark": "devkits" },
   "ui_font": "Geist",
   "font": "Geist Mono",
