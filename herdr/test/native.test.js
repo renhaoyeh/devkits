@@ -587,6 +587,9 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.deepEqual(overlays.at(-1).props, { view: 'manage-launchers', space: 'api' });
   assert.equal(overlays.at(-1).width, 680);
   assert.equal(overlays.at(-1).height, 0.8);
+  ui.nodes.get('open-token-statistics').click();
+  assert.equal(overlays.at(-1).props.view, 'token-statistics');
+  assert.equal(overlays.at(-1).modal, false);
 });
 test('quota time progress uses each actual window and hides missing, inconsistent or expired resets', () => {
   const now = Date.UTC(2026, 10, 6);

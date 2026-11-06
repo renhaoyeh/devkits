@@ -1,5 +1,7 @@
 # Design Guidelines
 
+- Open Token statistics from a chart icon beside Manage agent profiles in the AGENT PROFILES header. Use a large native Sera dialog with Today, 7 days, 30 days and All time ranges, token totals, clickable daily bars, and Models, Projects, Accounts and Sessions tables. Clicking a day or grouped row filters the results; Clear filters resets them. Paginate tables and refresh local history once a minute, retaining the last successful result during refresh or errors. Allow wheel and trackpad scrolling without a visible scrollbar. Clicking the backdrop, Done or Escape closes the statistics dialog. Separate uncached input, output, cache read and cache write; include reasoning in output. Format token totals and table values consistently with one-decimal K/M/B suffixes; retain exact counts in accessibility labels. Read local Codex and Claude history, including dedicated Herdr profiles, without depending on Orca or provider services. Label unknown metadata explicitly and do not present token totals as subscription charges.
+
 - Use Project consistently for the folder-backed session container in user-facing navigation, menus, dialogs, and status text.
 
 - Prefer a thread's explicit task name or live agent title over launcher/account labels. Use the account label only as a fallback when there is no thread title. Drop the repository Codex appends to its terminal title ("Task | repo") so Codex and Claude titles match.

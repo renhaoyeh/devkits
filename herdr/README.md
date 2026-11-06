@@ -2,6 +2,8 @@
 
 A native Herdr layout and GPUI mod with shadcn/ui Sera styling and a Zed-inspired project and thread sidebar.
 
+Click the chart icon in **AGENT PROFILES** to open **Token statistics**. Choose Today, 7 days, 30 days or All time; inspect daily totals and Models, Projects, Accounts or Sessions. Click a daily bar or grouped row to filter, then Clear filters to reset. Tables show uncached input, output, cache reads, cache writes and their total; reasoning is already included in output. Statistics read local Codex/Claude transcripts (including Herdr account directories and archived Codex sessions), deduplicate repeated events, cache parsed files under `data/devkits/analytics-cache.json`, and refresh every minute while open. Dates use the computer's local timezone. Only recorded history can be counted; missing metadata is labeled unknown. Token totals include cache traffic and do not represent subscription charges. No provider requests or Orca installation are required.
+
 ## Install
 
 Requires Herdr App and Node.js 22+. Run from the repository root:
