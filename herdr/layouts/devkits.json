@@ -27,6 +27,7 @@
           "content": { "mod": "devkits", "props": { "view": "header" } } },
         { "id": "workspace-view", "type": "stack", "active": "main", "children": [
         { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
+        { "id": "diff", "type": "block", "content": { "mod": "devkits", "props": { "view": "diff" } } },
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
         { "id": "main", "type": "block",
           "content": { "tab": "active", "pane": {

@@ -741,6 +741,13 @@ test('status bar Files toggles an empty project browser without creating session
   target = { view: 'status' }; status.render(); ui.nodes.get('open-files').click();
   target = {}; sidebar.render();
   assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'project-empty' }]);
+  target = { view: 'status' }; status.render(); ui.nodes.get('open-diff').click();
+  target = {}; sidebar.render();
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'diff' }]);
+  target = { view: 'status' }; status.render(); ui.nodes.get('open-files').click();
+  assert.equal(memory['devkits.diff'], null);
+  target = {}; sidebar.render();
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
   assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new' || name === 'terminal.kill'));
 });
 test('sidebar menus align below the right edge of each button at the current zoom', async () => {
