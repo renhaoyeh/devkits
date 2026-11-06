@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, simulatorShown: () => false, toggleSimulator() {}, window: () => ({}), appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1408,8 +1408,15 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   const ids = new Set();
   function visit(node) { assert.ok(!ids.has(node.id)); ids.add(node.id); for (const child of node.children || []) visit(child); }
   visit(layout);
-  const stack = layout.children[1].children[1];
+  const row = layout.children[1].children[1], stack = row.children[0], simulator = row.children[1];
   assert.equal(stack.id, 'workspace-view');
+  assert.equal(simulator.id, 'simulator');
+  assert.equal(simulator.hidden, true);
+  assert.equal(simulator.content.props.view, 'simulator');
+  // Herdr docks a folder without place "none" into the shown layout.
+  assert.equal(JSON.parse(await readFile(join(home, 'mods', 'devkits-sim-frames', 'mod.json'), 'utf8')).place, 'none');
+  assert.equal(await readFile(join(home, 'mods', 'devkits-sim-frames', 'main.js'), 'utf8'),
+    await readFile(new URL('../mods/devkits-sim-frames/main.js', import.meta.url), 'utf8'));
   assert.equal(stack.children.find(node => node.id === 'main').content.tab, 'active');
   assert.deepEqual((await readdir(home)).sort(), ['layouts', 'mods', 'themes']);
   for (const name of Object.values(layout.theme)) {
@@ -1420,4 +1427,20 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   const before = await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8');
   await assert.rejects(install(home), /Refusing to overwrite/);
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
+});
+
+test('status bar toggles the simulator panel on macOS, with a selected background while it shows', async () => {
+  const ui = fakeElements(), toggles = [];
+  let shown = true;
+  const host = platform => ({ ...ui, spaces: () => [], window: () => ({ platform }), layout: () => ({}),
+    simulatorShown: () => shown, toggleSimulator: () => toggles.push('simulator') });
+  let View = await viewFor(host('macos'));
+  new View().statusBar({ selected: 'selected', background: 'background' });
+  assert.equal(ui.nodes.get('open-simulator').background, 'selected');
+  ui.nodes.get('open-simulator').click();
+  assert.deepEqual(toggles, ['simulator']);
+  ui.nodes.clear(); shown = false;
+  View = await viewFor(host('windows'));
+  new View().statusBar({});
+  assert.ok(!ui.nodes.has('open-simulator'));
 });

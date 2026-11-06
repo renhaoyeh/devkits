@@ -25,6 +25,7 @@
       "children": [
         { "id": "header", "type": "block", "size": { "px": 32 }, "window_drag": true,
           "content": { "mod": "devkits", "props": { "view": "header" } } },
+        { "id": "workspace-row", "type": "row", "divider": { "width": 1, "color": "border" }, "children": [
         { "id": "workspace-view", "type": "stack", "active": "main", "children": [
         { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
         { "id": "diff", "type": "block", "content": { "mod": "devkits", "props": { "view": "diff" } } },
@@ -35,6 +36,9 @@
             "gap": 0, "radius": 0, "background": "background", "lone": true,
             "header": { "content": { "mod": "devkits", "props": { "view": "pane" } }, "height": 32, "position": "top", "reveal": "always" }
           } } }
+        ] },
+        { "id": "simulator", "type": "block", "hidden": true, "size": { "px": 380 }, "min": 300, "max": 900,
+          "content": { "mod": "devkits", "props": { "view": "simulator" } } }
         ] },
         { "id": "status", "type": "block", "size": { "px": 32 }, "content": { "mod": "devkits", "props": { "view": "status" } } }
       ]

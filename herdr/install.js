@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 export async function install(home) {
   const layout = join(home, 'layouts', 'devkits.json');
   const mod = join(home, 'mods', 'devkits');
+  const frames = join(home, 'mods', 'devkits-sim-frames');
   const themes = ['devkits', 'devkits-light'].map(name => join(home, 'themes', `${name}.json`));
-  for (const path of [layout, mod, ...themes]) {
+  for (const path of [layout, mod, frames, ...themes]) {
     try { await access(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     throw new Error(`Already exists: ${path}. Refusing to overwrite.`);
   }
@@ -15,12 +16,16 @@ export async function install(home) {
   await mkdir(join(home, 'mods'), { recursive: true });
   await mkdir(join(home, 'themes'), { recursive: true });
   const stage = await mkdtemp(join(home, 'mods', '.devkits-'));
-  let installed = false, layoutWritten = false;
+  let installed = false, framesInstalled = false, layoutWritten = false;
   const writtenThemes = [];
   try {
     await cp(new URL('./mods/devkits/', import.meta.url), stage, { recursive: true,
       filter: source => !source.endsWith('/gpui-kit.d.ts') && !source.endsWith('/jsconfig.json') });
     await rename(stage, mod); installed = true;
+    await mkdir(frames);
+    framesInstalled = true;
+    for (const name of ['mod.json', 'main.js'])
+      await writeFile(join(frames, name), await readFile(new URL(`./mods/devkits-sim-frames/${name}`, import.meta.url)), { flag: 'wx' });
     for (const [index, name] of ['devkits', 'devkits-light'].entries()) {
       await writeFile(themes[index], await readFile(new URL(`./themes/${name}.json`, import.meta.url)), { flag: 'wx' });
       writtenThemes.push(themes[index]);
@@ -29,6 +34,7 @@ export async function install(home) {
   } catch (error) {
     if (layoutWritten) await rm(layout);
     if (installed) await rm(mod, { recursive: true });
+    if (framesInstalled) await rm(frames, { recursive: true });
     for (const path of writtenThemes) await rm(path);
     throw error;
   } finally { await rm(stage, { recursive: true, force: true }); }
