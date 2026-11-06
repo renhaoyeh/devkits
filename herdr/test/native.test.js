@@ -520,6 +520,56 @@ test('Manage saves Codex permissions per launcher and applies them to new tabs a
   assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-work': 'workspace-write' });
   assert.deepEqual(commands, []);
 });
+test('Codex sharing is manual, scoped to a local saved account, reports results and ignores duplicate clicks', async () => {
+  const ui = fakeElements(), calls = [], notices = [], overlays = [];
+  let finish, pending;
+  let target = { view: 'manage-launchers', overlay: 'manage' };
+  const work = { key: 'devkits-codex-work', name: 'Codex · Work', run: ['env', 'CODEX_HOME=/accounts/work', 'codex'] };
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
+    openOverlay: value => overlays.push(value), closeOverlay() {}, notify: value => notices.push(value),
+    exec: async (...args) => { calls.push(args); return new Promise(resolve => { finish = resolve; }); } });
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] }, work,
+    { key: 'devkits-claude-work', name: 'Claude · Work', run: ['claude'] }];
+  view.manageIndex = 0;
+  const cx = { ...renderContext, spawn: task => { pending = task(cx); } };
+  view.render(cx);
+  assert.deepEqual(calls, []);
+  assert.ok(!ui.nodes.has('sync-codex'));
+  assert.ok(!ui.nodes.has('sync-devkits-claude-work'));
+  ui.nodes.get(`sync-${work.key}`).click({}, cx);
+  assert.deepEqual(calls, []);
+  target = { ...overlays.at(-1).props, overlay: 'picker' };
+  const picker = new View(); picker.init(null, cx);
+  assert.deepEqual(calls, [['node', ['/herdr/mods/devkits/codex-sharing.js', '/herdr', work.key, '--list']]]);
+  picker.render(cx);
+  assert.ok(ui.textOf('codex-sharing').includes('Checking shared settings…'));
+  finish({ code: 0, stdout: JSON.stringify({ items: [{ kind: 'plugins', key: 'one@local', label: 'One', selected: false, status: 'not-shared' },
+    { kind: 'skills', key: 'Writing', label: 'Writing', selected: true, status: 'pending' }] }) });
+  await pending; picker.render(cx);
+  assert.ok(ui.textOf('codex-sharing').includes('Not shared'));
+  assert.ok(ui.textOf('codex-sharing').includes('Update needed'));
+  ui.nodes.get('share-all').change(true, cx); picker.render(cx);
+  assert.ok(picker.sharingItems.every(item => item.selected));
+  ui.nodes.get('share-all').change(false, cx); picker.render(cx);
+  assert.ok(picker.sharingItems.every(item => !item.selected));
+  ui.nodes.get('share-all').change(true, cx); picker.render(cx);
+  ui.nodes.get('sharing-apply').click({}, cx);
+  ui.nodes.get('sharing-apply').click({}, cx);
+  picker.render(cx);
+  assert.equal(ui.nodes.get('sharing-apply').disabled, true);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(JSON.parse(calls[1][1][3]), { plugins: ['one@local'], skills: ['Writing'] });
+  finish({ code: 0, stdout: JSON.stringify({ message: 'Synced 2 plugins. Use a new session.' }) });
+  await pending;
+  assert.equal(notices[0].body, 'Synced 2 plugins. Use a new session.');
+  assert.equal(overlays.at(-1).props.view, 'manage-launchers');
+  picker.render(cx);
+  ui.nodes.get('sharing-apply').click({}, cx);
+  finish({ code: 1, stdout: JSON.stringify({ error: 'Existing files were kept.' }) });
+  await pending; picker.render(cx);
+  assert.ok(ui.textOf('codex-sharing').includes('Existing files were kept.'));
+});
+
 test('an old permissions dialog returns to Manage after a live update', async () => {
   const ui = fakeElements(), closed = [], overlays = [];
   const View = await viewFor({ ...ui, props: () => ({ view: 'codex-permissions', overlay: 'old-dialog', space: 'api' }),
