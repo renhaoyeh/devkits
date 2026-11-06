@@ -160,6 +160,54 @@ test('launcher shows installed agents at content height without a scroll contain
   assert.ok(ui.nodes.has('start-account-19'));
   assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
 });
+test('agent discovery shares pending work, caches empty results, and separates machines', async () => {
+  const calls = [];
+  let resolve;
+  const View = await viewFor({ knownAgents: ({ on }) => {
+    calls.push(on);
+    return new Promise(done => { resolve = done; });
+  } });
+  const first = new View().cachedAgents();
+  const second = new View().cachedAgents(null);
+  assert.equal(calls.length, 1);
+  resolve([]);
+  assert.deepEqual(await first, []);
+  assert.deepEqual(await second, []);
+  assert.deepEqual(await new View().cachedAgents(), []);
+  assert.equal(calls.length, 1);
+  const remote = new View().cachedAgents('server');
+  resolve([{ key: 'codex', installed: true }, { key: 'devkits-codex-work', installed: true }]);
+  assert.deepEqual((await remote).map(agent => agent.key), ['codex']);
+  assert.deepEqual(calls, [undefined, 'server']);
+});
+
+test('reopening Add Agent uses cached rows immediately and account changes refresh them', async () => {
+  let target = { view: 'launcher', space: 'api' }, pending, calls = 0;
+  const View = await viewFor({ props: () => target, spaces: () => projects,
+    knownAgents: async () => { calls++; return [{ key: 'claude', installed: true }]; } });
+  const cx = { ...renderContext, spawn(task) { pending = task(cx); } };
+  new View().init({}, cx); await pending;
+  const reopened = new View(); reopened.init({}, cx);
+  assert.equal(reopened.loading, false);
+  assert.equal(reopened.launchers[0].key, 'claude');
+  assert.equal(calls, 1);
+  target = { ...target, refreshAgents: true };
+  new View().init({}, cx); await pending;
+  assert.equal(calls, 2);
+});
+
+test('failed discovery can retry instead of caching the rejection', async () => {
+  let calls = 0;
+  const View = await viewFor({ knownAgents: async () => {
+    if (++calls === 1) throw Error('offline');
+    return [];
+  } });
+  const view = new View();
+  await assert.rejects(view.cachedAgents(), /offline/);
+  assert.deepEqual(await view.cachedAgents(), []);
+  assert.equal(calls, 2);
+});
+
 test('Manage persists visibility, retains hidden choices, and numbers only visible launchers', async () => {
   const ui = fakeElements(), memory = {}, commands = [], overlays = [], closed = [];
   let target = { view: 'launcher', space: 'api', overlay: 'menu' }, pending;
