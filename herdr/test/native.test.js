@@ -155,6 +155,29 @@ test('button input stays inside its action instead of reaching a parent row or d
   button.click({}, cx);
   assert.deepEqual(commands, [['tab.close', { id: 'tab-1' }]]);
 });
+test('thread close appears only on hover and another row leaving cannot hide it', async () => {
+  const ui = fakeElements();
+  const View = await viewFor(ui);
+  const view = new View();
+  const first = { tab: { id: 'first' }, agents: [], active: true, title: 'First' };
+  const second = { tab: { id: 'second' }, agents: [], title: 'Second' };
+  const render = () => { view.threadRow(first, {}); view.threadRow(second, {}); };
+  const cx = { notify() {} };
+  render();
+  assert.equal(ui.nodes.get('close-thread-first').opacity, 0);
+  ui.nodes.get('thread-first').hover(true, cx);
+  render();
+  assert.equal(ui.nodes.get('close-thread-first').opacity, 1);
+  ui.nodes.get('thread-second').hover(true, cx);
+  ui.nodes.get('thread-first').hover(false, cx);
+  render();
+  assert.equal(ui.nodes.get('close-thread-first').opacity, 0);
+  assert.equal(ui.nodes.get('close-thread-second').opacity, 1);
+  ui.nodes.get('thread-second').hover(false, cx);
+  render();
+  assert.equal(ui.nodes.get('close-thread-second').opacity, 0);
+});
+
 test('closing a live workspace requires confirmation; cancel leaves all sessions and saved projects intact', async () => {
   const ui = fakeElements(), commands = [], overlays = [], closed = [];
   const memory = { 'devkits.projects': ['/Code/api'] };
