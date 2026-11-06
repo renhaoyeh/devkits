@@ -68,7 +68,7 @@ export function threadTitle(tab, agent, space) {
 // shortcut: compare path spellings; resolve aliases if symlinked project roots need deduplication.
 export const folderKey = folder => (folder || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
-export function projectCatalog(spaces, saved = [], roots = {}, selected) {
+export function projectCatalog(spaces, saved = [], roots = {}, selected, order = []) {
   const projects = spaces.map(space => ({ ...space, folder: roots[space.id] || space.folder }));
   for (const folder of saved) {
     if (projects.some(p => !p.machine && folderKey(p.folder) === folderKey(folder))) continue;
@@ -76,6 +76,9 @@ export function projectCatalog(spaces, saved = [], roots = {}, selected) {
       folder, machine: null, tabs: [], pending: true });
   }
   const chosen = projects.find(p => p.id === selected) || projects.find(p => p.active) || projects[0];
+  const ranks = new Map(order.map((key, index) => [key, index]));
+  projects.sort((a, b) => (ranks.get(JSON.stringify([a.machine || '', folderKey(a.folder) || a.id])) ?? order.length)
+    - (ranks.get(JSON.stringify([b.machine || '', folderKey(b.folder) || b.id])) ?? order.length));
   return projects.map(project => ({ ...project, active: project.id === chosen?.id }));
 }
 

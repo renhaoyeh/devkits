@@ -155,7 +155,7 @@ test('closing a live workspace requires confirmation; cancel leaves all sessions
   const ui = fakeElements(), commands = [], overlays = [], closed = [];
   const memory = { 'devkits.projects': ['/Code/api'] };
   let target;
-  const View = await viewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+  const View = await viewFor({ ...ui, spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     props: () => target, closeOverlay: id => closed.push(id), run: (...args) => commands.push(args),
     openOverlay: value => overlays.push(value) });
   const view = new View();
@@ -927,6 +927,37 @@ test('sidebar leaves the project list blank when no workspace is open', async ()
   assert.ok(!ui.texts.includes('Open folder…'));
   assert.ok(ui.nodes.has('settings'));
 });
+test('project menu moves persist and boundary actions leave order unchanged', async () => {
+  const ui = fakeElements(), memory = {}, commands = [], closed = [];
+  let target = { view: 'project-menu', project: projects[0], overlay: 'menu' };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, agents: () => [],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    theme: () => ({}), closeOverlay: id => closed.push(id), run: (...args) => commands.push(args) });
+  const view = new View();
+  const selected = view.projects().find(project => project.active).id;
+  view.projectMenu({});
+  assert.equal(ui.nodes.get('menu-project-up').opacity, 0.4);
+  ui.nodes.get('menu-project-up').click();
+  assert.equal(memory['devkits.project-order'], undefined);
+  assert.equal(closed.length, 0);
+  ui.nodes.get('menu-project-down').click();
+  assert.deepEqual(view.projects().map(project => project.id), ['app', 'api']);
+  assert.equal(view.projects().find(project => project.active).id, selected);
+  assert.deepEqual(closed, ['menu']);
+  assert.equal(commands.length, 0);
+  const restored = new View();
+  assert.deepEqual(restored.projects().map(project => project.id), ['app', 'api']);
+  view.projectMenu({});
+  assert.equal(ui.nodes.get('menu-project-down').opacity, 0.4);
+  const saved = memory['devkits.project-order'];
+  ui.nodes.get('menu-project-down').click();
+  assert.equal(memory['devkits.project-order'], saved);
+  ui.nodes.get('menu-project-up').click();
+  assert.deepEqual(view.projects().map(project => project.id), ['api', 'app']);
+  view.moveProject('missing', -1);
+  assert.deepEqual(view.projects().map(project => project.id), ['api', 'app']);
+});
+
 test('native sidebar renders project/thread nesting and a shell row can be selected', async () => {
   const ui = fakeElements(), { nodes } = ui, commands = [], memory = {};
   const View = await viewFor({ ...ui,
