@@ -79,7 +79,7 @@ async function loadView(host) {
 async function viewFor(host) {
   const memory = {};
   host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
-    setShared: (key, value) => { memory[key] = value; }, ...host };
+    setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
 }
@@ -505,7 +505,7 @@ test('Manage saves Codex permissions per launcher and applies them to new tabs a
   target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
     ['codex', '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
-  target = { ...target, space: null, projectName: 'New project' }; view.startThread(work);
+  target = { ...target, space: null, projectName: 'New project' }; await view.startThread(work);
   assert.deepEqual(commands.find(([name]) => name === 'space.new')[1].argv,
     ['env', 'CODEX_HOME=/accounts/work', 'codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--no-daemon']);
   commands.length = 0;
@@ -945,12 +945,12 @@ test('each Claude or Codex profile sets its default model and effort, which new 
   ui.nodes.get(`profile-model-${codex.key}-select`).openChange(true, renderContext); view.render(renderContext);
   ui.nodes.get(`profile-model-${codex.key}-option-b`).click({}, renderContext);
   assert.deepEqual(memory['devkits.profile-sessions'][codex.key], { model: 'b', effort: null });
-  view.startThread(codex, space);
+  await view.startThread(codex, space);
   assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CODEX_HOME=/work', 'codex', '-m', 'b']);
   view.render(renderContext);
   ui.nodes.get('session-codex-models-b').change(false, renderContext);
   assert.equal(memory['devkits.profile-sessions'][codex.key].model, null);
-  view.startThread(codex, space);
+  await view.startThread(codex, space);
   assert.deepEqual(commands.at(-1)[1].argv, codex.run);
   memory['devkits.profile-sessions'].claude = { model: 'opus', effort: 'high' };
   view.launchers.push(claude); view.preparePermissionSelects(renderContext); view.render(renderContext);
@@ -1094,6 +1094,24 @@ test('New thread without a project opens the native folder picker; launcher pass
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', { space: 'api', folder: '/Code/project name', name: 'Codex', argv: ['codex', '--profile', 'work'] }]);
   assert.deepEqual(closed, ['popup']);
 });
+test('Codex account sessions wait for plugin sync and still launch after a reported sync failure', async () => {
+  const account = { key: 'devkits-codex-work', name: 'Work', run: ['env', 'CODEX_HOME=/account', 'codex'] };
+  for (const code of [0, 1]) {
+    const commands = [], notices = [], calls = [];
+    let finish;
+    const View = await viewFor({ spaces: () => [], run: (...args) => commands.push(args),
+      notify: message => notices.push(message), exec: (...args) => {
+        calls.push(args); return new Promise(resolve => { finish = resolve; });
+      } });
+    const pending = new View().startThread(account, { space: 'one', folder: '/project' });
+    assert.equal(commands.length, 0);
+    assert.deepEqual(calls, [['node', ['/herdr/mods/devkits/plugin-sync.js', '/home/.codex', '/account']]]);
+    finish({ code, stderr: code ? 'Installer failed' : '' }); await pending;
+    assert.equal(commands.filter(([name]) => name === 'tab.new').length, 1);
+    assert.equal(notices.length, code);
+  }
+});
+
 test('each project gets its open panel back when selected again, until a thread is chosen there', async () => {
   const ui = fakeElements(), commands = [], memory = {};
   let active = 'one';
