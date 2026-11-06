@@ -67,7 +67,7 @@ export function launcherChoices(agents, order = []) {
 }
 
 export function threadTitle(tab, agent, space) {
-  const providers = agent ? ['Codex', agent.program?.name, agent.app].filter(Boolean) : [];
+  const providers = agent ? ['Codex', 'Claude', agent.program?.name, agent.app].filter(Boolean) : [];
   const folders = [agent?.space_name, space?.name, space?.folder,
     space?.folder?.split(/[\\/]/).filter(Boolean).at(-1)].filter(Boolean);
   let fallback;

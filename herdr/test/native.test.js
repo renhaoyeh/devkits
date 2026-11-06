@@ -1047,6 +1047,10 @@ test('sidebar thread names omit redundant agent labels while preserving tasks an
   assert.equal(threadTitle({ name: '123', named: true }, codex), '123');
   assert.equal(threadTitle({ name: '1' }), 'Terminal');
   assert.equal(threadTitle({ name: 'Codex', named: true }), 'Codex');
+  const claude = { title: '✳ Claude Code', app: 'claude-code', program: { name: 'Claude Code' } };
+  assert.equal(threadTitle({ name: 'Claude · PPDShare', named: true }, claude), 'PPDShare');
+  assert.equal(threadTitle({ name: 'Claude · PPDShare', named: true },
+    { ...claude, title: '✳ Fix permission modes' }), 'Fix permission modes');
 });
 test('automatic terminal folder titles are never used as conversation titles', () => {
   const tab = { name: 'Codex', named: true };
