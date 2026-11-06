@@ -579,7 +579,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   ui.nodes.clear(); view.accountUsage({});
   assert.ok(ui.nodes.has('usage-agent:work'));
   assert.ok(ui.nodes.has('usage-meter-agent:work'));
-  assert.ok(ui.nodes.has('usage-terminal'));
+  assert.ok(!ui.nodes.has('usage-terminal'));
   assert.ok(!ui.nodes.has('usage-agent:codex'));
   assert.ok(ui.texts.includes('AGENT PROFILES'));
   ui.nodes.get('manage-agent-profiles').click();
@@ -604,8 +604,7 @@ test('usage meters use the percentage for fill and color at both warning thresho
       assert.equal(ui.nodes.get(`${id}-fill`).background, color);
     }
   }
-  assert.equal(ui.nodes.get('usage-meter-terminal').indeterminate, true);
-  assert.ok(!ui.nodes.has('usage-meter-terminal-fill'));
+  assert.ok(!ui.nodes.has('usage-meter-terminal'));
 });
 test('usage details show all durations and errors, and Done or Escape close only the dialog', async () => {
   const ui = fakeElements(), closed = [];
