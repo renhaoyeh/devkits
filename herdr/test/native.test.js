@@ -527,7 +527,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   const ui = fakeElements(), overlays = [];
   const now = Date.UTC(2026, 0, 1);
   const memory = { 'devkits.hidden-launchers': ['terminal', 'agent:work'],
-    'devkits.launcher-order': ['agent:claude', 'agent:codex'] };
+    'devkits.launcher-order': ['agent:pi', 'agent:codex'] };
   const View = await viewFor({ ...ui, spaces: () => projects, shared: key => memory[key],
     openOverlay: overlay => overlays.push(overlay), settings: () => ({ zoom: 1 }),
     window: () => ({}), layout: () => ({ children: [] }),
@@ -537,7 +537,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.ok(!ui.nodes.has('account-usage'));
   view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] },
     { key: 'work', name: 'Codex · 工作', run: ['codex'] },
-    { key: 'claude', name: 'Claude Code', run: ['claude'] }];
+    { key: 'pi', name: 'Pi', run: ['pi'] }];
   view.usage = [{ key: 'codex', name: 'Codex', windows: [
     { bucket: 'codex', minutes: 300, usedPercent: 0, resetsAt: now / 1000 + 83 * 60 },
     { bucket: 'codex', minutes: 10080, usedPercent: 42 }], fetchedAt: 5678 }];
@@ -553,12 +553,12 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.equal(ui.nodes.get('usage-reset-agent:codex-10080').tooltip, undefined);
   assert.ok(ui.texts.includes('01h 23m'));
   assert.ok(ui.texts.includes('Week'));
-  assert.ok(ui.nodes.has('usage-meter-agent:claude'));
+  assert.ok(ui.nodes.has('usage-meter-agent:pi'));
   assert.ok(!ui.nodes.has('usage-agent:work'));
   assert.ok(!ui.nodes.has('usage-terminal'));
   assert.ok(ui.texts.includes('Not supported'));
   assert.ok(ui.texts.includes('0%'));
-  assert.deepEqual([...ui.nodes.keys()].filter(key => key.startsWith('usage-agent:')), ['usage-agent:claude', 'usage-agent:codex']);
+  assert.deepEqual([...ui.nodes.keys()].filter(key => key.startsWith('usage-agent:')), ['usage-agent:pi', 'usage-agent:codex']);
   ui.nodes.get('usage-agent:codex').click();
   assert.equal(overlays[0].props.view, 'usage-details');
   assert.equal(overlays[0].modal, false);
@@ -572,7 +572,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.ok(!ui.texts.includes('5h'));
   assert.ok(!ui.texts.includes('5h —'));
   assert.ok(ui.texts.includes('Week'));
-  ui.nodes.get('usage-agent:claude').click();
+  ui.nodes.get('usage-agent:pi').click();
   assert.equal(overlays[1].props.account.supported, false);
   assert.ok(!ui.nodes.has('usage-settings'));
   memory['devkits.hidden-launchers'] = ['agent:codex'];
@@ -664,31 +664,47 @@ test('case-only profile renames refresh sidebar labels even while native discove
   assert.equal((await view.cachedAgents(null))[0].name, 'Codex · WORK');
 });
 
-test('usage queries only visible local Codex launchers and refreshes on selection changes', async () => {
+test('Codex usage is cached across reloads while Devkits Claude accounts reread their local status-line file', async () => {
   let pending, failed = false, calls = [], discovered = 0;
+  const statusLines = [];
   const memory = { 'devkits.hidden-launchers': ['agent:work'] };
-  const View = await viewFor({ spaces: () => projects, shared: key => memory[key], knownAgents: async () => {
-    discovered++;
-    return [{ key: 'codex', installed: true, run: ['codex'] },
-      { key: 'work', installed: true, run: ['env', 'CODEX_HOME=/accounts/work', 'codex', '--no-daemon'] },
-      { key: 'claude', installed: true, run: ['claude'] }];
-  }, appHome: () => '/herdr', exec: async (...args) => {
-    calls.push(args);
-    return failed ? { code: 1 } : { code: 0, stdout: '[{"key":"codex","windows":[{"usedPercent":42}]}]' };
-  } });
+  const claude = { key: 'devkits-claude-me', installed: true, run: ['env', 'CLAUDE_CONFIG_DIR=/accounts/me', 'claude'] };
+  const View = await viewFor({ spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    ensureClaudeStatusLine: async directory => statusLines.push(directory),
+    knownAgents: async () => {
+      discovered++;
+      return [{ key: 'codex', installed: true, run: ['codex'] },
+        { key: 'work', installed: true, run: ['env', 'CODEX_HOME=/accounts/work', 'codex', '--no-daemon'] },
+        { key: 'claude', installed: true, run: ['claude'] }, claude, { key: 'pi', installed: true, run: ['pi'] }];
+    }, appHome: () => '/herdr', exec: async (...args) => {
+      const keys = JSON.parse(args[1][1]).map(account => account.key);
+      calls.push(keys);
+      return failed ? { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, error: 'Rate limited' }))) }
+        : { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, windows: [{ usedPercent: 42 }], fetchedAt: 1 }))) };
+    } });
   const cx = { spawn(task) { pending = task(cx); }, notify() {} };
   const view = new View();
   view.refreshUsage(cx); view.refreshUsage(cx); await pending;
-  assert.equal(calls.length, 1);
-  assert.deepEqual(JSON.parse(calls[0][1][1]).map(account => account.key), ['codex']);
+  assert.deepEqual(calls, [['codex', 'devkits-claude-me']]);
+  assert.deepEqual(statusLines, ['/accounts/me']);
   assert.equal(view.usage[0].windows[0].usedPercent, 42);
   view.refreshUsage(cx, false); assert.equal(discovered, 1);
+  // A reload or restart starts a new view; Codex reuses fresh cached results.
+  const reloaded = new View(); reloaded.refreshUsage(cx); await pending;
+  assert.deepEqual(calls.at(-1), ['devkits-claude-me']);
+  assert.deepEqual(reloaded.usage.map(account => account.key), ['codex', 'devkits-claude-me']);
   memory['devkits.hidden-launchers'] = [];
   view.refreshUsage(cx, false); await pending;
-  assert.deepEqual(JSON.parse(calls[1][1][1]).map(account => account.key), ['codex', 'work']);
+  assert.deepEqual(calls.at(-1), ['work', 'devkits-claude-me']);
+  assert.equal(statusLines.length, 2);
+  for (const entry of Object.values(memory['devkits.usage-cache'])) entry.checkedAt -= 5 * 60000;
   failed = true; view.refreshUsage(cx); await pending;
-  assert.deepEqual(view.usage, []);
-  assert.ok(view.usageError);
+  assert.deepEqual(calls.at(-1), ['codex', 'work', 'devkits-claude-me']);
+  assert.equal(view.usage[0].windows[0].usedPercent, 42);
+  assert.equal(view.usage[0].error, 'Rate limited');
+  const count = calls.length;
+  view.refreshUsage(cx); await pending;
+  assert.deepEqual(calls.slice(count), [['devkits-claude-me']]);
   assert.equal(view.usageLoading, false);
 });
 test('remote usage never queries local credentials or shows local account entries', async () => {
