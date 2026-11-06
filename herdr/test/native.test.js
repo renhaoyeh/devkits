@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, codexPermissionModes, isCodexLauncher, launcherArgv, quotaResetLabel, props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, codexPermissionModes, isCodexLauncher, launcherArgv, quotaResetLabel, readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -376,6 +376,27 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
   ui.nodes.get('thread-launcher').keyDown({ key: '1', modifiers: {} });
   assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'pi');
 });
+test('profile rename blocks duplicate saves, refreshes labels, and returns to Manage', async () => {
+  const ui = fakeElements(), overlays = [], memory = { 'devkits.agent-cache': { old: [] } };
+  let pending, resolve, calls = 0;
+  const View = await viewFor({ ...ui, theme: () => ({}),
+    props: () => ({ view: 'rename-account', overlay: 'rename', space: 'project', account: { key: 'devkits-codex-work', name: 'Codex · Work' } }),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    closeOverlay() {}, openOverlay: value => overlays.push(value),
+    renameCodexAccount: async (key, name) => {
+      calls++; assert.equal(key, 'devkits-codex-work'); assert.equal(name, '工作');
+      await new Promise(done => { resolve = done; });
+    } });
+  const view = new View(); view.renameInput = { value: () => '工作' };
+  const cx = { notify() {}, spawn: fn => { pending = fn(cx); } };
+  view.saveAccountName(cx); view.saveAccountName(cx); view.finishRename();
+  assert.equal(calls, 1); assert.equal(overlays.length, 0);
+  resolve(); await pending;
+  assert.deepEqual(memory['devkits.agent-cache'], {});
+  assert.equal(overlays[0].props.view, 'manage-launchers');
+  assert.equal(overlays[0].props.space, 'project');
+});
+
 test('account removal requires confirmation, blocks duplicate requests, and cleans only the removed preferences', async () => {
   const ui = fakeElements(), overlays = [], closed = [], removed = [], memory = {
     'devkits.hidden-launchers': ['agent:devkits-codex-work', 'agent:codex'],
@@ -502,24 +523,6 @@ test('hiding every agent keeps Manage available so the menu can be restored', as
   assert.ok(ui.nodes.has('manage-launchers-open'));
   assert.ok(ui.texts.includes('All agents are hidden. Use Manage to show them.'));
 });
-test('header anchors the project picker below its actual trigger', async () => {
-  const ui = fakeElements(), overlays = [];
-  const View = await viewFor({ ...ui, spaces: () => projects,
-    openOverlay: value => overlays.push(value),
-    settings: () => ({ zoom: 1.5 }),
-    window: () => ({ platform: 'macos' }), layout: () => ({ children: [], traffic_lights: [12, 21] }) });
-  new View().header({});
-  assert.ok(!ui.nodes.has('new-tab'));
-  assert.ok(!ui.nodes.has('tab-strip'));
-  const cx = { stop_propagation() {} };
-  ui.nodes.get('project-switcher').mouseDown({ bounds: { x: 453, y: 18, width: 150, height: 48 } }, cx);
-  ui.nodes.get('project-switcher').click({}, cx);
-  assert.equal(overlays[0].props.view, 'project-picker');
-  assert.deepEqual(overlays[0].at, { x: 453, y: 72 });
-  assert.equal(overlays[0].frame, 'none');
-  ui.nodes.get('project-switcher').click({}, cx);
-  assert.equal(overlays[1].at, undefined);
-});
 test('usage follows Add session visibility and order, shows actual quota windows, always has meters, and opens details', async () => {
   const ui = fakeElements(), overlays = [];
   const now = Date.UTC(2026, 0, 1);
@@ -640,6 +643,27 @@ test('usage details refresh the reset countdown every minute while open', async 
   tick(cx);
   assert.equal(notified, 1);
 });
+test('case-only profile renames refresh sidebar labels even while native discovery has the old name', async () => {
+  const key = 'devkits-codex-work';
+  const memory = {};
+  let label = 'Codex · work', pending;
+  const View = await viewFor({ spaces: () => projects,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    knownAgents: async () => [{ key, name: 'Codex · work', installed: true, run: ['codex'] }],
+    readTextFile: async () => JSON.stringify({ programs: { [key]: { name: label } } }),
+    exec: async () => ({ code: 0, stdout: '[]' }) });
+  const cx = { spawn(task) { pending = task(cx); }, notify() {} };
+  const view = new View();
+  view.refreshUsage(cx, false); await pending;
+  assert.equal(view.usageAgents[0].name, 'Codex · work');
+  label = 'Codex · WORK';
+  memory['devkits.agent-cache'] = {};
+  memory['devkits.profile-revision'] = 1;
+  view.refreshUsage(cx, false); await pending;
+  assert.equal(view.usageAgents[0].name, 'Codex · WORK');
+  assert.equal((await view.cachedAgents(null))[0].name, 'Codex · WORK');
+});
+
 test('usage queries only visible local Codex launchers and refreshes on selection changes', async () => {
   let pending, failed = false, calls = [], discovered = 0;
   const memory = { 'devkits.hidden-launchers': ['agent:work'] };

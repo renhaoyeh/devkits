@@ -2,7 +2,7 @@
   "id": "root",
   "type": "row",
   "titlebar": "none",
-  "traffic_lights": [12, 21],
+  "traffic_lights": [12, 16],
   "theme": { "light": "devkits-light", "dark": "devkits" },
   "ui_font": "Geist",
   "font": "Geist Mono",
@@ -15,7 +15,7 @@
       "id": "sidebar", "type": "column", "size": { "px": 280 }, "min": 250, "max": 440, "hidden": false,
       "background": "chrome", "resizable": false,
       "children": [
-        { "id": "brand", "type": "block", "size": { "px": 56 }, "window_drag": true,
+        { "id": "brand", "type": "block", "size": { "px": 32 }, "window_drag": true,
           "content": { "mod": "devkits", "props": { "view": "brand" } } },
         { "id": "agents", "type": "block", "content": { "mod": "devkits" } }
       ]
@@ -23,7 +23,7 @@
     {
       "id": "work", "type": "column", "resizable": false,
       "children": [
-        { "id": "header", "type": "block", "size": { "px": 56 }, "window_drag": true,
+        { "id": "header", "type": "block", "size": { "px": 32 }, "window_drag": true,
           "content": { "mod": "devkits", "props": { "view": "header" } } },
         { "id": "workspace-view", "type": "stack", "active": "main", "children": [
         { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },

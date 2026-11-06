@@ -5,11 +5,36 @@ import { readFile } from 'node:fs/promises';
 async function load(host = {}) {
   const source = await readFile(new URL('../mods/devkits/codex-login.js', import.meta.url), 'utf8');
   const factory = new Function('View', ...Object.keys(host), source.replace(/^import .*;\n/gm, '')
-    .replace('export default class', 'class').replace(/^export /gm, '') + '\nreturn { CodexLogin, codexProfile, registerCodex, removeCodexAccount };');
+    .replace('export default class', 'class').replace(/^export /gm, '') + '\nreturn { CodexLogin, codexProfile, registerCodex, removeCodexAccount, renameCodexAccount };');
   return factory(class {}, ...Object.values(host));
 }
 
 const profileId = 'account-000000000001';
+
+test('renaming changes only the display label and uses an atomic settings write', async () => {
+  const key = `devkits-codex-${profileId}`;
+  const entry = { name: 'Codex · Work', run: ['env', 'CODEX_HOME=/original', 'codex'], icon: 'icons/codex.svg' };
+  const original = { programs: { [key]: entry, other: { name: 'Codex · Other' } }, shells: ['fish'] };
+  const source = JSON.stringify(original);
+  let saved;
+  const { renameCodexAccount } = await load({ appHome: () => '/root', readTextFile: async () => source,
+    writeTextFile: async (path, next, expected) => {
+      assert.equal(path, '/root/programs.json'); assert.equal(expected, source); saved = JSON.parse(next);
+    } });
+  await renameCodexAccount(key, ' 工作 ABC ');
+  assert.deepEqual(saved, { ...original, programs: { ...original.programs, [key]: { ...entry, name: 'Codex · 工作 ABC' } } });
+  await renameCodexAccount(key, 'WORK');
+  assert.equal(saved.programs[key].name, 'Codex · WORK');
+  for (const name of ['', 'Other', 'a'.repeat(49)]) {
+    await assert.rejects(renameCodexAccount(key, name));
+  }
+  await assert.rejects(renameCodexAccount(key, 'x\ny'));
+  await assert.rejects(renameCodexAccount('codex', 'New'));
+  await assert.rejects(renameCodexAccount('devkits-codex-missing', 'New'));
+  const stale = await load({ appHome: () => '/root', readTextFile: async () => source,
+    writeTextFile: async () => { throw Error('stale snapshot'); } });
+  await assert.rejects(stale.renameCodexAccount(key, 'New'), /stale snapshot/);
+});
 
 test('removing an account signs out only its owned credentials and merges concurrent unrelated settings', async () => {
   for (const id of [profileId, 'Legacy']) {

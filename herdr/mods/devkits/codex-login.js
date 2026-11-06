@@ -50,6 +50,22 @@ export async function registerCodex(profile) {
   await writeTextFile(path, `${JSON.stringify(data, null, 2)}\n`, source);
 }
 
+export async function renameCodexAccount(key, name) {
+  name = accountName(name);
+  if (!/^devkits-codex-[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$/.test(key)) throw new Error('Only saved Codex accounts can be renamed.');
+  const path = `${appHome()}/programs.json`;
+  const source = await readTextFile(path);
+  const data = programs(source);
+  const entry = data.programs?.[key];
+  if (!entry) throw new Error('This account no longer exists. Reopen Manage and try again.');
+  const label = `Codex · ${name}`;
+  if (Object.entries(data.programs).some(([other, value]) => other !== key && value?.name === label)) {
+    throw new Error('That account name is already in the agent menu. Choose another name.');
+  }
+  data.programs[key] = { ...entry, name: label };
+  await writeTextFile(path, `${JSON.stringify(data, null, 2)}\n`, source);
+}
+
 export async function removeCodexAccount(key) {
   const id = /^devkits-codex-([a-zA-Z0-9][a-zA-Z0-9_-]{0,47})$/.exec(key)?.[1];
   if (!id) throw new Error('Only Devkits Codex accounts can be removed.');
