@@ -1,5 +1,5 @@
 import { div, svg } from 'gpui-kit';
-import { v_flex, h_flex, InputState, Input, TextView } from 'gpui-base';
+import { v_flex, h_flex, InputState, Input, TextView, TextareaState, Textarea } from 'gpui-base';
 import { appHome, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
 import { folderKey } from './model.js';
 import { Button } from './components/button.js';
@@ -135,7 +135,8 @@ export function taskPrompt(task) {
   return [`Work on this Asana task: ${task.name}`, task.url,
     task.parent && [`It is a subtask of: ${task.parent.name}`, task.parent.url].filter(Boolean).join('\n'),
     notes && `Description:\n${clip(notes)}`,
-    comments.length && `Latest comments${task.comments.length > comments.length ? ` (${comments.length} of ${task.comments.length})` : ''}:\n${comments.join('\n')}`]
+    comments.length && `Latest comments${task.comments.length > comments.length ? ` (${comments.length} of ${task.comments.length})` : ''}:\n${comments.join('\n')}`,
+    task.note?.trim() && `My instructions:\n${task.note.trim()}`]
     .filter(Boolean).join('\n\n');
 }
 
@@ -248,6 +249,10 @@ export default class AsanaPanel {
     this.reset();
     this.search = InputState.new({ placeholder: 'Search tasks' });
     this.search.on('change', (_event, cx) => cx.notify());
+    this.notes = new Map();
+    this.note = TextareaState.new({ placeholder: 'Add instructions for the agent (optional)' });
+    this.note.set_auto_grow(2, 8);
+    this.note.on('change', () => { if (this.selected) this.notes.set(this.selected, this.note.value()); });
     this.tokenInput = InputState.new({ placeholder: 'Personal access token' });
     this.tokenInput.set_masked(true);
     this.tokenInput.on('submit', (_event, cx) => this.saveToken(cx));
@@ -379,6 +384,7 @@ export default class AsanaPanel {
   show(task, cx) {
     const gid = task.gid;
     this.selected = gid; this.cursor = gid; this.detail = null; this.detailError = null;
+    this.note.set_value(this.notes.get(gid) || '');
     cx.spawn(async cx => {
       try {
         const detail = await taskDetails(this.token, gid, binding(this.folder)?.gid);
@@ -609,8 +615,7 @@ export default class AsanaPanel {
             .accessibility_label(saved ? 'Remove from Saved' : 'Save for later on this computer')
             .on_click((_event, cx) => { this.toggleSaved(task); cx.notify(); })
             .child(glyph(saved ? 'star-filled' : 'star', 12)).child(saved ? 'Saved' : 'Save for later'))
-          .child(DropdownMenuTrigger(Button('asana-start', t).h(28).px(10).gap(6).accessibility_label('Start a session for this task'), 280,
-            (_cx, at) => startMenu(task, at), 'end').child(glyph('plus', 12)).child('Start session')))
+)
         .child(Button('asana-close-preview', t, { variant: 'ghost', size: 'icon' }).accessibility_label('Close preview')
           .on_click((_event, cx) => { this.selected = null; this.detail = null; cx.notify(); }).child(glyph('close'))))
       .child(v_flex().id(`asana-preview-${this.selected}`).flex_1().min_h(0).overflow_y_scrollbar().px(32).py(28).gap(24)
@@ -650,7 +655,15 @@ export default class AsanaPanel {
                 .child(h_flex().gap(8).items_center().text_size(12)
                   .child(div().font_medium().child(comment.author))
                   .child(div().text_color(t.muted).child(relativeTime(comment.at))))
-                .child(TextView.markdown(`asana-comment-text-${comment.gid}`, comment.text).selectable(true).scrollable(false).w_full())))))));
+                .child(TextView.markdown(`asana-comment-text-${comment.gid}`, comment.text).selectable(true).scrollable(false).w_full())))))))
+      .when(Boolean(task), el => el.child(v_flex().flex_none().p(12).gap(8).border_t(1).border_color(t.border).bg(t.chrome)
+        .child(Textarea.new(this.note).id('asana-note').accessibility_label('Instructions for the agent')
+          .w_full().px(10).py(8).rounded(0).border(1).border_color(t.input).bg(t.background).text_size(13))
+        .child(h_flex().gap(8).items_center()
+          .child(div().flex_1().min_w(0).text_size(11).text_color(t.muted)
+            .child('Added after the task, its description and latest comments.'))
+          .child(DropdownMenuTrigger(Button('asana-start', t).h(28).px(10).gap(6).accessibility_label('Start a session for this task'), 280,
+            (_cx, at) => startMenu({ ...task, note: this.notes.get(task.gid) || '' }, at), 'end').child(glyph('plus', 12)).child('Start session')))));
   }
 
   render(project, startMenu, close, cx) {
