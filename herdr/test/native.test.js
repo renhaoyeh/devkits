@@ -1097,19 +1097,45 @@ test('New thread without a project opens the native folder picker; launcher pass
 test('Codex account sessions wait for plugin sync and still launch after a reported sync failure', async () => {
   const account = { key: 'devkits-codex-work', name: 'Work', run: ['env', 'CODEX_HOME=/account', 'codex'] };
   for (const code of [0, 1]) {
-    const commands = [], notices = [], calls = [];
+    const commands = [], notices = [], calls = [], memory = {}, ui = fakeElements();
     let finish;
-    const View = await viewFor({ spaces: () => [], run: (...args) => commands.push(args),
+    const View = await viewFor({ ...ui, spaces: () => [], run: (...args) => commands.push(args),
+      shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
       notify: message => notices.push(message), exec: (...args) => {
         calls.push(args); return new Promise(resolve => { finish = resolve; });
       } });
-    const pending = new View().startThread(account, { space: 'one', folder: '/project' });
+    const view = new View();
+    view.statusBar({});
+    assert.equal(ui.nodes.has('plugin-sync-progress'), false);
+    const pending = view.startThread(account, { space: 'one', folder: '/project' });
     assert.equal(commands.length, 0);
+    view.statusBar({});
+    assert.ok(ui.nodes.has('plugin-sync-progress'));
+    assert.ok(ui.textOf('plugin-sync-progress').includes('Syncing plugins…'));
     assert.deepEqual(calls, [['node', ['/herdr/mods/devkits/plugin-sync.js', '/home/.codex', '/account']]]);
     finish({ code, stderr: code ? 'Installer failed' : '' }); await pending;
+    ui.nodes.clear(); view.statusBar({});
+    assert.equal(ui.nodes.has('plugin-sync-progress'), false);
     assert.equal(commands.filter(([name]) => name === 'tab.new').length, 1);
     assert.equal(notices.length, code);
   }
+});
+
+test('sync progress stays visible until concurrent profiles finish and clears when execution rejects', async () => {
+  const memory = {}, finish = new Map();
+  const View = await viewFor({ spaces: () => [], run() {}, notify() {},
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    exec: (_command, args) => new Promise((resolve, reject) => { finish.set(args.at(-1), { resolve, reject }); }) });
+  const view = new View();
+  const account = id => ({ key: `devkits-codex-${id}`, run: ['env', `CODEX_HOME=/${id}`, 'codex'] });
+  const first = view.startThread(account('one')), duplicate = view.startThread(account('one'));
+  const second = view.startThread(account('two'));
+  assert.equal(finish.size, 2);
+  assert.deepEqual(memory['devkits.plugin-syncs'], { '/one': 2, '/two': 1 });
+  finish.get('/one').resolve({ code: 0 }); await Promise.all([first, duplicate]);
+  assert.deepEqual(memory['devkits.plugin-syncs'], { '/two': 1 });
+  finish.get('/two').reject(new Error('Could not start Node')); await second;
+  assert.deepEqual(memory['devkits.plugin-syncs'], {});
 });
 
 test('each project gets its open panel back when selected again, until a thread is chosen there', async () => {
