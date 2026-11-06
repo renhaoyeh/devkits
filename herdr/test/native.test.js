@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1001,18 +1001,16 @@ test('each project gets its open panel back when selected again, until a thread 
   active = 'two'; sidebar.render(); active = 'one'; sidebar.render();
   assert.equal(memory['devkits.files'], null);
 });
-test('Start session from an Asana preview offers only agents, names the thread, prompts with the task and unsaves it', async () => {
+test('Start session from the Asana composer names the thread, adds the model, effort and task prompt, and unsaves it', async () => {
   const ui = fakeElements(), commands = [], unsaved = [];
-  const target = { view: 'launcher', space: 'api', folder: '/Code/api', projectName: 'API', overlay: 'menu', task: { gid: 't1', name: 'Fix login' } };
-  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => projects,
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), spaces: () => projects,
     taskPrompt: task => `prompt:${task.name}`, unsaveTask: (...args) => unsaved.push(args), run: (...args) => commands.push(args),
-    closeOverlay() {}, notify: error => assert.fail(error.body) });
-  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', installed: true, run: ['codex'] }]; view.render();
-  assert.ok(!ui.nodes.has('new-terminal'));
-  assert.ok(!ui.nodes.has('manage-launchers-open'));
-  ui.nodes.get('start-codex').click();
+    closeOverlay: () => assert.fail('no overlay to close'), notify: error => assert.fail(error.body) });
+  const view = new View();
+  view.startThread({ key: 'claude', name: 'Claude', run: ['claude'] }, { space: 'api', folder: '/Code/api', projectName: 'API', task: { gid: 't1', name: 'Fix login' } },
+    { model: 'opus', effort: 'max' });
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'),
-    ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['codex', 'prompt:Fix login'] }]);
+    ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--model', 'opus', '--effort', 'max', 'prompt:Fix login'] }]);
   assert.deepEqual(unsaved, [['/Code/api', 't1']]);
 });
 test('Asana tasks opens from a local project menu, replaces Files and Changes, and is absent for remote projects', async () => {

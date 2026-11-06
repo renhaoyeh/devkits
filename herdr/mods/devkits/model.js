@@ -67,6 +67,33 @@ export function launcherArgv(agent, permission) {
   return [...agent.run.slice(0, executable + 1), ...mode.args, ...rest];
 }
 
+// Per-session model and effort for Claude and Codex launchers; Default leaves the command as it is.
+export const claudeModels = [['fable', 'Fable'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']]
+  .map(([key, label]) => ({ key, label }));
+export const claudeEfforts = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const codexHome = (agent, home) => agent?.run?.find(arg => arg.startsWith('CODEX_HOME='))?.slice(11) || `${home}/.codex`;
+
+// Codex lists its models, and each model's reasoning efforts, in models_cache.json.
+export function codexModels(source) {
+  let models;
+  try { models = JSON.parse(source)?.models; } catch { return []; }
+  return (Array.isArray(models) ? models : []).filter(model => model?.slug && model.visibility === 'list')
+    .map(model => ({ key: model.slug, label: model.display_name || model.slug,
+      efforts: (model.supported_reasoning_levels || []).map(level => level?.effort || level).filter(effort => typeof effort === 'string') }));
+}
+
+export function sessionArgv(agent, argv, { model, effort } = {}) {
+  if (!model && !effort) return argv;
+  const kind = isCodexLauncher(agent) ? 'codex' : isClaudeLauncher(agent) ? 'claude' : null;
+  if (!kind) return argv;
+  const executable = argv.findIndex(arg => !arg.includes('=') && permissionFlags[kind].executable.test(arg));
+  if (executable < 0) throw new Error(`Could not find ${permissionFlags[kind].name} in this launcher. Choose Default for model and effort.`);
+  const flags = kind === 'claude'
+    ? [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
+    : [...(model ? ['-m', model] : []), ...(effort ? ['-c', `model_reasoning_effort="${effort}"`] : [])];
+  return [...argv.slice(0, executable + 1), ...flags, ...argv.slice(executable + 1)];
+}
+
 export function launcherChoices(agents, order = []) {
   const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
     ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,

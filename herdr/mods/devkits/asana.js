@@ -1,7 +1,8 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex, InputState, Input, TextView, TextareaState, Textarea } from 'gpui-base';
-import { appHome, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
-import { folderKey } from './model.js';
+import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
+import { folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher } from './model.js';
+import { Select, SelectState } from './components/select.js';
 import { Button } from './components/button.js';
 import { DialogTitle, DialogDescription } from './components/dialog.js';
 import { DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel } from './components/dropdown-menu.js';
@@ -250,6 +251,8 @@ export default class AsanaPanel {
     this.search = InputState.new({ placeholder: 'Search tasks' });
     this.search.on('change', (_event, cx) => cx.notify());
     this.notes = new Map();
+    this.selects = { agent: new SelectState(cx), model: new SelectState(cx), effort: new SelectState(cx) };
+    this.codexModels = new Map();
     this.note = TextareaState.new({ placeholder: 'Add instructions for the agent (optional)' });
     this.note.set_auto_grow(2, 8);
     this.note.on('change', () => { if (this.selected) this.notes.set(this.selected, this.note.value()); });
@@ -593,7 +596,7 @@ export default class AsanaPanel {
   }
 
   // Linear's issue view: title, description and sub-issues, with properties as label and value rows.
-  preview(t, startMenu) {
+  preview(t, agents, start) {
     const task = this.detail;
     const saved = task && savedTasks(this.folder).some(item => item.gid === task.gid);
     const subtasks = task ? this.subtasks.get(task.gid) : null;
@@ -659,14 +662,66 @@ export default class AsanaPanel {
       .when(Boolean(task), el => el.child(v_flex().flex_none().p(12).gap(8).border_t(1).border_color(t.border).bg(t.chrome)
         .child(Textarea.new(this.note).id('asana-note').accessibility_label('Instructions for the agent')
           .w_full().px(10).py(8).rounded(0).border(1).border_color(t.input).bg(t.background).text_size(13))
-        .child(h_flex().gap(8).items_center()
-          .child(div().flex_1().min_w(0).text_size(11).text_color(t.muted)
-            .child('Added after the task, its description and latest comments.'))
-          .child(DropdownMenuTrigger(Button('asana-start', t).h(28).px(10).gap(6).accessibility_label('Start a session for this task'), 280,
-            (_cx, at) => startMenu({ ...task, note: this.notes.get(task.gid) || '' }, at), 'end').child(glyph('plus', 12)).child('Start session')))));
+        .child(this.launchRow(task, agents, start, t))));
   }
 
-  render(project, startMenu, close, cx) {
+  // Remembers the last agent, model and effort; a model or effort the chosen agent lacks falls back to Default.
+  session(agents) {
+    const saved = shared('devkits.asana-session') || {};
+    const agent = agents.find(agent => agent.key === saved.agent) || agents[0] || null;
+    const models = this.modelsFor(agent);
+    const model = models.find(item => item.key === saved.model) ? saved.model : null;
+    const efforts = this.effortsFor(agent, model);
+    return { agent, models, model, efforts, effort: efforts.includes(saved.effort) ? saved.effort : null };
+  }
+
+  modelsFor(agent) {
+    if (isClaudeLauncher(agent)) return claudeModels;
+    if (!isCodexLauncher(agent)) return [];
+    const dir = codexHome(agent, home());
+    if (!this.codexModels.has(dir)) {
+      this.codexModels.set(dir, []);
+      this.cx?.spawn(async cx => { this.codexModels.set(dir, codexModels(await readTextFile(`${dir}/models_cache.json`) || '')); cx.notify(); });
+    }
+    return this.codexModels.get(dir);
+  }
+
+  effortsFor(agent, model) {
+    if (isClaudeLauncher(agent)) return claudeEfforts;
+    if (!isCodexLauncher(agent)) return [];
+    const models = this.modelsFor(agent);
+    const levels = model ? models.find(item => item.key === model)?.efforts || [] : models.flatMap(item => item.efforts);
+    return [...new Set(levels)];
+  }
+
+  launchRow(task, agents, start, t) {
+    const current = this.session(agents);
+    const remember = change => setShared('devkits.asana-session', { ...(shared('devkits.asana-session') || {}), ...change });
+    const option = (key, label) => ({ key, label, color: key === 'default' ? t.muted : t.foreground });
+    // Model and effort start with Default, which keeps the launcher's own setting.
+    const pick = (id, name, label, value, options, onChange) => Select(id, this.selects[name], value || 'default',
+      [option('default', 'Default'), ...options], label, onChange, t);
+    return h_flex().gap(8).items_center().flex_wrap()
+      .when(agents.length > 0, el => el.child(Select('asana-agent', this.selects.agent, current.agent.key,
+        agents.map(agent => ({ key: agent.key, label: agent.name, color: t.foreground })), 'Agent',
+        key => remember({ agent: key, model: null, effort: null }), t)))
+      .when(current.models.length > 0, el => el.child(pick('asana-model', 'model', 'Model', current.model,
+        current.models.map(model => option(model.key, model.label)), key => remember({ model: key === 'default' ? null : key }))))
+      .when(current.efforts.length > 0, el => el.child(pick('asana-effort', 'effort', 'Effort', current.effort,
+        current.efforts.map(effort => option(effort, effort[0].toUpperCase() + effort.slice(1))), key => remember({ effort: key === 'default' ? null : key }))))
+      .child(div().flex_1())
+      .child(Button('asana-start', t).h(28).px(10).gap(6).disabled(!current.agent).accessibility_label('Start a session for this task')
+        .on_click(() => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, { model: current.model, effort: current.effort }); })
+        .child(glyph('plus', 12)).child('Start session'));
+  }
+
+  // `start(agent, task, { model, effort })` opens the session; `agents` are the visible Add session agents.
+  render(project, agents, start, close, cx) {
+    this.cx = cx;
+    try { return this.panel(project, agents, start, close, cx); } finally { this.cx = null; }
+  }
+
+  panel(project, agents, start, close, cx) {
     if (this.folder !== (project?.folder || null)) this.open(project, cx);
     this.sync(cx);
     const t = theme();
@@ -704,7 +759,7 @@ export default class AsanaPanel {
             .bg(this.resizing ? t.border : t.background).hover(el => el.bg(t.border))
             .accessibility_label('Resize preview')
             .on_mouse_down('left', (_event, cx) => { cx.stop_propagation(); this.width = this.previewWidth(); this.resizing = true; cx.notify(); }))
-          .child(this.preview(t, startMenu))));
+          .child(this.preview(t, agents, start))));
   }
 
   // The tasks and the preview split the space evenly until the divider is dragged; the dragged width is remembered.
