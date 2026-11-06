@@ -1,7 +1,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex, InputState, Input, TextView, TextareaState, Textarea } from 'gpui-base';
 import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
-import { folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions } from './model.js';
+import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions } from './model.js';
 import { Select, SelectState } from './components/select.js';
 import { Button } from './components/button.js';
 import { DialogTitle, DialogDescription } from './components/dialog.js';
@@ -671,11 +671,19 @@ export default class AsanaPanel {
     const agent = agents.find(agent => agent.key === saved.agent) || agents[0] || null;
     const models = this.modelsFor(agent);
     const model = models.find(item => item.key === saved.model) ? saved.model : null;
-    const efforts = this.effortsFor(agent, model);
+    const profile = this.profileFor(agent);
+    const efforts = this.effortsFor(agent, model || profile.model);
     return { agent, models, model, efforts, effort: efforts.includes(saved.effort) ? saved.effort : null };
   }
 
   // Only the models and efforts Manage leaves checked are offered.
+  profileFor(agent) {
+    const stored = shared('devkits.profile-sessions')?.[agent?.key] || {};
+    const hidden = shared('devkits.session-options')?.[sessionKind(agent)] || {};
+    return { model: hidden.models?.includes(stored.model) ? null : stored.model,
+      effort: hidden.efforts?.includes(stored.effort) ? null : stored.effort };
+  }
+
   modelsFor(agent) {
     const options = shared('devkits.session-options')?.[sessionKind(agent)];
     return shownOptions(orderedOptions(this.allModels(agent), options?.order), options?.models);
@@ -696,7 +704,7 @@ export default class AsanaPanel {
     const hidden = shared('devkits.session-options')?.[sessionKind(agent)]?.efforts;
     if (isClaudeLauncher(agent)) return shownOptions(claudeEfforts, hidden);
     if (!isCodexLauncher(agent)) return [];
-    const models = this.modelsFor(agent);
+    const models = model ? this.allModels(agent) : this.modelsFor(agent);
     const levels = model ? models.find(item => item.key === model)?.efforts || [] : models.flatMap(item => item.efforts);
     return shownOptions([...new Set(levels)], hidden);
   }
@@ -705,20 +713,27 @@ export default class AsanaPanel {
     const current = this.session(agents);
     const remember = change => setShared('devkits.asana-session', { ...(shared('devkits.asana-session') || {}), ...change });
     const option = (key, label) => ({ key, label, color: key === 'default' ? t.muted : t.foreground });
-    // Model and effort start with Default, which keeps the launcher's own setting.
+    // Default is the agent profile's own model and effort from Manage, named when it has one.
+    const profile = this.profileFor(current.agent);
+    const defaultEffort = this.effortsFor(current.agent, current.model || profile.model).includes(profile.effort) ? profile.effort : null;
+    const fallback = { model: profile.model && (this.allModels(current.agent).find(item => item.key === profile.model)?.label || profile.model),
+      effort: defaultEffort && effortLabel(defaultEffort) };
     const pick = (id, name, label, value, options, onChange) => Select(id, this.selects[name], value || 'default',
-      [option('default', 'Default'), ...options], label, onChange, t);
+      [option('default', fallback[name] ? `Default (${fallback[name]})` : 'Default'), ...options], label, onChange, t, { width: 168, prefix: label });
     return h_flex().gap(8).items_center().flex_wrap()
       .when(agents.length > 0, el => el.child(Select('asana-agent', this.selects.agent, current.agent.key,
         agents.map(agent => ({ key: agent.key, label: agent.name, color: t.foreground })), 'Agent',
-        key => remember({ agent: key, model: null, effort: null }), t)))
+        key => remember({ agent: key, model: null, effort: null }), t, { width: 200, prefix: 'Agent' })))
       .when(current.models.length > 0, el => el.child(pick('asana-model', 'model', 'Model', current.model,
         current.models.map(model => option(model.key, model.label)), key => remember({ model: key === 'default' ? null : key }))))
       .when(current.efforts.length > 0, el => el.child(pick('asana-effort', 'effort', 'Effort', current.effort,
-        current.efforts.map(effort => option(effort, effort[0].toUpperCase() + effort.slice(1))), key => remember({ effort: key === 'default' ? null : key }))))
+        current.efforts.map(effort => option(effort, effortLabel(effort))), key => remember({ effort: key === 'default' ? null : key }))))
       .child(div().flex_1())
       .child(Button('asana-start', t).h(28).px(10).gap(6).disabled(!current.agent).accessibility_label('Start a session for this task')
-        .on_click(() => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, { model: current.model, effort: current.effort }); })
+        .on_click(() => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, {
+          model: current.model || profile.model || null,
+          effort: current.effort || defaultEffort,
+        }); })
         .child(glyph('plus', 12)).child('Start session'));
   }
 

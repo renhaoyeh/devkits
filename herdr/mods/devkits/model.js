@@ -97,6 +97,16 @@ export function mergeModels(lists) {
 // Manage hides models and efforts by key, so ones Codex adds later still appear.
 export const shownOptions = (items, hidden = []) => items.filter(item => !hidden.includes(typeof item === 'string' ? item : item.key));
 
+export const effortLabel = effort => effort === 'xhigh' ? 'XHigh' : effort[0].toUpperCase() + effort.slice(1);
+
+// The models and efforts a provider offers after Manage's order and switches; efforts narrow to the chosen model's for Codex.
+export function sessionChoices(kind, codexList, settings = {}, model = null) {
+  const models = shownOptions(orderedOptions(kind === 'claude' ? claudeModels : codexList || [], settings.order), settings.models);
+  const levels = kind === 'claude' ? claudeEfforts
+    : [...new Set((model ? models.filter(item => item.key === model) : models).flatMap(item => item.efforts))];
+  return { models, efforts: shownOptions(levels, settings.efforts) };
+}
+
 // Models follow the order dragged in Manage; ones it has not seen keep their own order after them.
 export function orderedOptions(items, order = []) {
   const ranks = new Map(order.map((key, index) => [key, index]));
@@ -122,7 +132,22 @@ export function sessionArgv(agent, argv, { model, effort } = {}) {
   const flags = kind === 'claude'
     ? [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
     : [...(model ? ['-m', model] : []), ...(effort ? ['-c', `model_reasoning_effort="${effort}"`] : [])];
-  return [...argv.slice(0, executable + 1), ...flags, ...argv.slice(executable + 1)];
+  const rest = [];
+  const overridesConfig = value => (model && /^model\s*=/.test(value)) || (effort && /^model_reasoning_effort\s*=/.test(value));
+  for (let i = executable + 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--') { rest.push(...argv.slice(i)); break; }
+    if ((model && (arg === '--model' || (kind === 'codex' && arg === '-m'))) ||
+        (effort && kind === 'claude' && arg === '--effort')) { i++; continue; }
+    if ((model && (/^--model=/.test(arg) || (kind === 'codex' && /^-m.+/.test(arg)))) ||
+        (effort && kind === 'claude' && /^--effort=/.test(arg))) continue;
+    if (kind === 'codex') {
+      if ((arg === '-c' || arg === '--config') && overridesConfig(argv[i + 1] || '')) { i++; continue; }
+      if (/^(?:-c|--config=)/.test(arg) && overridesConfig(arg.replace(/^(?:--config=|-c=?)/, ''))) continue;
+    }
+    rest.push(arg);
+  }
+  return [...argv.slice(0, executable + 1), ...flags, ...rest];
 }
 
 export function launcherChoices(agents, order = []) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -78,13 +78,15 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
 }
 function fakeElements() {
-  const nodes = new Map();
+  const nodes = new Map(), owners = new WeakMap();
+  // Every string drawn inside an element, however deeply it is nested.
+  const textOf = id => { const walk = data => data.children.flatMap(child => typeof child === 'string' ? [child] : owners.has(child) ? walk(owners.get(child)) : []); return walk(nodes.get(id)); };
   const texts = [];
   const assets = [];
   const element = () => {
@@ -121,10 +123,11 @@ function fakeElements() {
       };
     } });
     data.element = el;
+    owners.set(el, data);
     return el;
   };
   const asset = path => { assets.push(path); return element(); };
-  return { nodes, texts, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
+  return { nodes, texts, textOf, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
     NativeSelect: { new: id => element().id(id) }, NativePopup: { new: (_id, trigger) => element().child(trigger) },
     NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) },
     NativeSwitch: { new: id => element().id(id) }, NativeToggleGroup: { new: id => element().id(id) }, NativeToggle: { new: id => element().id(id) } };
@@ -403,6 +406,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
     'devkits.hidden-launchers': ['agent:devkits-codex-work', 'agent:codex'],
     'devkits.launcher-order': ['terminal', 'agent:devkits-codex-work', 'agent:devkits-codex-personal'],
     'devkits.codex-permissions': { 'devkits-codex-work': 'workspace-write', 'devkits-codex-personal': 'read-only' },
+    'devkits.profile-sessions': { 'devkits-codex-work': { model: 'a', effort: 'high' }, 'devkits-codex-personal': { model: 'b' } },
   };
   let target = { view: 'manage-launchers', space: 'api', overlay: 'manage' }, release, pending;
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
@@ -430,6 +434,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:codex']);
   assert.deepEqual(memory['devkits.launcher-order'], ['terminal', 'agent:devkits-codex-personal']);
   assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-personal': 'read-only' });
+  assert.deepEqual(memory['devkits.profile-sessions'], { 'devkits-codex-personal': { model: 'b' } });
   assert.equal(overlays.at(-1).props.view, 'manage-launchers');
 });
 test('Manage saves Codex permissions per launcher and applies them to new tabs and projects only', async () => {
@@ -455,9 +460,9 @@ test('Manage saves Codex permissions per launcher and applies them to new tabs a
   ui.nodes.get('permissions-codex-option-read-only').click({}, cx); view.render(cx);
   assert.equal(view.permissionSelects.get('codex').open, false);
   assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only' });
-  assert.ok(ui.nodes.get('permissions-codex').children.includes('Read only'));
+  assert.ok(ui.textOf('permissions-codex').includes('Read only'));
   assert.equal(ui.nodes.get('permissions-codex').textColor, '#0000ff');
-  assert.ok(ui.nodes.get('permissions-devkits-codex-work').children.includes('Default'));
+  assert.ok(ui.textOf('permissions-devkits-codex-work').includes('Default'));
   ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
   assert.equal(view.permissionSelects.get('devkits-codex-work').open, true);
   ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
@@ -829,9 +834,8 @@ test('only the base Codex row offers Add account, including when Codex is hidden
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
-  const codexRow = ui.nodes.get('manage-agent:codex'), accountRow = ui.nodes.get('manage-agent:devkits-codex-work');
-  assert.ok(codexRow.children.includes(ui.nodes.get('add-codex-account').element));
-  assert.ok(!accountRow.children.includes(ui.nodes.get('add-codex-account').element));
+  assert.ok(ui.textOf('manage-agent:codex').includes('Add account'));
+  assert.ok(!ui.textOf('manage-agent:devkits-codex-work').includes('Add account'));
   ui.nodes.get('add-codex-account').click();
   assert.deepEqual(closed, ['manage-dialog']);
   assert.equal(overlays[0].props.view, 'account-login');
@@ -849,7 +853,7 @@ test('the base Claude row offers Add account and Claude accounts join Your accou
     closeOverlay() {}, openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
-  assert.ok(ui.nodes.get('manage-agent:claude').children.includes(ui.nodes.get('add-claude-account').element));
+  assert.ok(ui.textOf('manage-agent:claude').includes('Add account'));
   assert.ok(ui.nodes.has('manage-section-2'));
   assert.ok(ui.nodes.has('rename-devkits-claude-work')); assert.ok(ui.nodes.has('remove-devkits-claude-work'));
   assert.ok(ui.nodes.has('permissions-devkits-claude-work')); assert.ok(ui.nodes.has('permissions-claude'));
@@ -883,6 +887,54 @@ test('Manage chooses which Claude and Codex models and efforts the Asana compose
   assert.equal(view.modelDrag, null);
   ui.nodes.clear(); view.launchers = [{ key: 'aider', name: 'Aider', run: ['aider'] }]; view.render(renderContext);
   assert.ok(!ui.nodes.has('manage-section-session'));
+});
+test('each Claude or Codex profile sets its default model and effort, which new sessions use unless one is chosen', async () => {
+  const ui = fakeElements(), memory = {}, commands = [];
+  let target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, closeOverlay() {}, openOverlay() {},
+    run: (...args) => commands.push(args), notify: error => assert.fail(error.body) });
+  const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude', run: ['claude'] }, { key: 'aider', name: 'Aider', run: ['aider'] }];
+  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  assert.ok(ui.nodes.has('profile-settings-claude'));
+  assert.ok(!ui.nodes.has('profile-settings-aider'));
+  ui.nodes.get('profile-model-claude-select').openChange(true, renderContext); view.render(renderContext);
+  ui.nodes.get('profile-model-claude-option-opus').click({}, renderContext);
+  ui.nodes.get('profile-effort-claude-select').openChange(true, renderContext); view.render(renderContext);
+  ui.nodes.get('profile-effort-claude-option-high').click({}, renderContext);
+  assert.deepEqual(memory['devkits.profile-sessions'], { claude: { model: 'opus', effort: 'high' } });
+  const claude = view.launchers[0], space = { space: 'api', folder: '/Code/api' };
+  view.startThread(claude, space);
+  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'opus', '--effort', 'high']);
+  view.startThread(claude, space, { model: 'sonnet' });
+  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', '--effort', 'high']);
+  view.startThread(claude, space, { model: 'sonnet', effort: null });
+  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet']);
+  const codex = { key: 'devkits-codex-work', name: 'Codex · work', run: ['env', 'CODEX_HOME=/work', 'codex'] };
+  view.launchers = [codex]; view.preparePermissionSelects(renderContext);
+  view.codexModelsByHome = new Map([['/work', [{ key: 'a', label: 'A', efforts: ['high'] }, { key: 'b', label: 'B', efforts: ['low'] }]]]);
+  view.codexModelList = view.codexModelsByHome.get('/work');
+  memory['devkits.profile-sessions'][codex.key] = { model: 'a', effort: 'high' };
+  memory['devkits.session-options'] = { codex: { models: ['a'] } };
+  view.render(renderContext);
+  assert.ok(ui.textOf(`profile-model-${codex.key}`).includes('Default'));
+  assert.ok(!ui.nodes.has(`profile-model-${codex.key}-option-a`));
+  ui.nodes.get(`profile-model-${codex.key}-select`).openChange(true, renderContext); view.render(renderContext);
+  ui.nodes.get(`profile-model-${codex.key}-option-b`).click({}, renderContext);
+  assert.deepEqual(memory['devkits.profile-sessions'][codex.key], { model: 'b', effort: null });
+  view.startThread(codex, space);
+  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CODEX_HOME=/work', 'codex', '-m', 'b']);
+  view.render(renderContext);
+  ui.nodes.get('session-codex-models-b').change(false, renderContext);
+  assert.equal(memory['devkits.profile-sessions'][codex.key].model, null);
+  view.startThread(codex, space);
+  assert.deepEqual(commands.at(-1)[1].argv, codex.run);
+  memory['devkits.profile-sessions'].claude = { model: 'opus', effort: 'high' };
+  view.launchers.push(claude); view.preparePermissionSelects(renderContext); view.render(renderContext);
+  ui.nodes.get('session-claude-efforts-high').change(false, renderContext);
+  assert.deepEqual(memory['devkits.profile-sessions'].claude, { model: 'opus', effort: null });
+  view.startThread(claude, space);
+  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'opus']);
 });
 test('local account profiles and their login action stay out of remote project menus', async () => {
   const ui = fakeElements(); let pending;
