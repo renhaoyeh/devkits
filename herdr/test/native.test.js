@@ -680,7 +680,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.ok(ui.nodes.has('usage-meter-agent:work'));
   assert.ok(!ui.nodes.has('usage-terminal'));
   assert.ok(!ui.nodes.has('usage-agent:codex'));
-  assert.ok(ui.texts.includes('AGENT PROFILES'));
+  assert.ok(ui.texts.includes('USAGE'));
   ui.nodes.get('manage-agent-profiles').click();
   assert.deepEqual(overlays.at(-1).props, { view: 'manage-launchers', space: 'api' });
   assert.equal(overlays.at(-1).width, 680);
