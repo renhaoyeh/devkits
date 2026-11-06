@@ -17,6 +17,7 @@ export const codexPermissionModes = [
     args: ['--sandbox', 'danger-full-access', '--ask-for-approval', 'never'] },
 ];
 
+export const isAccountLauncher = agent => /^devkits-(?:codex|claude)-/.test(agent?.key || '');
 export const isCodexLauncher = agent => agent?.key === 'codex' || Boolean(agent?.key?.startsWith('devkits-codex-'));
 
 export function launcherArgv(agent, permission) {
@@ -39,7 +40,7 @@ export function launcherArgv(agent, permission) {
 export function launcherChoices(agents, order = []) {
   const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
     ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,
-      group: agent.key.startsWith('devkits-codex-') ? 2 : 1 }))];
+      group: isAccountLauncher(agent) ? 2 : 1 }))];
   const ranks = new Map(order.map((key, index) => [key, index]));
   return choices.sort((a, b) => a.group - b.group || (ranks.get(a.key) ?? order.length) - (ranks.get(b.key) ?? order.length));
 }

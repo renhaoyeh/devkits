@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isCodexLauncher, launcherArgv, quotaResetLabel } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, isCodexLauncher, launcherArgv, quotaResetLabel } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, codexPermissionModes, isCodexLauncher, launcherArgv, quotaResetLabel, readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, isCodexLauncher, launcherArgv, quotaResetLabel, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -383,7 +383,7 @@ test('profile rename blocks duplicate saves, refreshes labels, and returns to Ma
     props: () => ({ view: 'rename-account', overlay: 'rename', space: 'project', account: { key: 'devkits-codex-work', name: 'Codex · Work' } }),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     closeOverlay() {}, openOverlay: value => overlays.push(value),
-    renameCodexAccount: async (key, name) => {
+    renameAccountProfile: async (key, name) => {
       calls++; assert.equal(key, 'devkits-codex-work'); assert.equal(name, '工作');
       await new Promise(done => { resolve = done; });
     } });
@@ -407,7 +407,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     openOverlay: value => overlays.push(value), closeOverlay: id => closed.push(id),
-    removeCodexAccount: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
+    removeAccountProfile: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
   const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
   view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
@@ -505,7 +505,7 @@ test('failed account removal stays in the confirmation dialog and preserves pref
   const View = await viewFor({ ...ui, props: () => ({ view: 'remove-account', account: { key: 'devkits-codex-work', name: 'Work' } }),
     theme: () => ({}), setShared: () => assert.fail('must not clean preferences'),
     closeOverlay: () => assert.fail('must not close'),
-    removeCodexAccount: async () => { throw Error('Could not sign out'); } });
+    removeAccountProfile: async () => { throw Error('Could not sign out'); } });
   const view = new View(); view.render();
   const cx = { notify() {}, spawn(fn) { pending = fn(cx); } };
   ui.nodes.get('confirm-remove-account').click({}, cx); await pending; view.render();
@@ -756,11 +756,27 @@ test('only the base Codex row offers Add account, including when Codex is hidden
   assert.ok(!accountRow.children.includes(ui.nodes.get('add-codex-account').element));
   ui.nodes.get('add-codex-account').click();
   assert.deepEqual(closed, ['manage-dialog']);
-  assert.equal(overlays[0].props.view, 'codex-login');
+  assert.equal(overlays[0].props.view, 'account-login');
+  assert.equal(overlays[0].props.provider, 'codex');
   assert.equal(overlays[0].modal, true);
   assert.deepEqual(overlays[0].props.returnTo, { view: 'manage-launchers', space: 'api' });
   ui.nodes.clear(); view.launcher({});
   assert.ok(!ui.nodes.has('add-codex-account'));
+});
+test('the base Claude row offers Add account and Claude accounts join Your accounts without Codex permissions', async () => {
+  const ui = fakeElements(), overlays = [];
+  const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
+    closeOverlay() {}, openOverlay: value => overlays.push(value) });
+  const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
+  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  assert.ok(ui.nodes.get('manage-agent:claude').children.includes(ui.nodes.get('add-claude-account').element));
+  assert.ok(ui.nodes.has('manage-section-2'));
+  assert.ok(ui.nodes.has('rename-devkits-claude-work')); assert.ok(ui.nodes.has('remove-devkits-claude-work'));
+  assert.ok(!ui.nodes.has('permissions-devkits-claude-work')); assert.ok(!ui.nodes.has('permissions-claude'));
+  ui.nodes.get('add-claude-account').click();
+  assert.equal(overlays[0].props.view, 'account-login');
+  assert.equal(overlays[0].props.provider, 'claude');
 });
 test('local account profiles and their login action stay out of remote project menus', async () => {
   const ui = fakeElements(); let pending;
