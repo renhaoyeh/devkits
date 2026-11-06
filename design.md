@@ -2,7 +2,7 @@
 
 - Use Project consistently for the folder-backed session container in user-facing navigation, menus, dialogs, and status text.
 
-- Prefer a thread's explicit task name or live agent title over launcher/account labels. Use the account label only as a fallback when there is no thread title.
+- Prefer a thread's explicit task name or live agent title over launcher/account labels. Use the account label only as a fallback when there is no thread title. Drop the repository Codex appends to its terminal title ("Task | repo") so Codex and Claude titles match.
 - Do not show hover tooltips anywhere in the custom interface or shortcut hints beside Add session entries. Keep keyboard shortcuts and accessibility labels.
 
 - Within each project's thread list, show threads with working agents first, preserving the original tab order within each group. Recompute from live status so finished threads return to their original order.
@@ -13,7 +13,7 @@
 - Use a consistent **shadcn/ui Sera visual language across the entire interface**, including menus, dialogs, sidebars, headers, and empty states. Styling a few controls is not enough.
 - Follow Sera’s editorial geometry: square corners throughout controls, menus, dialogs, meters, and terminal panes; thin borders and no decorative shadows. Retain Neutral colors and semantic theme tokens. Use Georgia serif for dialog, empty-state, and brand headings, with Geist sans-serif body text. Use small uppercase menu section labels; preserve account and project display names. Use bottom borders for outlined actions, selects, project pickers, and text inputs. Keep hover, focus, and selection states consistent. Native GPUI does not expose letter spacing, so use uppercase labels without simulated spacing.
 - Prefer compact layouts, aligned edges, and clear visual hierarchy. Avoid redundant labels when an icon or nearby context already conveys the information.
-- Let the terminal fill the central workspace without outer padding or a pane frame. Keep a compact 32px title row showing the current thread title, program icon, and status, without split, zoom, or close controls. Align it with the sidebar's 32px project header. Keep only the terminal's text padding.
+- Let the terminal fill the central workspace without outer padding or a pane frame. Keep a compact 32px title row showing the current thread title, program icon, the muted agent profile that started it (omitted when it repeats the title), and status, without split, zoom, or close controls. Align it with the sidebar's 32px project header. Keep only the terminal's text padding.
 - Make thread hover and selection backgrounds span the sidebar width, with no horizontal row margins. Use a consistent 12px content inset for project headers and thread rows, without extra top padding or gaps between rows.
 - Separate adjacent project groups with a full-width 1px line using the border theme token, without an extra gap or a line above the first group.
 - Reorder projects in Threads through Move up and Move down in each project's menu, disabling moves at the list boundaries. Save changes immediately and preserve project selection, thread order, and header click-to-collapse behavior. Keep reorder handles out of project headers.

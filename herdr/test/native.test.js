@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -851,6 +851,30 @@ test('pane header uses the sidebar thread title without split, zoom, or close co
   assert.ok(!ui.texts.includes('Codex'));
   for (const name of ['split-right', 'split-down', 'zoom', 'close']) assert.ok(!ui.nodes.has(`${name}-pane-1`));
 });
+test('pane header names the agent profile that started the thread', async () => {
+  const ui = fakeElements();
+  const launchers = [{ key: 'devkits-claude-work', name: 'Claude · Work' }];
+  const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }), spaces: () => projects, agents: () => agents,
+    shared: key => ({ 'devkits.agent-cache': { null: launchers }, 'devkits.thread-profiles': { 'tab-1': 'devkits-claude-work' } })[key],
+    panes: () => [{ pane: 'pane-1', tab: 'tab-1', program: { name: 'Codex' } }] });
+  new View().paneHeader({});
+  assert.ok(ui.texts.includes('Review tests'));
+  assert.ok(ui.texts.includes('Claude · Work'));
+});
+test('started sessions remember their profile once the new tab appears', () => {
+  const pending = [{ key: 'codex', space: 'app', before: ['tab-1', 'tab-3'], at: 1000 },
+    { key: 'claude', space: null, folder: '/Code/new/', before: [], at: 1000 },
+    { key: 'pi', space: 'missing', before: [], at: 1000 }];
+  const spaces = [...projects.map(space => space.id === 'app' ? { ...space, tabs: [...space.tabs, { id: 'tab-9' }] } : space),
+    { id: 'new', folder: '/Code/new', tabs: [{ id: 'tab-new' }] }];
+  assert.deepEqual(resolveThreadProfiles(spaces, pending, {}, 2000),
+    { pending: [pending[2]], profiles: { 'tab-9': 'codex', 'tab-new': 'claude' } });
+  assert.deepEqual(resolveThreadProfiles(spaces, [pending[2]], {}, 70000).pending, []);
+  const launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
+  assert.equal(threadProfile({ id: 'a', name: 'Fix login', named: true }, launchers, { a: 'devkits-codex-work' }), 'Codex · work');
+  assert.equal(threadProfile({ id: 'b', name: 'Codex · work', named: true }, launchers), 'Codex · work');
+  assert.equal(threadProfile({ id: 'c', name: 'Fix login', named: true }, launchers), null);
+});
 test('New thread targets the chosen project and its saved root, not the current directory', async () => {
   const overlays = [];
   const View = await viewFor({ spaces: () => projects, shared: key => key === 'devkits.project-roots' ? { app: '/original/app' } : undefined, openOverlay: value => overlays.push(value) });
@@ -1063,6 +1087,8 @@ test('sidebar thread names omit redundant agent labels while preserving tasks an
   assert.equal(threadTitle({ name: '123', named: true }, codex), '123');
   assert.equal(threadTitle({ name: '1' }), 'Terminal');
   assert.equal(threadTitle({ name: 'Codex', named: true }), 'Codex');
+  assert.equal(threadTitle({ name: 'Codex · rickyeh', named: true },
+    { ...codex, app: 'codex', title: '⠙ 串接 rl-vs-mcp | reallusion-mcp' }), '串接 rl-vs-mcp');
   const claude = { title: '✳ Claude Code', app: 'claude-code', program: { name: 'Claude Code' } };
   assert.equal(threadTitle({ name: 'Claude · PPDShare', named: true }, claude), 'PPDShare');
   assert.equal(threadTitle({ name: 'Claude · PPDShare', named: true },

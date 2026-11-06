@@ -70,9 +70,12 @@ export function threadTitle(tab, agent, space) {
   const providers = agent ? ['Codex', 'Claude', agent.program?.name, agent.app].filter(Boolean) : [];
   const folders = [agent?.space_name, space?.name, space?.folder,
     space?.folder?.split(/[\\/]/).filter(Boolean).at(-1)].filter(Boolean);
+  // Codex appends its repository to the terminal title ("Task | repo"); the project is already shown.
+  const codex = agent?.app === 'codex' || isCodexLauncher(agent?.program);
   let fallback;
   for (const value of [tab.named ? tab.name : '', agent?.title, agent?.tab_name, tab.name]) {
     let title = (value || '').replace(/^[\u2800-\u28ff✳✻✽✶✢✦✴✹✺]\s*/u, '').trim();
+    if (codex && value === agent.title) title = title.replace(/\s+\|\s+[^|]+$/, '');
     if (!title || (/^\d+$/.test(title) && !(tab.named && value === tab.name))) continue;
     for (const provider of providers) {
       if (title.toLowerCase() === provider.toLowerCase()) { title = ''; break; }
@@ -85,6 +88,25 @@ export function threadTitle(tab, agent, space) {
     if (title) return title;
   }
   return fallback || (agent ? 'New thread' : 'Terminal');
+}
+
+// A started session is the first tab that appears in its project afterwards; remember which profile ran it.
+export function resolveThreadProfiles(spaces, pending = [], profiles = {}, now = Date.now()) {
+  const next = { ...profiles };
+  const waiting = pending.filter(entry => {
+    const space = spaces.find(space => entry.space ? space.id === entry.space
+      : !space.machine && folderKey(space.folder) === folderKey(entry.folder));
+    const tab = space?.tabs.find(tab => !entry.before.includes(tab.id) && !next[tab.id]);
+    if (tab) next[tab.id] = entry.key;
+    return !tab && now - entry.at < 60000;
+  });
+  return { pending: waiting, profiles: Object.fromEntries(Object.entries(next).slice(-200)) };
+}
+
+// Threads started before profiles were recorded are still named after their launcher.
+export function threadProfile(tab, launchers = [], profiles = {}) {
+  return (launchers.find(agent => agent.key === profiles[tab.id])
+    || (tab.named ? launchers.find(agent => agent.name === tab.name) : null))?.name || null;
 }
 
 // shortcut: compare path spellings; resolve aliases if symlinked project roots need deduplication.
