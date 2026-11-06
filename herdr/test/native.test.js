@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -561,6 +561,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.deepEqual([...ui.nodes.keys()].filter(key => key.startsWith('usage-agent:')), ['usage-agent:pi', 'usage-agent:codex']);
   ui.nodes.get('usage-agent:codex').click();
   assert.equal(overlays[0].props.view, 'usage-details');
+  assert.equal(overlays[0].height, 480);
   assert.equal(overlays[0].modal, false);
   assert.equal(overlays[0].props.account.windows.length, 2);
   assert.equal(overlays[0].props.account.fetchedAt, 5678);
@@ -587,6 +588,56 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.equal(overlays.at(-1).width, 680);
   assert.equal(overlays.at(-1).height, 0.8);
 });
+test('quota time progress uses each actual window and hides missing, inconsistent or expired resets', () => {
+  const now = Date.UTC(2026, 10, 6);
+  for (const minutes of [300, 10080, 60]) {
+    const window = { minutes, resetsAt: now / 1000 + minutes * 60 };
+    assert.equal(quotaElapsedPercent(window, now), 0);
+    assert.equal(quotaElapsedPercent(window, now + minutes * 30000), 50);
+    assert.equal(quotaElapsedPercent(window, now + minutes * 60000), null);
+    assert.equal(quotaElapsedPercent(window, now - 1000), null);
+  }
+  for (const window of [{}, { minutes: null, resetsAt: now / 1000 + 60 },
+    { minutes: 0, resetsAt: now / 1000 + 60 }, { minutes: 300 },
+    { minutes: 300, resetsAt: 0 }, { minutes: 300, resetsAt: NaN },
+    { minutes: 300, resetsAt: now / 1000 - 60 }]) {
+    assert.equal(quotaElapsedPercent(window, now), null);
+  }
+});
+
+test('sidebar and details compare quota usage with the same elapsed background and remove stale time progress', async () => {
+  const ui = fakeElements(), now = Date.UTC(2026, 10, 6);
+  const colors = { border: '#111111', muted: '#999999', foreground: '#ffffff', working: '#008800' };
+  const window = { bucket: 'codex', name: 'codex', minutes: 300, usedPercent: 60, resetsAt: now / 1000 + 150 * 60 };
+  const account = { key: 'codex', name: 'Codex', supported: true, windows: [window] };
+  let time = now;
+  const View = await viewFor({ ...ui, props: () => ({ account }), spaces: () => projects,
+    quotaElapsedPercent: window => quotaElapsedPercent(window, time) });
+  const view = new View(); view.usageMachine = null;
+  view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] }]; view.usage = [account];
+  const ids = ['usage-meter-agent:codex-300', 'usage-detail-meter-0'];
+  const render = () => { ui.nodes.clear(); view.accountUsage(colors); view.usageDetails(colors); };
+  render();
+  for (const id of ids) {
+    assert.equal(ui.nodes.get(id).height, 10);
+    assert.equal(ui.nodes.get(`${id}-elapsed`).width, '50%');
+    assert.equal(ui.nodes.get(`${id}-elapsed`).background, colors.muted);
+    assert.equal(ui.nodes.get(`${id}-elapsed`).height, '50%');
+    assert.equal(ui.nodes.get(`${id}-fill`).width, '60%');
+    assert.equal(ui.nodes.get(`${id}-fill`).height, '50%');
+    assert.ok(ui.nodes.has(`${id}-time-marker`));
+  }
+  assert.ok(ui.texts.includes('Top: 50% of window elapsed · Bottom: quota used'));
+  time += 75 * 60000; render();
+  for (const id of ids) assert.equal(ui.nodes.get(`${id}-elapsed`).width, '75%');
+  time += 75 * 60000; render();
+  for (const id of ids) {
+    assert.ok(!ui.nodes.has(`${id}-elapsed`));
+    assert.ok(!ui.nodes.has(`${id}-time-marker`));
+    assert.equal(ui.nodes.get(`${id}-fill`).width, '60%');
+  }
+});
+
 test('usage meters use the percentage for fill and color at both warning thresholds in sidebar and details', async () => {
   const ui = fakeElements(), colors = { border: '#111111', working: '#008800', blocked: '#aa8800', ansi1: '#cc0000' };
   const account = { key: 'codex', name: 'Codex', supported: true, windows: [] };

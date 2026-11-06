@@ -1,3 +1,12 @@
+export function quotaElapsedPercent(window, now = Date.now()) {
+  const duration = window.minutes * 60000;
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(window.resetsAt) || window.resetsAt <= 0) return null;
+  const remaining = window.resetsAt * 1000 - now;
+  // An expired or inconsistent reset belongs to stale data, not a new window.
+  if (!Number.isFinite(remaining) || remaining <= 0 || remaining > duration) return null;
+  return (1 - remaining / duration) * 100;
+}
+
 export function quotaResetLabel(window, now = Date.now()) {
   if (!Number.isFinite(window.resetsAt) || window.resetsAt <= 0) return 'Reset time unavailable';
   const minutes = Math.ceil((window.resetsAt * 1000 - now) / 60000);
