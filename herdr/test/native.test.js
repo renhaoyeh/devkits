@@ -530,13 +530,15 @@ test('usage follows Add session visibility and order, shows actual quota windows
     window: () => ({}), layout: () => ({ children: [] }),
     quotaResetLabel: window => quotaResetLabel(window, now) });
   const view = new View(); view.usageMachine = null;
+  view.header({});
+  assert.ok(!ui.nodes.has('account-usage'));
   view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] },
     { key: 'work', name: 'Codex · 工作', run: ['codex'] },
     { key: 'claude', name: 'Claude Code', run: ['claude'] }];
   view.usage = [{ key: 'codex', name: 'Codex', windows: [
     { bucket: 'codex', minutes: 300, usedPercent: 0, resetsAt: now / 1000 + 83 * 60 },
     { bucket: 'codex', minutes: 10080, usedPercent: 42 }], fetchedAt: 5678 }];
-  view.header({});
+  view.accountUsage({});
   assert.ok(ui.nodes.has('usage-meter-agent:codex-300'));
   assert.ok(ui.nodes.has('usage-meter-agent:codex-10080'));
   assert.equal(ui.nodes.get('usage-meter-agent:codex-300-fill').width, '0%');
@@ -560,7 +562,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.equal(overlays[0].props.account.windows.length, 2);
   assert.equal(overlays[0].props.account.fetchedAt, 5678);
   view.usage[0].windows = view.usage[0].windows.filter(window => window.minutes !== 300);
-  ui.nodes.clear(); ui.texts.length = 0; view.header({});
+  ui.nodes.clear(); ui.texts.length = 0; view.accountUsage({});
   assert.ok(ui.nodes.has('usage-meter-agent:codex-10080'));
   assert.ok(!ui.nodes.has('usage-meter-agent:codex-300'));
   assert.ok(!ui.nodes.has('usage-reset-agent:codex-300'));
@@ -571,13 +573,18 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.equal(overlays[1].props.account.supported, false);
   assert.ok(!ui.nodes.has('usage-settings'));
   memory['devkits.hidden-launchers'] = ['agent:codex'];
-  ui.nodes.clear(); view.header({});
+  ui.nodes.clear(); view.accountUsage({});
   assert.ok(ui.nodes.has('usage-agent:work'));
   assert.ok(ui.nodes.has('usage-meter-agent:work'));
   assert.ok(ui.nodes.has('usage-terminal'));
   assert.ok(!ui.nodes.has('usage-agent:codex'));
+  assert.ok(ui.texts.includes('AGENT PROFILES'));
+  ui.nodes.get('manage-agent-profiles').click();
+  assert.deepEqual(overlays.at(-1).props, { view: 'manage-launchers', space: 'api' });
+  assert.equal(overlays.at(-1).width, 680);
+  assert.equal(overlays.at(-1).height, 0.8);
 });
-test('usage meters use the percentage for fill and color at both warning thresholds in header and details', async () => {
+test('usage meters use the percentage for fill and color at both warning thresholds in sidebar and details', async () => {
   const ui = fakeElements(), colors = { border: '#111111', working: '#008800', blocked: '#aa8800', ansi1: '#cc0000' };
   const account = { key: 'codex', name: 'Codex', supported: true, windows: [] };
   const View = await viewFor({ ...ui, props: () => ({ account }), spaces: () => projects,
@@ -587,7 +594,7 @@ test('usage meters use the percentage for fill and color at both warning thresho
   for (const [value, color] of [[0, colors.working], [69, colors.working], [70, colors.blocked],
     [89, colors.blocked], [90, colors.ansi1], [100, colors.ansi1]]) {
     account.windows = [{ bucket: 'codex', name: 'codex', minutes: 10080, usedPercent: value }];
-    view.header(colors); view.usageDetails(colors);
+    view.accountUsage(colors); view.usageDetails(colors);
     for (const id of ['usage-meter-agent:codex-10080', 'usage-detail-meter-0']) {
       assert.equal(ui.nodes.get(id).value, value);
       assert.equal(ui.nodes.get(`${id}-fill`).width, `${value}%`);
