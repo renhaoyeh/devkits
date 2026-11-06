@@ -788,7 +788,11 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
   const count = calls.length;
   view.refreshUsage(cx); await pending;
   assert.deepEqual(calls.slice(count), [['claude', 'devkits-claude-me']]);
-  assert.equal(view.usageLoading, false);
+  assert.equal(view.usageLoading, false);  // Manual refresh rediscovers profiles and bypasses fresh cached results.
+  const found = discovered;
+  view.refreshUsage(cx, true, true); await pending;
+  assert.equal(discovered, found + 1);
+  assert.deepEqual(calls.at(-1), ['codex', 'work', 'claude', 'devkits-claude-me']);
 });
 test('remote usage never queries local credentials or shows local account entries', async () => {
   let pending;
