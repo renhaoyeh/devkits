@@ -523,17 +523,19 @@ test('header anchors the project picker below its actual trigger', async () => {
 });
 test('usage follows Add session visibility and order, shows actual quota windows, always has meters, and opens details', async () => {
   const ui = fakeElements(), overlays = [];
+  const now = Date.UTC(2026, 0, 1);
   const memory = { 'devkits.hidden-launchers': ['terminal', 'agent:work'],
     'devkits.launcher-order': ['agent:claude', 'agent:codex'] };
   const View = await viewFor({ ...ui, spaces: () => projects, shared: key => memory[key],
     openOverlay: overlay => overlays.push(overlay), settings: () => ({ zoom: 1 }),
-    window: () => ({}), layout: () => ({ children: [] }) });
+    window: () => ({}), layout: () => ({ children: [] }),
+    quotaResetLabel: window => quotaResetLabel(window, now) });
   const view = new View(); view.usageMachine = null;
   view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] },
     { key: 'work', name: 'Codex · 工作', run: ['codex'] },
     { key: 'claude', name: 'Claude Code', run: ['claude'] }];
   view.usage = [{ key: 'codex', name: 'Codex', windows: [
-    { bucket: 'codex', minutes: 300, usedPercent: 0, resetsAt: Date.now() / 1000 + 83 * 60 },
+    { bucket: 'codex', minutes: 300, usedPercent: 0, resetsAt: now / 1000 + 83 * 60 },
     { bucket: 'codex', minutes: 10080, usedPercent: 42 }], fetchedAt: 5678 }];
   view.header({});
   assert.ok(ui.nodes.has('usage-meter-agent:codex-300'));
@@ -545,7 +547,7 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.equal(ui.nodes.get('usage-agent:codex').tooltip, undefined);
   assert.equal(ui.nodes.get('usage-reset-agent:codex-300').tooltip, undefined);
   assert.equal(ui.nodes.get('usage-reset-agent:codex-10080').tooltip, undefined);
-  assert.ok(ui.texts.includes('1h 23m'));
+  assert.ok(ui.texts.includes('01h 23m'));
   assert.ok(ui.texts.includes('Week'));
   assert.ok(ui.nodes.has('usage-meter-agent:claude'));
   assert.ok(!ui.nodes.has('usage-agent:work'));
