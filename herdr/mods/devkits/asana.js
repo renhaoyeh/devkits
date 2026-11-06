@@ -724,6 +724,12 @@ export default class AsanaPanel {
   panel(project, agents, start, close, cx) {
     if (this.folder !== (project?.folder || null)) this.open(project, cx);
     this.sync(cx);
+    // A thread's Asana link asks for its task; the preview shows it once the token is known.
+    const focus = shared('devkits.asana-focus');
+    if (focus && this.needsToken === false && folderKey(focus.folder) === folderKey(this.folder)) {
+      setShared('devkits.asana-focus', null);
+      if (this.selected !== focus.gid) this.show({ gid: focus.gid }, cx);
+    }
     const t = theme();
     const ready = this.needsToken === false, bound = Boolean(binding(this.folder));
     const rows = ready && bound ? this.rows() : [];

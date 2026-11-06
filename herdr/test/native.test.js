@@ -912,6 +912,18 @@ test('pane header uses the sidebar thread title without split, zoom, or close co
   assert.ok(!ui.texts.includes('Codex'));
   for (const name of ['split-right', 'split-down', 'zoom', 'close']) assert.ok(!ui.nodes.has(`${name}-pane-1`));
 });
+test('a thread started from an Asana task links back to it from the pane header', async () => {
+  const ui = fakeElements(), commands = [], memory = { 'devkits.thread-tasks': { 'tab-1': { gid: 't1', name: 'Fix login', folder: '/Code/app' } } };
+  const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }), spaces: () => projects, agents: () => agents,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args),
+    panes: () => [{ pane: 'pane-1', tab: 'tab-1', program: { name: 'Codex' } }, { pane: 'pane-2', tab: 'tab-3', program: { name: 'Codex' } }] });
+  new View().paneHeader({});
+  ui.nodes.get('asana-link-tab-1').click({}, { stop_propagation() {} });
+  assert.equal(memory['devkits.asana'], 'app');
+  assert.deepEqual(memory['devkits.asana-focus'], { folder: '/Code/app', gid: 't1' });
+  assert.ok(commands.some(([name, args]) => name === 'space.select' && args.id === 'app'));
+  assert.ok(!ui.nodes.has('asana-link-tab-3'));
+});
 test('pane header names the agent profile that started the thread', async () => {
   const ui = fakeElements();
   const launchers = [{ key: 'devkits-claude-work', name: 'Claude · Work' }];
@@ -929,7 +941,9 @@ test('started sessions remember their profile once the new tab appears', () => {
   const spaces = [...projects.map(space => space.id === 'app' ? { ...space, tabs: [...space.tabs, { id: 'tab-9' }] } : space),
     { id: 'new', folder: '/Code/new', tabs: [{ id: 'tab-new' }] }];
   assert.deepEqual(resolveThreadProfiles(spaces, pending, {}, 2000),
-    { pending: [pending[2]], profiles: { 'tab-9': 'codex', 'tab-new': 'claude' } });
+    { pending: [pending[2]], profiles: { 'tab-9': 'codex', 'tab-new': 'claude' }, tasks: {} });
+  const task = { gid: 't1', name: 'Fix login', folder: '/Code/app' };
+  assert.deepEqual(resolveThreadProfiles(spaces, [{ ...pending[0], task }], {}, 2000, { old: task }).tasks, { old: task, 'tab-9': task });
   assert.deepEqual(resolveThreadProfiles(spaces, [pending[2]], {}, 70000).pending, []);
   const launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
   assert.equal(threadProfile({ id: 'a', name: 'Fix login', named: true }, launchers, { a: 'devkits-codex-work' }), 'Codex · work');
