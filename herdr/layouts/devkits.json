@@ -30,7 +30,8 @@
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
         { "id": "main", "type": "block",
           "content": { "tab": "active", "pane": {
-            "gap": 0, "radius": 0, "background": "background", "lone": false
+            "gap": 0, "radius": 0, "background": "background", "lone": true,
+            "header": { "content": { "mod": "devkits", "props": { "view": "pane" } }, "height": 32, "position": "top", "reveal": "always" }
           } } }
         ] },
         { "id": "status", "type": "block", "size": { "px": 32 }, "content": { "mod": "devkits", "props": { "view": "status" } } }

@@ -139,18 +139,17 @@ test('closing an empty project only removes its saved folder', async () => {
 });
 test('button input stays inside its action instead of reaching a parent row or dialog', async () => {
   const ui = fakeElements(), commands = [];
-  const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
-    panes: () => [{ pane: 'pane-1' }], run: (...args) => commands.push(args) });
-  new View().paneHeader({});
-  const button = ui.nodes.get('close-pane-1');
+  const View = await viewFor({ ...ui, run: (...args) => commands.push(args) });
+  new View().threadRow({ tab: { id: 'tab-1' }, agents: [], title: 'Task' }, {});
+  const button = ui.nodes.get('close-thread-tab-1');
   let stopped = 0;
   const cx = { stop_propagation() { stopped++; } };
   button.mouseDown({}, cx);
   for (const key of ['enter', 'space', 'escape']) button.keyDown({ key }, cx);
   assert.equal(stopped, 3);
   assert.deepEqual(commands, []);
-  button.click();
-  assert.deepEqual(commands, [['pane.close', { pane: 'pane-1' }]]);
+  button.click({}, cx);
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-1' }]]);
 });
 test('closing a live workspace requires confirmation; cancel leaves all sessions and saved projects intact', async () => {
   const ui = fakeElements(), commands = [], overlays = [], closed = [];
@@ -774,15 +773,16 @@ test('project dropdown switches projects and creates a default terminal for a ne
     ['space.new', { name: 'new project', folder: '/Code/new project', machine: '', tab: '__devkits_default_terminal__' }]);
   assert.ok(!commands.some(([name]) => name === 'tab.new'));
 });
-test('pane header identifies the agent by its icon and keeps the path without repeating its name', async () => {
+test('pane header uses the sidebar thread title without split, zoom, or close controls', async () => {
   const ui = fakeElements();
   const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
-    panes: () => [{ pane: 'pane-1', cwd: '/Code/project', program: { name: 'Codex', icon: 'icons/codex.svg', tint: false } }] });
+    spaces: () => projects, agents: () => agents,
+    panes: () => [{ pane: 'pane-1', tab: 'tab-1', cwd: '/Code/project', program: { name: 'Codex', icon: 'icons/codex.svg', tint: false } }] });
   new View().paneHeader({});
-  assert.ok(ui.texts.includes('/Code/project'));
+  assert.ok(ui.texts.includes(projectGroups(projects, agents)[1].threads.find(thread => thread.tab.id === 'tab-1').title));
+  assert.ok(!ui.texts.includes('/Code/project'));
   assert.ok(!ui.texts.includes('Codex'));
-  assert.ok(ui.nodes.has('split-right-pane-1'));
-  assert.ok(ui.nodes.has('close-pane-1'));
+  for (const name of ['split-right', 'split-down', 'zoom', 'close']) assert.ok(!ui.nodes.has(`${name}-pane-1`));
 });
 test('New thread targets the chosen project and its saved root, not the current directory', async () => {
   const overlays = [];
