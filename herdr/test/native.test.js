@@ -82,7 +82,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1453,7 +1453,7 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
 });
 
-test('status bar toggles the simulator panel on macOS, with a selected background while it shows', async () => {
+test('status bar toggles the simulator panel, with a selected background while it shows', async () => {
   const ui = fakeElements(), commands = [], colors = { selected: 'selected', background: 'background' };
   const simulator = { id: 'simulator', hidden: false };
   let root = { id: 'root', children: [{ id: 'work', children: [simulator] }] };
@@ -1474,7 +1474,7 @@ test('status bar toggles the simulator panel on macOS, with a selected backgroun
   root = { id: 'root', children: [simulator] }; ui.nodes.clear();
   View = await viewFor(host('windows'));
   new View().statusBar(colors);
-  assert.ok(!ui.nodes.has('open-simulator'));
+  assert.ok(ui.nodes.has('open-simulator'));
 });
 
 test('mods that use devkits components carry copies equal to the source', async () => {
