@@ -69,12 +69,15 @@ test('working threads rise within their project and return to tab order when fin
 
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
-  const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group']
+  const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
+  // The feature views main.js mixes into its view.
+  const features = await Promise.all(['session-menu', 'account-actions', 'usage']
+    .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
-  return new Function('View', ...Object.keys(host), components.join('\n')
+  return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
     .replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\n' + source
-    .replace(/^import .*;\n/gm, '').replace('export default class', 'return class'));
+    .replace(/^import .*;\n/gm, '').replace('export default class', 'class') + '\nreturn Devkits;');
 }
 async function viewFor(host) {
   const memory = {};
