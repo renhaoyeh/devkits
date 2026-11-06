@@ -44,7 +44,3 @@ herdr-app do layout.switch --name main
 ```
 
 See [design guidelines](../design.md) and the [development workflow](DEVELOPMENT.md) for further changes.
-
-## Issues
-
-Choose **Issues** above the project groups to open a local issue board in the central workspace. Issues belong to the app, independently of project folders. Switch between **List** and **Board**, then choose **New issue** to enter a title, description, assignee (free text), and status. Click a card to edit it or change its status. Changes are saved locally across app restarts. Board columns scroll independently and the board scrolls horizontally in narrower windows. Selecting a thread returns to its terminal. This initial version does not launch agents from issues or support dragging cards.
