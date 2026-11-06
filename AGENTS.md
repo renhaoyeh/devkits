@@ -6,6 +6,7 @@ Read and follow [design.md](design.md) before making UI or interaction changes. 
 
 - Keep each tool's implementation, assets, installation, and tests in its own directory. Herdr-related files belong under `herdr/`.
 - Centralize SVG icons in `herdr/mods/devkits/assets/icons/`; keep other visual assets under the mod's `assets/` directory. Reuse existing assets and remove unused ones.
+- Edit shared components only in `herdr/mods/devkits/components/`, then run `npm run sync:shared`; other mods' `components/` folders hold copies.
 - Prefer the smallest complete change that fits the existing structure. Avoid unsolicited features, dependencies, abstractions, and duplicate controls.
 - Treat reference projects as design references; do not add service connections or external infrastructure unless requested.
 

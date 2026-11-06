@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 export async function install(home) {
   const layout = join(home, 'layouts', 'devkits.json');
   const mod = join(home, 'mods', 'devkits');
+  const simulator = join(home, 'mods', 'devkits-simulator');
   const frames = join(home, 'mods', 'devkits-sim-frames');
   const themes = ['devkits', 'devkits-light'].map(name => join(home, 'themes', `${name}.json`));
-  for (const path of [layout, mod, frames, ...themes]) {
+  for (const path of [layout, mod, simulator, frames, ...themes]) {
     try { await access(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     throw new Error(`Already exists: ${path}. Refusing to overwrite.`);
   }
@@ -16,12 +17,14 @@ export async function install(home) {
   await mkdir(join(home, 'mods'), { recursive: true });
   await mkdir(join(home, 'themes'), { recursive: true });
   const stage = await mkdtemp(join(home, 'mods', '.devkits-'));
-  let installed = false, framesInstalled = false, layoutWritten = false;
+  let installed = false, simulatorInstalled = false, framesInstalled = false, layoutWritten = false;
   const writtenThemes = [];
   try {
     await cp(new URL('./mods/devkits/', import.meta.url), stage, { recursive: true,
       filter: source => !source.endsWith('/gpui-kit.d.ts') && !source.endsWith('/jsconfig.json') });
     await rename(stage, mod); installed = true;
+    simulatorInstalled = true;
+    await cp(new URL('./mods/devkits-simulator/', import.meta.url), simulator, { recursive: true, errorOnExist: true, force: false });
     await mkdir(frames);
     framesInstalled = true;
     for (const name of ['mod.json', 'main.js'])
@@ -34,6 +37,7 @@ export async function install(home) {
   } catch (error) {
     if (layoutWritten) await rm(layout);
     if (installed) await rm(mod, { recursive: true });
+    if (simulatorInstalled) await rm(simulator, { recursive: true, force: true });
     if (framesInstalled) await rm(frames, { recursive: true });
     for (const path of writtenThemes) await rm(path);
     throw error;

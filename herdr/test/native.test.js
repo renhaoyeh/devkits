@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
 import { install } from '../install.js';
+import { syncShared } from '../sync-shared.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
 
@@ -81,7 +82,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, simulatorShown: () => false, toggleSimulator() {}, window: () => ({}), appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1415,7 +1416,12 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(stack.id, 'workspace-view');
   assert.equal(simulator.id, 'simulator');
   assert.equal(simulator.hidden, true);
+  assert.equal(simulator.content.mod, 'devkits-simulator');
   assert.equal(simulator.content.props.view, 'simulator');
+  for (const name of ['mod.json', 'main.js', 'simulator.js', 'components/button.js', 'components/dropdown-menu.js'])
+    assert.equal(await readFile(join(home, 'mods', 'devkits-simulator', name), 'utf8'),
+      await readFile(new URL(`../mods/devkits-simulator/${name}`, import.meta.url), 'utf8'));
+  assert.ok(!(await readdir(mod)).includes('simulator.js'));
   // Herdr docks a folder without place "none" into the shown layout.
   assert.equal(JSON.parse(await readFile(join(home, 'mods', 'devkits-sim-frames', 'mod.json'), 'utf8')).place, 'none');
   assert.equal(await readFile(join(home, 'mods', 'devkits-sim-frames', 'main.js'), 'utf8'),
@@ -1433,17 +1439,29 @@ test('installer adds only its own files and refuses to overwrite an existing ins
 });
 
 test('status bar toggles the simulator panel on macOS, with a selected background while it shows', async () => {
-  const ui = fakeElements(), toggles = [];
-  let shown = true;
-  const host = platform => ({ ...ui, spaces: () => [], window: () => ({ platform }), layout: () => ({}),
-    simulatorShown: () => shown, toggleSimulator: () => toggles.push('simulator') });
+  const ui = fakeElements(), commands = [], colors = { selected: 'selected', background: 'background' };
+  const simulator = { id: 'simulator', hidden: false };
+  let root = { id: 'root', children: [{ id: 'work', children: [simulator] }] };
+  const host = platform => ({ ...ui, spaces: () => [], window: () => ({ platform }), layout: () => root,
+    run: (...args) => commands.push(args) });
   let View = await viewFor(host('macos'));
-  new View().statusBar({ selected: 'selected', background: 'background' });
+  new View().statusBar(colors);
   assert.equal(ui.nodes.get('open-simulator').background, 'selected');
   ui.nodes.get('open-simulator').click();
-  assert.deepEqual(toggles, ['simulator']);
-  ui.nodes.clear(); shown = false;
-  View = await viewFor(host('windows'));
-  new View().statusBar({});
+  assert.deepEqual(commands, [['layout.toggle', { id: 'simulator' }]]);
+  simulator.hidden = true; ui.nodes.clear();
+  new View().statusBar(colors);
+  assert.equal(ui.nodes.get('open-simulator').background, 'background');
+  // A layout without the simulator block leaves the panel out, and its button with it.
+  root = { id: 'root', children: [] }; ui.nodes.clear();
+  new View().statusBar(colors);
   assert.ok(!ui.nodes.has('open-simulator'));
+  root = { id: 'root', children: [simulator] }; ui.nodes.clear();
+  View = await viewFor(host('windows'));
+  new View().statusBar(colors);
+  assert.ok(!ui.nodes.has('open-simulator'));
+});
+
+test('mods that use devkits components carry copies equal to the source', async () => {
+  assert.deepEqual((await syncShared({ check: true })).bad, []);
 });

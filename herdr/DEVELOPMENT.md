@@ -14,7 +14,8 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | --- | --- |
 | Window structure and block sizes | `layouts/devkits.json` |
 | Native views and interactions | `mods/devkits/main.js` |
-| Shared native UI components | `mods/devkits/components/` |
+| Shared native UI components | `mods/devkits/components/`; other mods carry copies (`COPIES`, `sync-shared.js`) |
+| iOS Simulator panel | `mods/devkits-simulator/` |
 | Project and thread data transformations | `mods/devkits/model.js` |
 | Semantic colors | `themes/devkits.json`, `themes/devkits-light.json` |
 | Icons and preview | `mods/devkits/assets/` |
@@ -32,7 +33,10 @@ Run from the repository root as appropriate for the change:
 ```sh
 npm test
 ~/.local/bin/herdr-app check ./herdr/mods/devkits
+~/.local/bin/herdr-app check ./herdr/mods/devkits-simulator
 ```
+
+A mod can import only files in its own folder, so `devkits-simulator` carries copies of the devkits components it uses. Edit `mods/devkits/components/`, never a copy, then run `npm run sync:shared`; `npm test` fails while a copy differs. `COPIES` lists which mods carry which components; add a line when a mod starts using another one. A copy edited by hand is never overwritten: keep its change with `npm run sync:shared -- --from <copy>`, or move it into the source.
 
 The native mod check is required after mod edits. It checks initial rendering, not layout geometry, deferred rows, or later async interactions; passing it does not replace checking the app.
 

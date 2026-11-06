@@ -4,3 +4,4 @@ node_modules/
 herdr/mods/**/gpui-kit.d.ts
 herdr/mods/**/jsconfig.json
 herdr/mods/devkits-sim-frames/*.jpg
+herdr/.sync-shared/

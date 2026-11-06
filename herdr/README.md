@@ -13,11 +13,12 @@ Requires Herdr App and Node.js 22+. Run from the repository root:
 ```sh
 npm run install:herdr
 herdr-app check ~/.config/herdr-app/mods/devkits
+herdr-app check ~/.config/herdr-app/mods/devkits-simulator
 herdr-app do layout.switch --name devkits
 ```
 
 If `herdr-app` is not on PATH, use `~/.local/bin/herdr-app`.
-The installer adds the custom layout, mod, and themes to `~/.config/herdr-app/` and refuses to overwrite existing files. For updates or a custom `HERDR_APP_HOME`, see [DEVELOPMENT.md](DEVELOPMENT.md).
+The installer adds the custom layout, mods, and themes to `~/.config/herdr-app/` and refuses to overwrite existing files. For updates or a custom `HERDR_APP_HOME`, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Use
 
@@ -31,7 +32,7 @@ Click the folder icon at the right of the status bar to toggle project files. Th
 
 Right-click a file or folder in Files for **Copy Relative Path**, **Copy Full Path**, or **Reveal in File Explorer** (Finder on macOS). Relative paths start at the project folder; full Windows paths use native backslashes. Reveal selects the item on Windows/macOS and opens its containing folder on Linux. Remote projects support copying paths, with Reveal disabled. Ignored files and folders remain visible in a dim color.
 
-On macOS, click the phone icon in the status bar to show or hide the **iOS Simulator** panel on the right of the workspace; drag its left edge to resize it. Choose a simulator from the picker in its header; a shut-down simulator boots when chosen, and the first booted one is shown by default. Click the screen to tap, drag to swipe, scroll with the mouse or trackpad, and type after clicking the screen. The toolbar presses Home, Lock and the volume keys, rotates the device, and shows or hides the software keyboard. The panel's picture lags about 0.2 seconds because Herdr can only show frames as image files; for smooth interaction, click the open-in-window icon in the panel header to open the same device in serve-sim's 60 FPS preview, in a Chrome app window (or the default browser). That window stops when the panel's own serve-sim helper stops, for example when switching devices. If taps stop working on Xcode 27, choose **Repair input** in the picker (it restarts SpringBoard and closes apps). The panel needs Xcode with an iOS simulator, an Apple Silicon Mac and Node.js 20+; it runs [serve-sim](https://github.com/EvanBacon/serve-sim) locally through `npx` (downloaded from npm the first time) and streams only while the panel is shown. Frames are written to `mods/devkits-sim-frames/`. Adapted from [herdr-sim](https://github.com/wobsoriano/herdr-sim).
+On macOS, click the phone icon in the status bar to show or hide the **iOS Simulator** panel on the right of the workspace; drag its left edge to resize it. Choose a simulator from the picker in its header; a shut-down simulator boots when chosen, and the first booted one is shown by default. Click the screen to tap, drag to swipe, scroll with the mouse or trackpad, and type after clicking the screen. The toolbar presses Home, Lock and the volume keys, rotates the device, and shows or hides the software keyboard. The panel's picture lags about 0.2 seconds because Herdr can only show frames as image files; for smooth interaction, click the open-in-window icon in the panel header to open the same device in serve-sim's 60 FPS preview, in a Chrome app window (or the default browser). That window stops when the panel's own serve-sim helper stops, for example when switching devices. If taps stop working on Xcode 27, choose **Repair input** in the picker (it restarts SpringBoard and closes apps). The panel needs Xcode with an iOS simulator, an Apple Silicon Mac and Node.js 20+; it runs [serve-sim](https://github.com/EvanBacon/serve-sim) locally through `npx` (downloaded from npm the first time) and streams only while the panel is shown. The panel is its own mod, `devkits-simulator`; a layout without the `simulator` block leaves it out, along with its status bar icon. Frames are written to `mods/devkits-sim-frames/`. Adapted from [herdr-sim](https://github.com/wobsoriano/herdr-sim).
 
 Click the compare icon beside Files to open **Changes**. Unified and Split diffs soft-wrap long lines to the available column width, keeping original line numbers and changed-word highlights. Split rows stay aligned when one side wraps onto more lines.
 

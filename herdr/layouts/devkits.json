@@ -38,7 +38,7 @@
           } } }
         ] },
         { "id": "simulator", "type": "block", "hidden": true, "size": { "px": 380 }, "min": 300, "max": 900,
-          "content": { "mod": "devkits", "props": { "view": "simulator" } } }
+          "content": { "mod": "devkits-simulator", "props": { "view": "simulator" } } }
         ] },
         { "id": "status", "type": "block", "size": { "px": 32 }, "content": { "mod": "devkits", "props": { "view": "status" } } }
       ]
