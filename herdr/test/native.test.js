@@ -977,22 +977,61 @@ test('New thread without a project opens the native folder picker; launcher pass
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', { space: 'api', folder: '/Code/project name', name: 'Codex', argv: ['codex', '--profile', 'work'] }]);
   assert.deepEqual(closed, ['popup']);
 });
-test('an Asana task names the thread and becomes the last launch argument; remote projects omit the entry', async () => {
-  const ui = fakeElements(), commands = [], overlays = [];
-  let target = { view: 'launcher', space: 'api', folder: '/Code/api', projectName: 'API', overlay: 'menu' };
+test('each project gets its open panel back when selected again, until a thread is chosen there', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  let active = 'one';
+  const spaces = () => ['one', 'two'].map(id => ({ id, name: id, folder: `/Code/${id}`, active: id === active,
+    tabs: [{ id: `${id}-a`, name: 'A', active: true }, { id: `${id}-b`, name: 'B' }] }));
+  let target = {};
+  const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {}, run: (...args) => commands.push(args) });
+  const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
+  target = { view: 'status' }; new View().render(); ui.nodes.get('open-files').click();
+  assert.equal(memory['devkits.files'], 'one');
+  target = {}; active = 'two'; sidebar.render();
+  assert.equal(memory['devkits.files'], null);
+  active = 'one'; sidebar.render();
+  assert.equal(memory['devkits.files'], 'one');
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
+  ui.nodes.get('thread-one-b').click();
+  assert.equal(memory['devkits.files'], null);
+  active = 'two'; sidebar.render(); active = 'one'; sidebar.render();
+  assert.equal(memory['devkits.files'], null);
+});
+test('Start session from an Asana preview offers only agents, names the thread, prompts with the task and unsaves it', async () => {
+  const ui = fakeElements(), commands = [], unsaved = [];
+  const target = { view: 'launcher', space: 'api', folder: '/Code/api', projectName: 'API', overlay: 'menu', task: { gid: 't1', name: 'Fix login' } };
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => projects,
-    taskPrompt: task => `prompt:${task.name}`, run: (...args) => commands.push(args),
-    closeOverlay() {}, openOverlay: value => overlays.push(value), notify: error => assert.fail(error.body) });
-  const view = new View(); view.launchers = []; view.render();
-  ui.nodes.get('start-from-asana').click();
-  assert.deepEqual(overlays[0].props, { view: 'asana-tasks', space: 'api', folder: '/Code/api', projectName: 'API' });
-  view.startThread({ key: 'codex', name: 'Codex', run: ['codex'] }, { name: 'Fix login' });
+    taskPrompt: task => `prompt:${task.name}`, unsaveTask: (...args) => unsaved.push(args), run: (...args) => commands.push(args),
+    closeOverlay() {}, notify: error => assert.fail(error.body) });
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', installed: true, run: ['codex'] }]; view.render();
+  assert.ok(!ui.nodes.has('new-terminal'));
+  assert.ok(!ui.nodes.has('manage-launchers-open'));
+  ui.nodes.get('start-codex').click();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'),
     ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['codex', 'prompt:Fix login'] }]);
-  target = { ...target, space: 'remote' };
-  const remote = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [{ id: 'remote', machine: 'vps', tabs: [] }] });
-  ui.nodes.clear(); const view2 = new remote(); view2.launchers = []; view2.render();
-  assert.ok(!ui.nodes.has('start-from-asana'));
+  assert.deepEqual(unsaved, [['/Code/api', 't1']]);
+});
+test('Asana tasks opens from a local project menu, replaces Files and Changes, and is absent for remote projects', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  const project = { id: 'one', name: 'One', folder: '/Code/one', machine: null, active: true, tabs: [] };
+  let target = { view: 'project-menu', overlay: 'menu', project };
+  const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces: () => [project],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {},
+    run: (...args) => commands.push(args), closeOverlay() {} });
+  const menu = new View(); menu.handle = { focus() {} }; menu.render();
+  ui.nodes.get('menu-asana-tasks').click();
+  assert.equal(memory['devkits.asana'], 'one');
+  target = {}; const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'asana' }]);
+  target = { view: 'status' }; new View().render();
+  assert.ok(!ui.nodes.has('open-asana'));
+  ui.nodes.get('open-files').click();
+  assert.equal(memory['devkits.asana'], null);
+  ui.nodes.clear(); target = { view: 'project-menu', overlay: 'menu', project: { ...project, machine: 'vps' } };
+  const remote = new View(); remote.handle = { focus() {} }; remote.render();
+  assert.ok(!ui.nodes.has('menu-asana-tasks'));
+  assert.ok(ui.nodes.has('menu-close-project'));
 });
 test('empty projects stay empty until an agent is explicitly chosen', async () => {
   const ui = fakeElements();
