@@ -8,6 +8,16 @@ Click the chart icon in **AGENT PROFILES** to open **Token statistics**. Switch 
 
 ## Install
 
+Tell your agent:
+
+```text
+Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/renhaoyeh/devkits/tree/main/herdr
+```
+
+The [recipe](RECIPE.md) describes the layout, its companion mods and themes, installation, and validation. Your agent reads the files before adding it alongside your existing layouts. If you use a custom `HERDR_APP_HOME`, point the agent at that directory's `AGENTS.md` instead.
+
+For manual installation, clone this repository and run the commands below.
+
 Requires Herdr App and Node.js 22+. Run from the repository root:
 
 On Windows, keep Node.js and Git for Windows on Herdr's PATH. Account directories are created with Node's filesystem API; account launchers, usage reads, and settings synchronization use Git's bundled shell for Unix-style environment commands and npm launchers. WSL is not required. Existing `env` account launchers remain supported.
