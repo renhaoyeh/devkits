@@ -43,7 +43,7 @@ export const permissionModes = agent => isCodexLauncher(agent) ? codexPermission
   : isClaudeLauncher(agent) ? claudePermissionModes : null;
 
 const permissionFlags = {
-  codex: { name: 'Codex', executable: /(?:^|[/\\])codex(?:\.exe)?$/i, valued: ['--sandbox', '-s', '--ask-for-approval', '-a'],
+  codex: { name: 'Codex', executable: /(?:^|[/\\])codex(?:\.exe|\.cmd)?$/i, valued: ['--sandbox', '-s', '--ask-for-approval', '-a'],
     drop: arg => /^--(?:sandbox|ask-for-approval)=|^-[sa]=|^-[sa](?:read-only|workspace-write|danger-full-access|never|on-request)$/.test(arg) ||
       ['--full-auto', '--approve-for-me', '--not-so-yolo', '--yolo', '--dangerously-bypass-approvals-and-sandbox'].includes(arg) },
   claude: { name: 'Claude', executable: /(?:^|[/\\])claude(?:\.exe|\.cmd)?$/i, valued: ['--permission-mode'],

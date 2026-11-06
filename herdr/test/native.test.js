@@ -73,12 +73,12 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['session-menu', 'account-actions', 'usage']
+  const features = await Promise.all(['shell-command', 'session-menu', 'account-actions', 'usage']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
-    .replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\n' + source
-    .replace(/^import .*;\n/gm, '').replace('export default class', 'class') + '\nreturn Devkits;');
+    .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\n' + source
+    .replace(/^import .*;\r?\n/gm, '').replace('export default class', 'class') + '\nreturn Devkits;');
 }
 async function viewFor(host) {
   const memory = {};
@@ -87,6 +87,21 @@ async function viewFor(host) {
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
 }
+
+test('Windows starts legacy account launchers locally and preserves commands on remote machines', async () => {
+  const agent = { key: 'devkits-codex-work', name: 'Work', run: ['env', 'CODEX_HOME=C:/Account', 'codex'] };
+  for (const machine of [null, 'linux-server']) {
+    const commands = [];
+    const View = await viewFor({ window: () => ({ platform: 'windows' }),
+      spaces: () => [{ id: 'api', machine, tabs: [] }], run: (...args) => commands.push(args) });
+    await new View().launchThread(agent, { space: 'api', folder: 'C:/Project' }, {});
+    const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
+    assert.equal(argv[0], machine ? 'env' : 'git');
+    assert.deepEqual(argv.slice(-3), agent.run);
+  }
+  assert.deepEqual(launcherArgv({ key: 'codex', run: ['C:\\bin\\codex.cmd'] }, 'read-only').slice(1),
+    ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+});
 function fakeElements() {
   const nodes = new Map(), owners = new WeakMap();
   // Every string drawn inside an element, however deeply it is nested.

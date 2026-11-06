@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { commandArgv } from './shell-command.js';
 
 const manifestName = 'devkits-shared.json';
 const remoteMarket = name => /^(?:chatgpt(?:-|$)|openai-curated-remote$)/i.test(name);
@@ -18,8 +19,9 @@ const inside = (root, path) => { const rel = relative(root, path); return rel ==
 export async function openConfig(directory) {
   const env = { ...process.env, CODEX_HOME: directory };
   for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN']) delete env[key];
-  const child = spawn('codex', ['-c', 'cli_auth_credentials_store="file"', 'app-server', '--listen', 'stdio://'],
-    { cwd: directory, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const [command, ...args] = commandArgv(['codex', '-c', 'cli_auth_credentials_store="file"', 'app-server', '--listen', 'stdio://'],
+    process.platform === 'win32' ? 'windows' : process.platform);
+  const child = spawn(command, args, { cwd: directory, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   child.stderr.resume(); // Diagnostics may contain private config; do not forward them to the UI.
   const lines = createInterface({ input: child.stdout });
   let id = 0;
@@ -46,7 +48,6 @@ export async function openConfig(directory) {
   const close = async () => {
     lines.close(); child.stdin.end();
     if (child.exitCode !== null || child.signalCode !== null) return;
-    child.kill();
     await new Promise(resolve => {
       const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(); }, 1500);
       child.once('exit', () => { clearTimeout(timer); resolve(); });
@@ -108,7 +109,10 @@ async function profileContext(root, key, userHome) {
   const directory = join(root, 'data', 'devkits', 'codex', match[1]);
   const programs = JSON.parse(await readFile(join(root, 'programs.json'), 'utf8')).programs;
   const argv = programs?.[key]?.run;
-  if (!Array.isArray(argv) || !argv.includes(`CODEX_HOME=${directory}`)) throw new Error('This account does not use its own Devkits directory.');
+  const home = Array.isArray(argv) && argv.find(arg => typeof arg === 'string' && arg.startsWith('CODEX_HOME='))?.slice(11);
+  if (!home || (process.platform === 'win32' ? resolve(home).toLowerCase() !== directory.toLowerCase() : resolve(home) !== directory)) {
+    throw new Error('This account does not use its own Devkits directory.');
+  }
   await ownedDirectory(root, directory);
   const source = await realpath(join(userHome, '.codex'));
   if (inside(source, directory) || inside(directory, source)) throw new Error('The shared source and account must be separate directories.');

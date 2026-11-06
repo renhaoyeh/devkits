@@ -10,6 +10,8 @@ Click the chart icon in **AGENT PROFILES** to open **Token statistics**. Switch 
 
 Requires Herdr App and Node.js 22+. Run from the repository root:
 
+On Windows, keep Node.js and Git for Windows on Herdr's PATH. Account directories are created with Node's filesystem API; account launchers, usage reads, and settings synchronization use Git's bundled shell for Unix-style environment commands and npm launchers. WSL is not required. Existing `env` account launchers remain supported.
+
 ```sh
 npm run install:herdr
 herdr-app check ~/.config/herdr-app/mods/devkits
