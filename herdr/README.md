@@ -1,6 +1,6 @@
 # Herdr
 
-A native Herdr layout and GPUI mod with shadcn styling and a Zed-inspired project and thread sidebar.
+A native Herdr layout and GPUI mod with shadcn/ui Sera styling and a Zed-inspired project and thread sidebar.
 
 ## Install
 

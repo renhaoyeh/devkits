@@ -30,7 +30,7 @@
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
         { "id": "main", "type": "block", "padding": 16,
           "content": { "tab": "active", "pane": {
-            "gap": 12, "radius": 10, "background": "background", "lone": true,
+            "gap": 12, "radius": 0, "background": "background", "lone": true,
             "border": { "width": 1, "color": "border" },
             "focus": { "width": 1, "color": "accent" },
             "header": { "content": { "mod": "devkits", "props": { "view": "pane" } }, "height": 40, "position": "top", "reveal": "always" }

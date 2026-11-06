@@ -232,28 +232,28 @@ export default class CodexLogin {
 
   finish() {
     closeOverlay(this.target.overlay);
-    if (this.target.returnTo) openOverlay({ mod: 'devkits', kind: 'dialog', modal: false, width: 680, height: 0.8,
-      props: this.target.returnTo });
+    if (this.target.returnTo) openOverlay({ mod: 'devkits', kind: 'dialog', frame: 'none', modal: false, width: 680, height: 0.8,
+      props: { ...this.target.returnTo, refreshAgents: true } });
   }
 
   render() {
     const t = theme();
     const action = (id, label, handler, primary = false) => Button(id, t, { variant: primary ? 'default' : 'outline' })
       .on_click(handler).child(label);
-    return v_flex().id('codex-login-dialog').size_full().p(24).gap(16).bg(t.popover).text_color(t.foreground).role('dialog')
+    return v_flex().id('codex-login-dialog').size_full().rounded(0).border(1).border_color(t.border).p(24).gap(16).bg(t.popover).text_color(t.foreground).role('dialog')
       .track_focus(this.handle).on_key_down((event, cx) => {
         if (event.key === 'escape') { cx.stop_propagation(); this.finish(); }
         else if (event.key === 'enter' && this.phase === 'success') { cx.stop_propagation(); this.finish(); }
         else if (event.key === 'enter' && this.phase === 'waiting') { cx.stop_propagation(); this.openBrowser(cx); }
       })
       .child(v_flex().gap(6)
-        .child(div().text_size(16).font_semibold().child(this.phase === 'success' ? 'Codex account connected' : 'Add Codex account'))
+        .child(div().font_family('Georgia').text_size(22).font_normal().child(this.phase === 'success' ? 'Codex account connected' : 'Add Codex account'))
         .child(div().text_size(13).text_color(t.muted).child(this.phase === 'success'
           ? `${this.email} is ready in your agent menu.` : 'Connect a ChatGPT account to use with Codex.')))
       .child(v_flex().flex_1().min_h(0).gap(10)
         .when(!this.busy && this.phase !== 'success', el => el
           .child(div().text_size(12).font_medium().child('Account name'))
-          .child(Input.new(this.input).id('codex-account-name').h(36).px(10).rounded(6).border(1).border_color(t.input).text_size(13))
+          .child(Input.new(this.input).id('codex-account-name').h(36).px(10).rounded(0).border_b(1).border_color(t.input).text_size(13))
           .child(div().text_size(12).text_color(t.muted).child('A display name. Chinese and uppercase names are welcome.')))
         .when(this.busy, el => el.child(div().text_size(13).text_color(t.muted).child(
           this.phase === 'waiting' ? 'Finish signing in in your browser. This window will update automatically.'
