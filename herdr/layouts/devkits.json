@@ -28,12 +28,9 @@
         { "id": "workspace-view", "type": "stack", "active": "main", "children": [
         { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
-        { "id": "main", "type": "block", "padding": 16,
+        { "id": "main", "type": "block",
           "content": { "tab": "active", "pane": {
-            "gap": 12, "radius": 0, "background": "background", "lone": true,
-            "border": { "width": 1, "color": "border" },
-            "focus": { "width": 1, "color": "accent" },
-            "header": { "content": { "mod": "devkits", "props": { "view": "pane" } }, "height": 40, "position": "top", "reveal": "always" }
+            "gap": 0, "radius": 0, "background": "background", "lone": false
           } } }
         ] },
         { "id": "status", "type": "block", "size": { "px": 32 }, "content": { "mod": "devkits", "props": { "view": "status" } } }
