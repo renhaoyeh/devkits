@@ -79,8 +79,9 @@ export function projectCatalog(spaces, saved = [], roots = {}, selected) {
   return projects.map(project => ({ ...project, active: project.id === chosen?.id }));
 }
 
-export function projectGroups(spaces, agents) {
-  return spaces.map(space => ({ space, threads: space.tabs.map(tab => {
+export function projectGroups(spaces, agents, defaults = {}) {
+  return spaces.map(space => ({ space, threads: space.tabs.filter(tab => tab.id !== defaults[space.id]
+    || agents.some(agent => agent.space === space.id && agent.tab === tab.id)).map(tab => {
     const members = agents.filter(a => a.space === space.id && a.tab === tab.id);
     const agent = members.find(a => a.focused) || members[0];
     return { space: space.id, tab, agents: members, agent,

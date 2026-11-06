@@ -25,6 +25,32 @@ const projects = [
     { id: 'tab-1', name: '2', status: 'blocked' }, { id: 'tab-3', name: 'Plan', named: true },
   ] },
 ];
+
+test('only the recorded default terminal is hidden, even after renaming; agent sessions stay visible', () => {
+  const spaces = [{ id: 'one', tabs: [{ id: 'default', name: 'Renamed' },
+    { id: 'manual', name: 'Terminal' }] }];
+  const defaults = { one: 'default' };
+  assert.deepEqual(projectGroups(spaces, [], defaults)[0].threads.map(thread => thread.tab.id), ['manual']);
+  assert.equal(projectGroups(spaces, [], { one: 'deleted' })[0].threads.length, 2);
+  assert.equal(projectGroups(spaces, [{ space: 'one', tab: 'default' }], defaults)[0].threads.length, 2);
+  assert.equal(spaces[0].tabs.length, 2);
+});
+
+test('sidebar records the internal terminal ID, hides its row and shows the empty content', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), agents: () => [],
+    spaces: () => [{ id: 'one', active: true, tabs: [
+      { id: 'default', name: '__devkits_default_terminal__', active: true },
+      { id: 'manual', name: 'Terminal' }] }],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), setAgentOrder() {} });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.deepEqual(memory['devkits.default-terminals'], { one: 'default' });
+  assert.ok(!ui.nodes.has('thread-default'));
+  assert.ok(ui.nodes.has('thread-manual'));
+  assert.ok(commands.some(([name, args]) => name === 'layout.select' && args.child === 'project-empty'));
+  assert.ok(!commands.some(([name]) => name === 'tab.close' || name === 'terminal.kill'));
+});
 test('working threads rise within their project and return to tab order when finished', () => {
   const spaces = [{ id: 'one', tabs: [
     { id: 'idle', status: 'idle' }, { id: 'busy', status: 'working' },
@@ -715,7 +741,7 @@ test('local account profiles and their login action stay out of remote project m
   assert.deepEqual(view.launchers.map(agent => agent.key), ['codex']);
   assert.ok(!ui.nodes.has('add-codex-account'));
 });
-test('project dropdown switches projects and opens the native folder chooser without starting a session', async () => {
+test('project dropdown switches projects and creates a default terminal for a new folder', async () => {
   const ui = fakeElements(), commands = [], closed = [], memory = {};
   let pending, picks = 0;
   const View = await viewFor({ ...ui, props: () => ({ view: 'project-picker', overlay: 'picker' }),
@@ -742,7 +768,9 @@ test('project dropdown switches projects and opens the native folder chooser wit
   assert.equal(closed.length, beforePicker + 1);
   assert.equal(picks, 1);
   assert.deepEqual(memory['devkits.projects'], ['/Code/new project']);
-  assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new'));
+  assert.deepEqual(commands.find(([name]) => name === 'space.new'),
+    ['space.new', { name: 'new project', folder: '/Code/new project', machine: '', tab: '__devkits_default_terminal__' }]);
+  assert.ok(!commands.some(([name]) => name === 'tab.new'));
 });
 test('pane header identifies the agent by its icon and keeps the path without repeating its name', async () => {
   const ui = fakeElements();
@@ -774,11 +802,14 @@ test('native folder picker opens a project, reuses an existing root, and cancel 
   const view = new View(), cx = { notify() {}, spawn(task) { pending = task(cx); } };
   view.openProject(cx); await pending;
   assert.deepEqual(memory['devkits.projects'], [folder]);
-  assert.equal(memory['devkits.selected-project'], `project:${folder}`);
-  assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new'));
+  assert.equal(memory['devkits.selected-project'], null);
+  assert.deepEqual(commands.find(([name]) => name === 'space.new'),
+    ['space.new', { name: 'new project', folder, machine: '', tab: '__devkits_default_terminal__' }]);
+  assert.ok(!commands.some(([name]) => name === 'tab.new'));
   commands.length = 0;
   folder = '/original/api/'; view.openProject(cx); await pending;
   assert.ok(commands.some(([name, args]) => name === 'space.select' && args.id === 'api'));
+  assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new'));
   commands.length = 0;
   folder = null; view.openProject(cx); await pending;
   assert.deepEqual(commands, []);
