@@ -1,6 +1,6 @@
 # Design Guidelines
 
-- Before starting a local Devkits Codex account session, use the official Codex CLI to install missing enabled local plugins from the user's default Codex home. Reuse missing marketplace roots while preserving existing profile marketplaces, installed plugins, and disabled choices. Keep remote plugins, credentials, service authorization, and plugin data scoped to the account. Recheck on every new session; show a muted spinner and Syncing plugins… in the bottom status bar while any synchronization is pending, removing it after success or failure. Report synchronization failures and still start with the profile's existing plugins.
+- Start Codex account sessions immediately using the plugins already installed in that profile. Do not automatically synchronize plugins from the default Codex home. Close the launcher immediately when a valid session is requested; ignore repeated requests for the same project, agent profile and task while its launch is pending.
 
 - Token statistics has an All, Codex and Claude provider selector above the fixed summary, with each provider's existing program icon beside its name. The selected provider filters token totals, estimated cost, daily bars and every table together. Changing providers clears model and account filters, retains the date range and day/project filters, and returns to the first table page. Clear filters also returns the provider to All.
 

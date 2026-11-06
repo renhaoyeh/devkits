@@ -927,11 +927,11 @@ test('each Claude or Codex profile sets its default model and effort, which new 
   ui.nodes.get('profile-effort-claude-option-high').click({}, renderContext);
   assert.deepEqual(memory['devkits.profile-sessions'], { claude: { model: 'opus', effort: 'high' } });
   const claude = view.launchers[0], space = { space: 'api', folder: '/Code/api' };
-  view.startThread(claude, space);
+  await view.startThread(claude, space);
   assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'opus', '--effort', 'high']);
-  view.startThread(claude, space, { model: 'sonnet' });
+  await view.startThread(claude, space, { model: 'sonnet' });
   assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', '--effort', 'high']);
-  view.startThread(claude, space, { model: 'sonnet', effort: null });
+  await view.startThread(claude, space, { model: 'sonnet', effort: null });
   assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet']);
   const codex = { key: 'devkits-codex-work', name: 'Codex · work', run: ['env', 'CODEX_HOME=/work', 'codex'] };
   view.launchers = [codex]; view.preparePermissionSelects(renderContext);
@@ -1094,48 +1094,22 @@ test('New thread without a project opens the native folder picker; launcher pass
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', { space: 'api', folder: '/Code/project name', name: 'Codex', argv: ['codex', '--profile', 'work'] }]);
   assert.deepEqual(closed, ['popup']);
 });
-test('Codex account sessions wait for plugin sync and still launch after a reported sync failure', async () => {
-  const account = { key: 'devkits-codex-work', name: 'Work', run: ['env', 'CODEX_HOME=/account', 'codex'] };
-  for (const code of [0, 1]) {
-    const commands = [], notices = [], calls = [], memory = {}, ui = fakeElements();
-    let finish;
-    const View = await viewFor({ ...ui, spaces: () => [], run: (...args) => commands.push(args),
-      shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
-      notify: message => notices.push(message), exec: (...args) => {
-        calls.push(args); return new Promise(resolve => { finish = resolve; });
-      } });
-    const view = new View();
-    view.statusBar({});
-    assert.equal(ui.nodes.has('plugin-sync-progress'), false);
-    const pending = view.startThread(account, { space: 'one', folder: '/project' });
-    assert.equal(commands.length, 0);
-    view.statusBar({});
-    assert.ok(ui.nodes.has('plugin-sync-progress'));
-    assert.ok(ui.textOf('plugin-sync-progress').includes('Syncing plugins…'));
-    assert.deepEqual(calls, [['node', ['/herdr/mods/devkits/plugin-sync.js', '/home/.codex', '/account']]]);
-    finish({ code, stderr: code ? 'Installer failed' : '' }); await pending;
-    ui.nodes.clear(); view.statusBar({});
-    assert.equal(ui.nodes.has('plugin-sync-progress'), false);
-    assert.equal(commands.filter(([name]) => name === 'tab.new').length, 1);
-    assert.equal(notices.length, code);
-  }
-});
-
-test('sync progress stays visible until concurrent profiles finish and clears when execution rejects', async () => {
-  const memory = {}, finish = new Map();
-  const View = await viewFor({ spaces: () => [], run() {}, notify() {},
-    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
-    exec: (_command, args) => new Promise((resolve, reject) => { finish.set(args.at(-1), { resolve, reject }); }) });
+test('Codex account sessions start immediately with existing plugins and no synchronization', async () => {
+  const commands = [], closed = [], ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => [], run: (...args) => commands.push(args),
+    shared: key => key === 'devkits.plugin-syncs' ? { '/account': 1 } : undefined,
+    closeOverlay: id => closed.push(id), notify: error => assert.fail(error.body),
+    exec: () => assert.fail('Starting a session must not run a plugin helper') });
   const view = new View();
-  const account = id => ({ key: `devkits-codex-${id}`, run: ['env', `CODEX_HOME=/${id}`, 'codex'] });
-  const first = view.startThread(account('one')), duplicate = view.startThread(account('one'));
-  const second = view.startThread(account('two'));
-  assert.equal(finish.size, 2);
-  assert.deepEqual(memory['devkits.plugin-syncs'], { '/one': 2, '/two': 1 });
-  finish.get('/one').resolve({ code: 0 }); await Promise.all([first, duplicate]);
-  assert.deepEqual(memory['devkits.plugin-syncs'], { '/two': 1 });
-  finish.get('/two').reject(new Error('Could not start Node')); await second;
-  assert.deepEqual(memory['devkits.plugin-syncs'], {});
+  const pending = view.startThread({ key: 'devkits-codex-work', name: 'Work',
+    run: ['env', 'CODEX_HOME=/account', 'codex'] }, { space: 'one', folder: '/project', overlay: 'launcher' });
+  assert.deepEqual(closed, ['launcher']);
+  assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', {
+    space: 'one', folder: '/project', name: 'Work', argv: ['env', 'CODEX_HOME=/account', 'codex'],
+  }]);
+  await pending;
+  view.statusBar({});
+  assert.equal(ui.nodes.has('plugin-sync-progress'), false);
 });
 
 test('each project gets its open panel back when selected again, until a thread is chosen there', async () => {
