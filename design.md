@@ -1,5 +1,7 @@
 # Design Guidelines
 
+- Use Project consistently for the folder-backed session container in user-facing navigation, menus, dialogs, and status text.
+
 - Prefer a thread's explicit task name or live agent title over launcher/account labels. Use the account label only as a fallback when there is no thread title.
 - Do not show hover tooltips anywhere in the custom interface or shortcut hints beside Add session entries. Keep keyboard shortcuts and accessibility labels.
 
