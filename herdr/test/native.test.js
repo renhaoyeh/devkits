@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -69,7 +69,7 @@ test('working threads rise within their project and return to tab order when fin
 
 async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
-  const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress']
+  const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), components.join('\n')
@@ -78,7 +78,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -126,7 +126,8 @@ function fakeElements() {
   const asset = path => { assets.push(path); return element(); };
   return { nodes, texts, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
     NativeSelect: { new: id => element().id(id) }, NativePopup: { new: (_id, trigger) => element().child(trigger) },
-    NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) } };
+    NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) },
+    NativeSwitch: { new: id => element().id(id) }, NativeToggleGroup: { new: id => element().id(id) }, NativeToggle: { new: id => element().id(id) } };
 }
 test('closing an empty project only removes its saved folder', async () => {
   const commands = [], memory = { 'devkits.projects': ['/Code/one', '/Code/two'], 'devkits.selected-project': 'project:/Code/one' };
@@ -858,6 +859,30 @@ test('the base Claude row offers Add account and Claude accounts join Your accou
   ui.nodes.get('add-claude-account').click();
   assert.equal(overlays[0].props.view, 'account-login');
   assert.equal(overlays[0].props.provider, 'claude');
+});
+test('Manage chooses which Claude and Codex models and efforts the Asana composer offers', async () => {
+  const ui = fakeElements(), memory = {};
+  const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, closeOverlay() {}, openOverlay() {} });
+  const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude', run: ['claude'] }, { key: 'codex', name: 'Codex', run: ['codex'] }];
+  view.codexModelList = [{ key: 'gpt-6-luna', label: 'GPT-6 Luna', efforts: ['low', 'high'] }];
+  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  assert.ok(ui.nodes.has('manage-section-session'));
+  assert.ok(ui.nodes.has('session-claude-models-haiku') && ui.nodes.has('session-claude-efforts-max'));
+  assert.ok(ui.nodes.has('session-codex-models-gpt-6-luna') && ui.nodes.has('session-codex-efforts-high'));
+  ui.nodes.get('session-claude-models-haiku').change(false, renderContext);
+  ui.nodes.get('session-codex-efforts-low').change(false, renderContext);
+  assert.deepEqual(memory['devkits.session-options'], { claude: { models: ['haiku'] }, codex: { efforts: ['low'] } });
+  ui.nodes.get('session-claude-models-haiku').change(true, renderContext);
+  assert.deepEqual(memory['devkits.session-options'].claude.models, []);
+  ui.nodes.get('drag-session-claude-sonnet').mouseDown({}, renderContext); view.render(renderContext);
+  ui.nodes.get('session-claude-model-fable').mouseMove({}, renderContext);
+  ui.nodes.get('session-claude-model-fable').mouseUp({}, renderContext);
+  assert.deepEqual(memory['devkits.session-options'].claude.order, ['sonnet', 'fable', 'opus', 'haiku']);
+  assert.equal(view.modelDrag, null);
+  ui.nodes.clear(); view.launchers = [{ key: 'aider', name: 'Aider', run: ['aider'] }]; view.render(renderContext);
+  assert.ok(!ui.nodes.has('manage-section-session'));
 });
 test('local account profiles and their login action stay out of remote project menus', async () => {
   const ui = fakeElements(); let pending;

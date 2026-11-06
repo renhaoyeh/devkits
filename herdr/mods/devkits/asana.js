@@ -1,7 +1,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex, InputState, Input, TextView, TextareaState, Textarea } from 'gpui-base';
 import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
-import { folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher } from './model.js';
+import { folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions } from './model.js';
 import { Select, SelectState } from './components/select.js';
 import { Button } from './components/button.js';
 import { DialogTitle, DialogDescription } from './components/dialog.js';
@@ -675,7 +675,13 @@ export default class AsanaPanel {
     return { agent, models, model, efforts, effort: efforts.includes(saved.effort) ? saved.effort : null };
   }
 
+  // Only the models and efforts Manage leaves checked are offered.
   modelsFor(agent) {
+    const options = shared('devkits.session-options')?.[sessionKind(agent)];
+    return shownOptions(orderedOptions(this.allModels(agent), options?.order), options?.models);
+  }
+
+  allModels(agent) {
     if (isClaudeLauncher(agent)) return claudeModels;
     if (!isCodexLauncher(agent)) return [];
     const dir = codexHome(agent, home());
@@ -687,11 +693,12 @@ export default class AsanaPanel {
   }
 
   effortsFor(agent, model) {
-    if (isClaudeLauncher(agent)) return claudeEfforts;
+    const hidden = shared('devkits.session-options')?.[sessionKind(agent)]?.efforts;
+    if (isClaudeLauncher(agent)) return shownOptions(claudeEfforts, hidden);
     if (!isCodexLauncher(agent)) return [];
     const models = this.modelsFor(agent);
     const levels = model ? models.find(item => item.key === model)?.efforts || [] : models.flatMap(item => item.efforts);
-    return [...new Set(levels)];
+    return shownOptions([...new Set(levels)], hidden);
   }
 
   launchRow(task, agents, start, t) {

@@ -82,6 +82,37 @@ export function codexModels(source) {
       efforts: (model.supported_reasoning_levels || []).map(level => level?.effort || level).filter(effort => typeof effort === 'string') }));
 }
 
+export const sessionKind = agent => isClaudeLauncher(agent) ? 'claude' : isCodexLauncher(agent) ? 'codex' : null;
+
+// Every Codex profile shares one choice of models, so their caches are merged by model.
+export function mergeModels(lists) {
+  const models = new Map();
+  for (const model of lists.flat()) {
+    const known = models.get(model.key);
+    models.set(model.key, known ? { ...known, efforts: [...new Set([...known.efforts, ...model.efforts])] } : model);
+  }
+  return [...models.values()];
+}
+
+// Manage hides models and efforts by key, so ones Codex adds later still appear.
+export const shownOptions = (items, hidden = []) => items.filter(item => !hidden.includes(typeof item === 'string' ? item : item.key));
+
+// Models follow the order dragged in Manage; ones it has not seen keep their own order after them.
+export function orderedOptions(items, order = []) {
+  const ranks = new Map(order.map((key, index) => [key, index]));
+  return items.map((item, index) => [item, ranks.get(item.key) ?? order.length + index])
+    .sort((a, b) => a[1] - b[1]).map(([item]) => item);
+}
+
+// Moves `key` to where `target` is, within the full list of keys.
+export function moveOption(keys, key, target) {
+  const from = keys.indexOf(key), to = keys.indexOf(target);
+  if (from < 0 || to < 0 || from === to) return keys;
+  const next = [...keys];
+  next.splice(to, 0, next.splice(from, 1)[0]);
+  return next;
+}
+
 export function sessionArgv(agent, argv, { model, effort } = {}) {
   if (!model && !effort) return argv;
   const kind = isCodexLauncher(agent) ? 'codex' : isClaudeLauncher(agent) ? 'claude' : null;
