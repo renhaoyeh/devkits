@@ -895,6 +895,23 @@ test('New thread without a project opens the native folder picker; launcher pass
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', { space: 'api', folder: '/Code/project name', name: 'Codex', argv: ['codex', '--profile', 'work'] }]);
   assert.deepEqual(closed, ['popup']);
 });
+test('an Asana task names the thread and becomes the last launch argument; remote projects omit the entry', async () => {
+  const ui = fakeElements(), commands = [], overlays = [];
+  let target = { view: 'launcher', space: 'api', folder: '/Code/api', projectName: 'API', overlay: 'menu' };
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => projects,
+    taskPrompt: task => `prompt:${task.name}`, run: (...args) => commands.push(args),
+    closeOverlay() {}, openOverlay: value => overlays.push(value), notify: error => assert.fail(error.body) });
+  const view = new View(); view.launchers = []; view.render();
+  ui.nodes.get('start-from-asana').click();
+  assert.deepEqual(overlays[0].props, { view: 'asana-tasks', space: 'api', folder: '/Code/api', projectName: 'API' });
+  view.startThread({ key: 'codex', name: 'Codex', run: ['codex'] }, { name: 'Fix login' });
+  assert.deepEqual(commands.find(([name]) => name === 'tab.new'),
+    ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['codex', 'prompt:Fix login'] }]);
+  target = { ...target, space: 'remote' };
+  const remote = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [{ id: 'remote', machine: 'vps', tabs: [] }] });
+  ui.nodes.clear(); const view2 = new remote(); view2.launchers = []; view2.render();
+  assert.ok(!ui.nodes.has('start-from-asana'));
+});
 test('empty projects stay empty until an agent is explicitly chosen', async () => {
   const ui = fakeElements();
   const saved = ['/Code/new'];

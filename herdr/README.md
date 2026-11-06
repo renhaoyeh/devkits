@@ -46,3 +46,7 @@ herdr-app do layout.switch --name main
 ```
 
 See [design guidelines](../design.md) and the [development workflow](DEVELOPMENT.md) for further changes.
+
+## Asana tasks
+
+In a local project, choose **+** › **Asana task…** to search the open tasks assigned to you, then pick an agent. The session is named after the task and starts with its name, link and description as the prompt. The first time, paste a personal access token from the [Asana developer console](https://app.asana.com/0/my-apps); it is saved in `~/.config/herdr-app/data/devkits/asana.json`. Devkits only reads tasks and never changes them in Asana.
