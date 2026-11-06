@@ -670,7 +670,7 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
   const memory = { 'devkits.hidden-launchers': ['agent:work'] };
   const claude = { key: 'devkits-claude-me', installed: true, run: ['env', 'CLAUDE_CONFIG_DIR=/accounts/me', 'claude'] };
   const View = await viewFor({ spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
-    ensureClaudeStatusLine: async directory => statusLines.push(directory),
+    home: () => '/home/me', ensureClaudeStatusLine: async (directory, options) => statusLines.push([directory, options.chain]),
     knownAgents: async () => {
       discovered++;
       return [{ key: 'codex', installed: true, run: ['codex'] },
@@ -685,26 +685,27 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
   const cx = { spawn(task) { pending = task(cx); }, notify() {} };
   const view = new View();
   view.refreshUsage(cx); view.refreshUsage(cx); await pending;
-  assert.deepEqual(calls, [['codex', 'devkits-claude-me']]);
-  assert.deepEqual(statusLines, ['/accounts/me']);
+  assert.deepEqual(calls, [['codex', 'claude', 'devkits-claude-me']]);
+  // Only the built-in profile chains a status line another tool already set.
+  assert.deepEqual(statusLines, [['/home/me/.claude', true], ['/accounts/me', false]]);
   assert.equal(view.usage[0].windows[0].usedPercent, 42);
   view.refreshUsage(cx, false); assert.equal(discovered, 1);
   // A reload or restart starts a new view; Codex reuses fresh cached results.
   const reloaded = new View(); reloaded.refreshUsage(cx); await pending;
-  assert.deepEqual(calls.at(-1), ['devkits-claude-me']);
-  assert.deepEqual(reloaded.usage.map(account => account.key), ['codex', 'devkits-claude-me']);
+  assert.deepEqual(calls.at(-1), ['claude', 'devkits-claude-me']);
+  assert.deepEqual(reloaded.usage.map(account => account.key), ['codex', 'claude', 'devkits-claude-me']);
   memory['devkits.hidden-launchers'] = [];
   view.refreshUsage(cx, false); await pending;
-  assert.deepEqual(calls.at(-1), ['work', 'devkits-claude-me']);
-  assert.equal(statusLines.length, 2);
+  assert.deepEqual(calls.at(-1), ['work', 'claude', 'devkits-claude-me']);
+  assert.equal(statusLines.length, 4);
   for (const entry of Object.values(memory['devkits.usage-cache'])) entry.checkedAt -= 5 * 60000;
   failed = true; view.refreshUsage(cx); await pending;
-  assert.deepEqual(calls.at(-1), ['codex', 'work', 'devkits-claude-me']);
+  assert.deepEqual(calls.at(-1), ['codex', 'work', 'claude', 'devkits-claude-me']);
   assert.equal(view.usage[0].windows[0].usedPercent, 42);
   assert.equal(view.usage[0].error, 'Rate limited');
   const count = calls.length;
   view.refreshUsage(cx); await pending;
-  assert.deepEqual(calls.slice(count), [['devkits-claude-me']]);
+  assert.deepEqual(calls.slice(count), [['claude', 'devkits-claude-me']]);
   assert.equal(view.usageLoading, false);
 });
 test('remote usage never queries local credentials or shows local account entries', async () => {
