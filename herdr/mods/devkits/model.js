@@ -215,6 +215,21 @@ export function threadProfile(tab, launchers = [], profiles = {}) {
     || (tab.named ? launchers.find(agent => agent.name === tab.name) : null))?.name || null;
 }
 
+// Live terminals an agent started with hc run (and theirs, one level deeper each), in start order.
+export function childTerminals(terminals = [], parents = [], depth = 1) {
+  return parents.flatMap(parent => terminals.filter(terminal => terminal.parent === parent && terminal.state === 'live')
+    .flatMap(terminal => [{ terminal, depth, label: terminalLabel(terminal) },
+      ...(depth < 3 ? childTerminals(terminals, [terminal.address], depth + 1) : [])]));
+}
+
+// Its name, else the command a shell runs for it (sh -c "…"), else the program.
+export function terminalLabel(terminal) {
+  if (terminal.name) return terminal.name;
+  const argv = terminal.argv || [];
+  const shell = /(?:^|\/)(?:sh|bash|zsh)$/.test(argv[0] || '') && argv[1] === '-c';
+  return (shell ? argv[2] : argv.join(' ')) || terminal.agent || terminal.address;
+}
+
 // Claude and Codex threads on this machine can be archived and resumed later; remote ids carry a machine/ prefix.
 export const archivable = thread => (thread.agents || []).some(agent => ['claude-code', 'codex'].includes(agent.app))
   && !String(thread.space || '').includes('/');

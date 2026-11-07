@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 
@@ -83,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1626,4 +1626,28 @@ test('Edit creates the starting rules once and opens them in the default editor'
   assert.deepEqual(writes, [['/herdr/data/devkits/AGENTS.md', null]]);
   assert.match(file, /hc run --bg --name/);
   assert.deepEqual(runs, [['open', ['-t', '/herdr/data/devkits/AGENTS.md']], ['open', ['-t', '/herdr/data/devkits/AGENTS.md']]]);
+});
+
+test('terminals an agent started sit under its thread, peek when clicked and end from their close button', async () => {
+  const live = [
+    { address: 't9', parent: 't1', state: 'live', argv: ['sh', '-c', 'emulator -avd Pixel'] },
+    { address: 't8', parent: 't1', state: 'live', name: 'run-ios', status: 'working' },
+    { address: 't7', parent: 't8', state: 'live', argv: ['node', 'server.js'] },
+    { address: 't6', parent: 't1', state: 'finished', name: 'old' },
+    { address: 't5', parent: 't2', state: 'live', name: 'other-thread' },
+  ];
+  assert.deepEqual(childTerminals(live, ['t1']).map(child => [child.terminal.address, child.depth, child.label]),
+    [['t9', 1, 'emulator -avd Pixel'], ['t8', 1, 'run-ios'], ['t7', 2, 'node server.js']]);
+  assert.equal(terminalLabel({ address: 't3', agent: 'zsh' }), 'zsh');
+  const ui = fakeElements(), commands = [], memory = {};
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), agents: () => [agents[0]], spaces: () => projects, terminals: () => live,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args), setAgentOrder() {} });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.ok(ui.nodes.has('child-t9') && ui.nodes.has('child-t7') && !ui.nodes.has('child-t6') && !ui.nodes.has('child-t5'));
+  commands.length = 0;
+  ui.nodes.get('end-child-t9').click({}, { stop_propagation() {} });
+  assert.deepEqual(commands, [['terminal.kill', { terminal: 't9' }]]);
+  commands.length = 0;
+  ui.nodes.get('child-t8').click();
+  assert.deepEqual(commands.slice(-2), [['tab.select', { id: 'tab-0' }], ['terminal.peek', { terminal: 't8' }]]);
 });
