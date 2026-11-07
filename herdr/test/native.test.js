@@ -83,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1786,7 +1786,7 @@ test('the header branch opens a read-only list of local and remote branches, new
   assert.equal(ui.nodes.get('branch-local-main').click, undefined);
 });
 
-test('Settings is the one place for the rules: a Rules page with icons beside each page, and no thread menu', async () => {
+test('Settings is the one place for the rules: a Rules page with icons beside each page, outside thread actions', async () => {
   const ui = fakeElements();
   let target = { view: 'pane', pane: 'p1' }, pending;
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}),
@@ -1796,7 +1796,8 @@ test('Settings is the one place for the rules: a Rules page with icons beside ea
     readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? '# Global rules\n\nUse hc run.' : null,
     TextView: { markdown: (_id, text) => { ui.texts.push(text); return ui.element(); } } });
   new View().render();
-  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('thread-menu-')));
+  assert.ok(ui.nodes.has('thread-menu-p1'));
+  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('thread-rules-')));
   target = { view: 'manage-launchers', overlay: 'settings', space: 'api', page: 'rules' };
   const view = new View(), cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { if (task.length) pending = task(cx); }, timer: { every() {} } };
   view.initSessionMenu(cx); view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
@@ -1984,4 +1985,123 @@ test('archive rechecks live status after asynchronous session discovery', async 
   const view = new View(); await view.archiveThread({ ...claudeThread, agents: [claudeAgent] });
   assert.deepEqual(commands, []);
   assert.equal(memory['devkits.archived-threads'], undefined);
+});
+
+
+test('thread header menu contains only Close and targets the exact empty thread', async () => {
+  const ui = fakeElements(), commands = [];
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], props: () => ({ pane: 'p0' }),
+    panes: () => [{ pane: 'p0', tab: 'tab-0', title: 'New thread' }], run: (...args) => commands.push(args) });
+  const view = new View(), cx = { ...renderContext };
+  view.paneHeader({}, cx); ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
+  assert.ok(!ui.nodes.has('thread-actions-p0-hide'));
+  assert.ok(!ui.nodes.has('thread-actions-p0-stop'));
+  assert.ok(!ui.nodes.has('thread-actions-p0-archive'));
+  ui.nodes.get('thread-actions-p0-close').click({}, cx);
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+});
+
+test('pane header creates menu focus handles only during initialization', async () => {
+  const ui = fakeElements(); let handles = 0;
+  const View = await viewFor({ ...ui, props: () => ({ view: 'pane', pane: 'p0' }), theme: () => ({}), spaces: () => projects,
+    agents: () => [], panes: () => [{ pane: 'p0', tab: 'tab-0' }] });
+  const view = new View(); view.init({}, { focus_handle() { handles++; return { focus() {} }; } });
+  view.render({ focus_handle() { throw new Error('Cannot create focus during render'); } });
+  assert.equal(handles, 2);
+  assert.ok(ui.nodes.has('thread-menu-p0'));
+});
+
+test('split terminals appear under their thread without agent metadata and close only their own pane', async () => {
+  const ui = fakeElements(), commands = [];
+  const modelPanes = [{ pane: 'p0', terminal: 't1', tab: 'tab-0', program: {} },
+    { pane: 'p-shell', terminal: 'shell', tab: 'tab-0', title: 'Terminal', program: { shell: true }, focused: true }];
+  const live = [{ address: 'shell', parent: 't1', state: 'live' }, { address: 'build', parent: 't1', state: 'live', name: 'Build' }];
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], panes: () => modelPanes,
+    run: (...args) => commands.push(args) });
+  const view = new View(), thread = { ...claudeThread, agents: [claudeAgent] };
+  const rows = view.paneEntries(thread, live);
+  assert.deepEqual(rows.map(row => [row.label, row.pane?.pane]), [['Terminal', 'p-shell'], ['Build', undefined]]);
+  view.childRow(thread, rows[0], {});
+  ui.nodes.get('thread-pane-p-shell').click();
+  assert.deepEqual(commands.at(-1), ['pane.focus', { pane: 'p-shell' }]);
+  commands.length = 0;
+  ui.nodes.get('close-pane-p-shell').click({}, renderContext);
+  assert.deepEqual(commands, [['pane.close', { pane: 'p-shell' }]]);
+});
+
+test('a split header menu distinguishes Close terminal from Close thread', async () => {
+  const ui = fakeElements(), commands = [];
+  const View = await viewFor({ ...ui, props: () => ({ pane: 'p-shell' }), spaces: () => projects, agents: () => [],
+    panes: () => [{ pane: 'p0', terminal: 't1', tab: 'tab-0' }, { pane: 'p-shell', terminal: 'shell', tab: 'tab-0' }],
+    run: (...args) => commands.push(args) });
+  const view = new View(), cx = { ...renderContext };
+  view.paneHeader({}, cx); ui.nodes.get('thread-menu-p-shell').click({}, cx); view.paneHeader({}, cx);
+  ui.nodes.get('thread-actions-p-shell-close').click({}, cx);
+  assert.deepEqual(commands, [['pane.close', { pane: 'p-shell' }]]);
+});
+
+
+test('splitting the hidden default shell makes it and its extra pane visible in the sidebar', async () => {
+  const ui = fakeElements(), commands = [], memory = { 'devkits.default-terminals': { one: 'default' } };
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), agents: () => [],
+    spaces: () => [{ id: 'one', name: 'One', active: true, tabs: [{ id: 'default', name: '__devkits_default_terminal__', active: true }] }],
+    panes: () => [{ pane: 'first', terminal: 't1', tab: 'default' }, { pane: 'extra', terminal: 't2', tab: 'default', title: 'Terminal 2' }],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), setAgentOrder() {} });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.ok(ui.nodes.has('thread-default'));
+  assert.ok(ui.nodes.has('thread-pane-extra'));
+  assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.child === 'project-empty'));
+});
+
+
+test('sidebar preserves parallel pane depth and nests each real child under its own parent', async () => {
+  const modelPanes = [
+    { pane: 'root', terminal: 't1', tab: 'tab-0', title: 'Agent' },
+    { pane: 'parallel', terminal: 'shell', tab: 'tab-0', title: 'Terminal' },
+    { pane: 'adopted-child', terminal: 'adopted', tab: 'tab-0', title: 'Child pane' },
+    { pane: 'other-tab', terminal: 'elsewhere', tab: 'other' },
+  ];
+  const live = [
+    { address: 't1', state: 'live' }, { address: 'shell', state: 'live' },
+    { address: 'worker', parent: 't1', state: 'live', name: 'Worker' },
+    { address: 'nested', parent: 'worker', state: 'live', name: 'Nested task' },
+    { address: 'adopted', parent: 't1', state: 'live' },
+    { address: 'build', parent: 'shell', state: 'live', name: 'Build' },
+    { address: 'elsewhere', parent: 't1', state: 'live' },
+    { address: 'finished', parent: 't1', state: 'finished' },
+  ];
+  const View = await viewFor({ panes: () => modelPanes });
+  const rows = new View().paneEntries({ ...claudeThread, agents: [claudeAgent] }, live);
+  assert.deepEqual(rows.map(row => [row.label, row.depth, row.pane?.pane]), [
+    ['Worker', 1, undefined], ['Nested task', 2, undefined], ['Child pane', 1, 'adopted-child'],
+    ['Terminal', 0, 'parallel'], ['Build', 1, undefined],
+  ]);
+});
+
+test('child task traversal supports deeper trees and rejects cycles and duplicate roots', () => {
+  const live = [{ address: 'root', parent: 'deep', state: 'live' },
+    { address: 'one', parent: 'root', state: 'live' }, { address: 'two', parent: 'one', state: 'live' },
+    { address: 'three', parent: 'two', state: 'live' }, { address: 'deep', parent: 'three', state: 'live' }];
+  assert.deepEqual(childTerminals(live, ['root'], 1, Infinity).map(row => row.terminal.address), ['one', 'two', 'three', 'deep']);
+});
+
+
+test('only panes sharing a thread get a bracket; independent threads have no tree trunk', async () => {
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, panes: () => [
+    { pane: 'root', terminal: 't1', tab: 'tab-0' },
+    { pane: 'peer', terminal: 'shell', tab: 'tab-0', title: 'Terminal' },
+  ] });
+  const view = new View(), thread = { ...claudeThread, agents: [claudeAgent] };
+  view.renderThreadGroup(thread, {}, [{ address: 'shell', state: 'live' },
+    { address: 'job', parent: 'shell', name: 'Build', state: 'live' }]);
+  assert.ok(ui.nodes.has('thread-group-tab-0'));
+  assert.ok(ui.nodes.has('thread-tab-0-guide-0'));
+  assert.ok(ui.nodes.has('thread-pane-peer-guide-0'));
+  assert.ok(!ui.nodes.has('thread-pane-peer-guide-1'));
+  assert.ok(ui.nodes.has('child-job-guide-1'));
+  view.renderThreadGroup({ space: 'api', tab: { id: 'independent' }, agents: [], title: 'Independent' }, {}, []);
+  assert.ok(ui.nodes.has('thread-independent'));
+  assert.ok(!ui.nodes.has('thread-independent-guide-0'));
 });

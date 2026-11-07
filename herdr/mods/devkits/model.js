@@ -230,10 +230,14 @@ export function threadProfile(tab, launchers = [], profiles = {}) {
 }
 
 // Live terminals an agent started with hc run (and theirs, one level deeper each), in start order.
-export function childTerminals(terminals = [], parents = [], depth = 1) {
+export function childTerminals(terminals = [], parents = [], depth = 1, maxDepth = 3, seen = new Set(parents)) {
   return parents.flatMap(parent => terminals.filter(terminal => terminal.parent === parent && terminal.state === 'live')
-    .flatMap(terminal => [{ terminal, depth, label: terminalLabel(terminal) },
-      ...(depth < 3 ? childTerminals(terminals, [terminal.address], depth + 1) : [])]));
+    .flatMap(terminal => {
+      if (seen.has(terminal.address)) return [];
+      seen.add(terminal.address);
+      return [{ terminal, depth, label: terminalLabel(terminal) },
+        ...(depth < maxDepth ? childTerminals(terminals, [terminal.address], depth + 1, maxDepth, seen) : [])];
+    }));
 }
 
 // Its name, else the command a shell runs for it (sh -c "…"), else the program.
