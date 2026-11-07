@@ -2161,3 +2161,11 @@ test('only panes sharing a thread get a bracket; independent threads have no tre
   assert.ok(ui.nodes.has('thread-independent'));
   assert.ok(!ui.nodes.has('thread-independent-guide-0'));
 });
+
+test('close-file delegates to the shared editor tab strip for files, graph and commit views', async () => {
+  let editor = { id: 'editor', hidden: false, active: 'diff' }, closed = 0;
+  const View = await viewFor({ layout: () => editor });
+  const view = new View(); view.editor = { closeActiveTab() { closed++; } };
+  view.closeFileTab(renderContext); assert.equal(closed, 1);
+  editor.hidden = true; view.closeFileTab(renderContext); assert.equal(closed, 1);
+});
