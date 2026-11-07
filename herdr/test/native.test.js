@@ -1555,6 +1555,51 @@ test('archiving a Claude thread keeps its conversation, then ends the tab', asyn
   assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
 });
 
+test('a Codex launched inside Terminal shows Close immediately, including after recreating the view', async () => {
+  const commands = [], ui = fakeElements();
+  const agent = { ...claudeAgent, app: 'codex' };
+  const thread = { ...claudeThread, agent, agents: [agent] };
+  const terminal = { address: agent.address, argv: ['/bin/zsh', '-l'], foreground: { argv: ['codex'], pid: 42 } };
+  const View = await viewFor({ ...ui, terminals: () => [terminal], run: (...args) => commands.push(args),
+    hc: () => assert.fail('A terminal must close without an archive lookup') });
+  for (let i = 0; i < 2; i++) {
+    ui.nodes.clear();
+    new View().threadRow(thread, {});
+    assert.ok(ui.nodes.has('close-thread-tab-0'));
+    assert.ok(!ui.nodes.has('archive-thread-tab-0'));
+  }
+  ui.nodes.get('close-thread-tab-0').click({}, { stop_propagation() {} });
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+  commands.length = 0;
+  await new View().archiveThread(thread);
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+  assert.ok(!archivable(thread, [terminal]));
+  assert.ok(!archivable(thread, [{ ...terminal, argv: ['env', 'SHELL=/bin/zsh', '/bin/zsh', '-l'] }]));
+  assert.ok(archivable(thread, [{ ...terminal, argv: ['codex'] }]));
+});
+
+test('Codex without a readable rollout offers Close and only ends on the next click', async () => {
+  const commands = [], notes = [], ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => projects, run: (...args) => commands.push(args),
+    notify: note => notes.push(note), setShared: () => assert.fail('Must not save an unknown session'),
+    hc: async () => ({ code: 0, stdout: JSON.stringify({ argv: ['codex'],
+      foreground: { pid: 42, argv: ['codex'] } }) }), exec: async () => ({ code: 0, stdout: 'n/state_5.sqlite\n' }) });
+  const agent = { ...claudeAgent, app: 'codex' };
+  const view = new View(), thread = { ...claudeThread, agent, agents: [agent] };
+  let pending, redraws = 0;
+  const cx = { stop_propagation() {}, notify() { redraws++; }, spawn(task) { pending = task(cx); } };
+  view.threadRow(thread, {});
+  ui.nodes.get('archive-thread-tab-0').click({}, cx);
+  await pending;
+  assert.deepEqual(commands, []);
+  assert.match(notes[0].body, /Use Close thread/);
+  assert.equal(redraws, 1);
+  ui.nodes.clear(); view.threadRow(thread, {});
+  assert.ok(!ui.nodes.has('archive-thread-tab-0'));
+  ui.nodes.get('close-thread-tab-0').click({}, cx);
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+});
+
 test('a session without a conversation closes without an archive entry; an unreadable one stays open', async () => {
   const commands = [], memory = {}, notes = [];
   const host = { spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },

@@ -245,7 +245,10 @@ export function terminalLabel(terminal) {
 }
 
 // Claude and Codex threads on this machine can be archived and resumed later; remote ids carry a machine/ prefix.
-export const archivable = thread => (thread.agents || []).some(agent => ['claude-code', 'codex'].includes(agent.app))
+export const archivable = (thread, terminals = []) => (thread.agents || []).some(agent => {
+  const terminal = terminals.find(terminal => terminal.address === agent.address);
+  return ['claude-code', 'codex'].includes(agent.app) && (!terminal || Boolean(commandKind(terminal.argv)));
+})
   && !String(thread.space || '').includes('/');
 
 // The agent command inside a terminal's argv, without the login shell Herdr wraps it in.
