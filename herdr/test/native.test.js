@@ -91,6 +91,8 @@ async function viewFor(host) {
   host = { savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   host.InputState = { new: (...args) => { assert.equal(rendering, false, 'InputState.new cannot run during render'); return input.new(...args); } };
+  const textarea = host.TextareaState || input;
+  host.TextareaState = { new: (...args) => { assert.equal(rendering, false, 'TextareaState.new cannot run during render'); return textarea.new(...args); } };
   const factory = await loadView(host);
   const View = factory(class {}, ...Object.values(host)), render = View.prototype.render;
   View.prototype.render = function(...args) {
@@ -1086,7 +1088,7 @@ async function profileTableUi(memory = {}) {
     { key: 'claude', name: 'Claude', installed: true, run: ['claude'] }];
   memory['devkits.agent-cache'] = { null: accounts };
   let target, view;
-  const View = await viewFor({ ...ui, Input: { new: () => ui.element() }, props: () => target,
+  const View = await viewFor({ ...ui, Input: { new: () => ui.element() }, Textarea: { new: () => ui.element() }, props: () => target,
     spaces: () => projects, theme: () => ({}), taskPrompt: task => task.name,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     openOverlay: spec => overlays.push(spec), closeOverlay: id => closed.push(id), run: (...args) => commands.push(args), notify: error => assert.fail(error.body) });
@@ -1179,6 +1181,30 @@ test('profile editing retains its saved account when unchecked in Usage and save
   assert.deepEqual(memory['devkits.agent-configs'], [{ key, name: 'Review', profileKey: 'claude' }]);
   assert.deepEqual(memory['devkits.profile-sessions'][key], { model: 'sonnet', effort: 'high', serviceTier: null });
   assert.deepEqual(memory['devkits.hidden-usage-profiles'], ['devkits-codex-work']);
+});
+
+test('profile instructions are optional retained drafts, persist across account changes and clear on Save', async () => {
+  const key = 'devkits-preset-review', instructions = 'Review only.\nUse "繁體中文" and `code`.';
+  const h = await profileTableUi({ 'devkits.agent-configs': [{ key, name: 'Review', profileKey: 'codex', instructions }] });
+  h.mount('agent-profile-editor', key);
+  assert.equal(h.view.configInstructions.value(), instructions);
+  const state = h.view.configInstructions;
+  state.set_value('Unsaved'); h.pick('profile', 'claude'); h.render();
+  assert.equal(h.view.configInstructions, state);
+  assert.equal(state.value(), 'Unsaved');
+  assert.equal(h.memory['devkits.agent-configs'][0].instructions, instructions);
+  h.ui.nodes.get('cancel-agent-profile').click();
+  h.mount('agent-profile-editor', key);
+  assert.equal(h.view.configInstructions.value(), instructions);
+  h.view.configInstructions.set_value('  Updated\nInstructions  ');
+  h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][0].instructions, 'Updated\nInstructions');
+  h.mount('agent-profile-editor', key);
+  h.view.configInstructions.set_value('  \n'); h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][0].instructions, undefined);
+  h.mount('agent-profile-editor'); h.name('Writer'); h.pick('profile', 'claude');
+  h.view.configInstructions.set_value(instructions); h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][1].instructions, instructions);
 });
 
 test('new profiles offer only checked Usage accounts in the same saved order and revalidate on Create', async () => {
@@ -1763,6 +1789,53 @@ test('automatic terminal folder titles are never used as conversation titles', (
   const groups = projectGroups([{ ...space, id: 's1', tabs: [{ ...tab, id: 't1' }] }], [{ ...agent, space: 's1', tab: 't1', title: 'devkits' }]);
   assert.equal(groups[0].threads[0].title, 'New thread');
 });
+
+test('profile launcher labels never mask live task titles in the sidebar, pane header or Tasks', async () => {
+  const key = 'devkits-preset-work', label = 'Agent 1 - Work';
+  const project = { id: 'one', folder: '/Code/repo', name: 'Repo', active: true,
+    tabs: [{ id: 'custom', name: label, named: true, active: true }] };
+  const agent = { address: 'live', space: 'one', tab: 'custom', app: 'codex', title: '✳ Fix login | repo',
+    status: 'working', program: { key: 'codex', name: 'Codex' } };
+  const memory = { 'devkits.agent-cache': { null: [{ key: 'devkits-codex-work', name: 'Codex · Work', run: ['codex'] }] },
+    'devkits.agent-configs': [{ key, profileKey: 'devkits-codex-work', name: 'Agent 1' }],
+    'devkits.thread-profiles': { custom: key } };
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => [project], agents: () => [agent],
+    props: () => ({ pane: 'primary' }), theme: () => ({}), run() {}, setAgentOrder() {},
+    panes: () => [{ pane: 'primary', tab: 'custom', terminal: 'live', focused: true }],
+    shared: name => memory[name], setShared: (name, value) => { memory[name] = value; } });
+  const view = new View(); view.folded = new Set();
+  const cx = { ...renderContext, spawn() {}, timer: { every() {} } };
+  const assertTitle = expected => {
+    view.render(cx);
+    assert.ok(ui.textOf('thread-custom').includes(expected));
+    view.paneHeader({}, cx);
+    assert.ok(ui.textOf('pane-header-primary').includes(expected));
+    assert.equal(Object.values(memory['devkits.agent-board'])[0]['thread:custom'].name, expected);
+  };
+  for (const status of ['working', 'blocked', 'done', 'idle']) { agent.status = status; assertTitle('Fix login'); }
+  agent.title = 'Codex'; assertTitle(label);
+  agent.title = 'Fix a different issue';
+  memory['devkits.thread-tasks'] = { custom: { gid: 'local:task', name: 'Explicit task', source: 'local', folder: project.folder } };
+  view.render(cx); view.paneHeader({}, cx);
+  assert.ok(ui.textOf('thread-custom').includes('Explicit task'));
+  assert.ok(ui.textOf('pane-header-primary').includes('Explicit task'));
+  project.tabs[0].name = 'Manually named conversation';
+  view.render(cx);
+  assert.ok(ui.textOf('thread-custom').includes('Explicit task'));
+});
+
+test('automatic custom and account labels are fallbacks for both providers, while explicit task names win', () => {
+  for (const [app, provider] of [['codex', 'Codex'], ['claude-code', 'Claude Code']]) {
+    for (const label of ['Agent 1 - Work', 'Work', `${provider} · Work`]) {
+      const tab = { name: label, named: true }, agent = { app, program: { name: provider }, title: '✳ Fix login' };
+      assert.equal(threadTitle(tab, agent, null, { launcherName: label }), 'Fix login');
+      assert.equal(threadTitle(tab, { ...agent, title: provider }, null, { launcherName: label }), launcherLabel(label));
+      assert.equal(threadTitle({ ...tab, name: 'My conversation' }, agent, null, { launcherName: label }), 'My conversation');
+      assert.equal(threadTitle(tab, agent, null, { launcherName: label, taskName: 'Assigned task' }), 'Assigned task');
+    }
+  }
+});
 test('installer adds only its own files and refuses to overwrite an existing installation', async t => {
   const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
   t.after(() => rm(home, { recursive: true, force: true }));
@@ -2087,6 +2160,30 @@ test('global rules join Claude and Codex system prompts in local sessions only',
     await new View().launchThread(claude, { space: 'api', folder: '/Code/api' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
     assert.equal(argv.includes('--append-system-prompt-file'), expected);
+  }
+});
+
+test('new profile sessions append their latest instructions after global rules without changing native accounts or files', async () => {
+  const extra = 'Review "繁體中文".\nKeep `code` and \\paths.';
+  for (const provider of ['codex', 'claude']) {
+    for (const global of ['Global rules', null, '  \n', new Error('unreadable')]) {
+      const commands = [], key = 'devkits-preset-review';
+      const config = { key, profileKey: provider, name: 'Review', instructions: extra };
+      const View = await viewFor({ spaces: () => [{ id: 'api', tabs: [] }],
+        shared: name => name === 'devkits.agent-configs' ? [config] : undefined,
+        readTextFile: async () => { if (global instanceof Error) throw global; return global; },
+        writeTextFile: async () => assert.fail('Launching must not modify rules files'),
+        run: (...args) => commands.push(args) });
+      const agent = { key, profileKey: provider, run: [provider], instructions: 'Stale cached value' };
+      await new View().launchThread(agent, { space: 'api', folder: '/Code/api' }, {});
+      const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
+      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra;
+      assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`]
+        : [provider, '--append-system-prompt', expected]);
+      commands.length = 0;
+      await new View().launchThread({ key: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
+      assert.ok(!commands.find(([name]) => name === 'tab.new')[1].argv.join(' ').includes('Agent profile instructions'));
+    }
   }
 });
 
@@ -2703,7 +2800,7 @@ async function taskBoardFor(records = {}) {
       on(event, handler) { events.set(event, handler); }, set_auto_grow() {}, focus() {},
       blur() { events.get('blur')?.({}, renderContext); } };
   } };
-  const host = { ...ui, ...model, folderKey, launcherLabel, launcherOption, InputState: field, TextareaState: field,
+  const host = { ...ui, ...model, folderKey, launcherLabel, launcherOption, configuredAgents, threadTitle, InputState: field, TextareaState: field,
     Input: { new: () => ui.element() }, Textarea: { new: () => ui.element() },
     TextView: { markdown: () => ui.element() },
     shared: key => memory[key], setShared: (key, value) => { memory[key] = structuredClone(value); },

@@ -195,14 +195,16 @@ export function sessionArgv(agent, argv, { model, effort, serviceTier } = {}) {
   return [...argv.slice(0, executable + 1), ...flags, ...rest];
 }
 
-// Global rules join the session's system prompt: Claude reads the file, Codex takes the text as developer instructions.
-export function rulesArgv(agent, argv, rules) {
+// Profile instructions follow global rules, without replacing the provider's base system prompt.
+export function rulesArgv(agent, argv, rules, additional = '') {
   const kind = sessionKind(agent);
   const executable = argv.findIndex(arg => !arg.includes('=') && /(?:^|[/\\])(?:claude|codex)(?:\.exe|\.cmd)?$/i.test(arg));
-  if (!rules || !kind || executable < 0) return argv;
-  const flags = kind === 'claude' ? ['--append-system-prompt-file', rules.file]
+  const extra = additional.trim();
+  if ((!rules && !extra) || !kind || executable < 0) return argv;
+  const text = extra ? [rules?.text, `# Agent profile instructions\n\n${extra}`].filter(part => part?.trim()).join('\n\n') : rules.text;
+  const flags = kind === 'claude' ? extra ? ['--append-system-prompt', text] : ['--append-system-prompt-file', rules.file]
     // A JSON string is also a valid TOML basic string.
-    : ['-c', `developer_instructions=${JSON.stringify(rules.text)}`];
+    : ['-c', `developer_instructions=${JSON.stringify(text)}`];
   return [...argv.slice(0, executable + 1), ...flags, ...argv.slice(executable + 1)];
 }
 
@@ -214,7 +216,8 @@ export function launcherChoices(agents, order = []) {
   return choices.sort((a, b) => a.group - b.group || (ranks.get(a.key) ?? order.length) - (ranks.get(b.key) ?? order.length));
 }
 
-export function threadTitle(tab, agent, space) {
+export function threadTitle(tab, agent, space, { launcherName, taskName } = {}) {
+  if (taskName?.trim()) return taskName.trim();
   const providers = agent ? ['Codex', 'Claude', agent.program?.name, agent.app].filter(Boolean) : [];
   const folders = [agent?.space_name, space?.name, space?.folder,
     space?.folder?.split(/[\\/]/).filter(Boolean).at(-1)].filter(Boolean);
@@ -225,6 +228,8 @@ export function threadTitle(tab, agent, space) {
     let title = (value || '').replace(/^[\u2800-\u28ff✳✻✽✶✢✦✴✹✺]\s*/u, '').trim();
     if (codex && value === agent.title) title = title.replace(/\s+\|\s+[^|]+$/, '');
     if (!title || (/^\d+$/.test(title) && !(tab.named && value === tab.name))) continue;
+    // Launchers set a native tab name too; that automatic label is only a fallback.
+    if (launcherName && title === launcherName && !providerLabel.test(title)) { fallback ||= launcherLabel(launcherName); continue; }
     for (const provider of providers) {
       if (title.toLowerCase() === provider.toLowerCase()) { title = ''; break; }
       if (title.toLowerCase().startsWith(`${provider.toLowerCase()} · `)) {
@@ -365,13 +370,13 @@ export function projectCatalog(spaces, saved = [], roots = {}, selected, order =
   return projects.map(project => ({ ...project, active: project.id === chosen?.id }));
 }
 
-export function projectGroups(spaces, agents, defaults = {}) {
+export function projectGroups(spaces, agents, defaults = {}, titleFor = threadTitle) {
   return spaces.map(space => ({ space, threads: space.tabs.filter(tab => tab.id !== defaults[space.id]
     || agents.some(agent => agent.space === space.id && agent.tab === tab.id)).map(tab => {
     const members = agents.filter(a => a.space === space.id && a.tab === tab.id);
     const agent = members.find(a => a.focused) || members[0];
     return { space: space.id, tab, agents: members, agent,
-      title: threadTitle(tab, agent, space),
+      title: titleFor(tab, agent, space),
       status: tab.status || agent?.status || 'idle',
       active: space.active && tab.active };
   }).sort((a, b) => Number(b.agents.some(agent => agent.status === 'working') || b.status === 'working')
