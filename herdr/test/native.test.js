@@ -2124,6 +2124,69 @@ test('Codex without a readable rollout offers Close and only ends on the next cl
   assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
 });
 
+for (const platform of ['windows', 'macos', 'linux']) test(`${platform} threads without a resumable conversation show Close before any Archive click`, async () => {
+  for (const app of ['codex', 'claude-code']) {
+    const ui = fakeElements(), commands = [], tasks = [];
+    let reads = 0;
+    const agent = { ...claudeAgent, app, status: 'idle', seq: 1 };
+    const thread = { ...claudeThread, agent, agents: [agent] };
+    const terminal = { address: agent.address, argv: [app === 'codex' ? 'codex' : 'claude'], foreground: { pid: 42 } };
+    const View = await viewFor({ ...ui, window: () => ({ platform }), spaces: () => projects,
+      terminals: () => [terminal], run: (...args) => commands.push(args),
+      setShared: () => assert.fail('A missing session must not create an archive'),
+      notify: () => assert.fail('Preflight must not show an archive failure'),
+      hc: async () => { reads++; return { code: 0, stdout: JSON.stringify(terminal) }; },
+      readTextFile: async () => null, exec: async () => ({ code: 0, stdout: '' }) });
+    const view = new View(), cx = { stop_propagation() {}, notify() {}, spawn: fn => tasks.push(fn(cx)) };
+    view.prepareThreadArchive(thread, cx);
+    view.threadRow(thread, {});
+    assert.equal(ui.nodes.get('archive-thread-tab-0').disabled, true);
+    ui.nodes.get('archive-thread-tab-0').click({}, cx);
+    assert.deepEqual(commands, []);
+    await Promise.all(tasks);
+    assert.deepEqual(commands, []);
+    view.prepareThreadArchive(thread, cx);
+    assert.equal(reads, 1, 'An unchanged idle thread must reuse its check');
+    ui.nodes.clear(); view.threadRow(thread, {});
+    assert.ok(!ui.nodes.has('archive-thread-tab-0'));
+    assert.equal(ui.nodes.get('close-thread-tab-0').disabled, false);
+    // A rendered Close action must not terminate a thread that has since started working.
+    terminal.status = 'working';
+    ui.nodes.get('close-thread-tab-0').click({}, cx);
+    assert.deepEqual(commands, []);
+    terminal.status = 'idle';
+    ui.nodes.get('close-thread-tab-0').click({}, cx);
+    assert.deepEqual(commands, [['tab.close', { id: thread.tab.id }]]);
+  }
+});
+
+for (const platform of ['windows', 'macos', 'linux']) test(`${platform} archive checks retain resumable sessions and discard results after work resumes`, async () => {
+  const ui = fakeElements(), tasks = [], commands = [];
+  let reply;
+  const agent = { ...claudeAgent, app: 'codex', status: 'idle', seq: 1 };
+  const thread = { ...claudeThread, agent, agents: [agent] };
+  const terminal = { address: agent.address, argv: ['codex'], status: 'idle', foreground: { pid: 42 } };
+  const View = await viewFor({ ...ui, window: () => ({ platform }), spaces: () => projects,
+    terminals: () => [terminal], run: (...args) => commands.push(args),
+    hc: () => new Promise(resolve => { reply = () => resolve({ code: 0, stdout: JSON.stringify(terminal) }); }),
+    exec: async () => ({ code: 0, stdout: 'n/home/rollout-2026-11-08-12345678-1234-1234-1234-123456789abc.jsonl\n' }) });
+  const view = new View(), cx = { notify() {}, spawn: fn => tasks.push(fn(cx)) };
+  view.prepareThreadArchive(thread, cx);
+  terminal.status = agent.status = 'working'; agent.seq++;
+  view.prepareThreadArchive(thread, cx);
+  reply(); await Promise.all(tasks.splice(0));
+  view.threadRow(thread, {});
+  assert.ok(ui.nodes.has('stop-thread-tab-0'));
+  assert.ok(!view.closeOnlyThreads?.has(thread.tab.id));
+  terminal.status = agent.status = 'idle'; agent.seq++;
+  view.prepareThreadArchive(thread, cx);
+  reply(); await Promise.all(tasks);
+  ui.nodes.clear(); view.threadRow(thread, {});
+  assert.equal(ui.nodes.get('archive-thread-tab-0').disabled, false);
+  assert.ok(!ui.nodes.has('close-thread-tab-0'));
+  assert.deepEqual(commands, []);
+});
+
 test('a session without a conversation closes without an archive entry; an unreadable one stays open', async () => {
   const commands = [], memory = {}, notes = [];
   const host = { spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },

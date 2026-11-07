@@ -38,6 +38,14 @@ test('Windows launcher recognition recovers literal argv through PowerShell and 
   }
 });
 
+test('Windows launcher recognition preserves long instruction arguments with many quotes', () => {
+  const command = ['codex', '-c', `developer_instructions=${'中文 "quoted" \' \\text\n'.repeat(5000)}`];
+  const wrapped = terminalArgv(command, 'windows');
+  const argv = ['powershell.exe', '-NoExit', '-Command',
+    '& ' + wrapped.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ')];
+  assert.deepEqual(unwrapTerminalArgv(argv), command);
+});
+
 test('Windows terminal launches preserve arguments through legacy PowerShell', { skip: process.platform !== 'win32' }, async () => {
   const literal = 'developer_instructions="# Global rules\\n\\nThese rules use \\"quoted\\" text"';
   const home = "C:\\Users\\測試 ' $(throw INJECTED)\\App Data\\account";

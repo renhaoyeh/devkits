@@ -17,15 +17,40 @@ export function terminalArgv(argv, platform) {
 
 // Read only the literal quoting emitted by our Windows launchers; never run shell text.
 function launcherWords(script, ansi = false) {
-  const words = [], pattern = ansi ? /\$'((?:[^'\\]|\\(?:[\\'rn]|x22))*)'/y : /'((?:[^']|'')*)'/y;
+  const words = [], quote = ansi ? "$'" : "'";
   let offset = 0;
   while (offset < script.length) {
-    pattern.lastIndex = offset;
-    const match = pattern.exec(script);
-    if (!match) return null;
-    words.push(ansi ? match[1].replace(/\\(x22|[\\'rn])/g, (_all, escape) =>
-      ({ x22: '"', r: '\r', n: '\n' })[escape] ?? escape) : match[1].replaceAll("''", "'"));
-    offset = pattern.lastIndex;
+    if (!script.startsWith(quote, offset)) return null;
+    offset += quote.length;
+    const parts = [];
+    let start = offset, closed = false;
+    let nextQuote = script.indexOf("'", offset), nextEscape = ansi ? script.indexOf('\\', offset) : -1;
+    while (offset < script.length) {
+      offset = nextEscape >= 0 && (nextQuote < 0 || nextEscape < nextQuote) ? nextEscape : nextQuote;
+      if (offset < 0) return null;
+      const char = script[offset];
+      if (char === "'") {
+        parts.push(script.slice(start, offset)); offset++;
+        if (!ansi && script[offset] === "'") {
+          parts.push("'"); start = ++offset; nextQuote = script.indexOf("'", offset); continue;
+        }
+        closed = true; break;
+      }
+      if (ansi && char === '\\') {
+        parts.push(script.slice(start, offset));
+        const escape = script[++offset];
+        if (script.startsWith('x22', offset)) { parts.push('"'); offset += 3; }
+        else if (escape === '\\' || escape === "'" || escape === 'r' || escape === 'n') {
+          parts.push(escape === 'r' ? '\r' : escape === 'n' ? '\n' : escape); offset++;
+        } else return null;
+        start = offset;
+        nextEscape = script.indexOf('\\', offset);
+        if (nextQuote < offset) nextQuote = script.indexOf("'", offset);
+        continue;
+      }
+    }
+    if (!closed) return null;
+    words.push(parts.join(''));
     if (offset === script.length) break;
     if (script[offset] !== ' ') return null;
     offset++;
