@@ -1,5 +1,5 @@
 import { div, svg } from 'gpui-kit';
-import { v_flex, h_flex, InputState, Input, TextView, TextareaState, Textarea } from 'gpui-base';
+import { v_flex, h_flex, InputState, Input, TextView } from 'gpui-base';
 import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
 import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions, settingsKey } from './model.js';
 import { Select, SelectState } from './components/select.js';
@@ -107,19 +107,6 @@ export async function taskDetails(token, gid, project, request = fetch) {
   }
 }
 
-// Saved tasks missing from the project list are checked one by one: a task that became a subtask leaves the list but still exists.
-export function reconcileSaved(saved, listed, details, project) {
-  return saved.flatMap(item => {
-    const task = listed.find(task => task.gid === item.gid);
-    if (task) return [{ gid: item.gid, name: task.name, parent: null, moved: false }];
-    const detail = details[item.gid];
-    if (detail === undefined) return [item];
-    if (detail === null || detail.completed) return [];
-    return [{ gid: item.gid, name: detail.name, parent: detail.parent?.name || null,
-      moved: !detail.parent && !detail.projects.includes(project) }];
-  });
-}
-
 export const filterTasks = (tasks, query) => {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   return tasks.filter(task => words.every(word => [task.name, task.section, task.assignee, task.parent]
@@ -153,14 +140,15 @@ const commentLimit = 5, commentLength = 500;
 // The prompt carries the latest comments, which often hold the decisions the description lacks.
 export function taskPrompt(task) {
   const notes = (task.notes || '').trim();
-  const comments = (task.comments || []).slice(-commentLimit).map(comment => {
+  const source = task.asana || task, stories = source.comments || [];
+  const comments = stories.slice(-commentLimit).map(comment => {
     const text = comment.text.length > commentLength ? `${comment.text.slice(0, commentLength)}…` : comment.text;
     return `- ${comment.author}${comment.at ? ` (${comment.at.slice(0, 10)})` : ''}: ${text.replace(/\s*\n\s*/g, ' ')}`;
   });
-  return [`Work on this ${task.source && task.source !== 'asana' ? '' : 'Asana '}task: ${task.name}`, task.url,
-    task.parent && [`It is a subtask of: ${task.parent.name}`, task.parent.url].filter(Boolean).join('\n'),
-    notes && `Description:\n${clip(notes)}`,
-    comments.length && `Latest comments${task.comments.length > comments.length ? ` (${comments.length} of ${task.comments.length})` : ''}:\n${comments.join('\n')}`,
+  return [`Work on this ${task.asana || !task.source || task.source === 'asana' ? 'Asana ' : ''}task: ${task.name}`, source.url,
+    source.parent && [`It is a subtask of: ${source.parent.name}`, source.parent.url].filter(Boolean).join('\n'),
+    notes && `Description:\n${task.source === 'local' ? notes : clip(notes)}`,
+    comments.length && `Latest comments${stories.length > comments.length ? ` (${comments.length} of ${stories.length})` : ''}:\n${comments.join('\n')}`,
     task.note?.trim() && `My instructions:\n${task.note.trim()}`]
     .filter(Boolean).join('\n\n');
 }
@@ -174,11 +162,9 @@ export async function saveAsanaToken(token) {
   await writeTextFile(tokenPath(), `${JSON.stringify({ token }, null, 2)}\n`, current);
 }
 
-// Bindings and saved tasks belong to the Devkits project folder and stay on this computer.
+// Bindings belong to the Devkits project folder and stay on this computer.
 const projectKey = folder => JSON.stringify(['', folderKey(folder)]);
 const binding = folder => shared('devkits.asana-projects')?.[projectKey(folder)] || null;
-export const savedTasks = folder => shared('devkits.asana-saved')?.[projectKey(folder)] || [];
-const setSavedTasks = (folder, list) => setShared('devkits.asana-saved', { ...(shared('devkits.asana-saved') || {}), [projectKey(folder)]: list });
 // Bounds and positions are in zoomed pixels; the list and the preview each keep at least 320px.
 export const previewWidthAt = (bounds, x, zoom) =>
   Math.round(Math.max(320, Math.min(bounds.width / zoom - 320, (bounds.x + bounds.width - x) / zoom)));
@@ -198,7 +184,6 @@ export function dueLabel(due, now = new Date()) {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return { text: `${months[month - 1]} ${day}${year === now.getFullYear() ? '' : `, ${year}`}`, overdue: due < today };
 }
-export const unsaveTask = (folder, gid) => setSavedTasks(folder, savedTasks(folder).filter(item => item.gid !== gid));
 
 // The Asana project menu: a dropdown under the toolbar's project button, searched with Asana's typeahead.
 export class AsanaProjectPicker {
@@ -265,21 +250,17 @@ export class AsanaProjectPicker {
   }
 }
 
-// Asana's project as a read-only List or Board, with a preview beside it. Nothing starts until Start session is chosen.
+// Read-only source selection. Confirm the import in the Tasks composer.
 export default class AsanaPanel {
   init(cx) {
     this.handle = cx.focus_handle();
-    this.tab = shared('devkits.asana-tab') || 'mine';
+    this.tab = shared('devkits.asana-tab') === 'all' ? 'all' : 'mine';
     this.folder = undefined;
     this.reset();
     this.search = InputState.new({ placeholder: 'Search tasks' });
     this.search.on('change', (_event, cx) => cx.notify());
-    this.notes = new Map();
     this.selects = { agent: new SelectState(cx), model: new SelectState(cx), effort: new SelectState(cx) };
     this.codexModels = new Map();
-    this.note = TextareaState.new({ placeholder: 'Add instructions for the agent (optional)' });
-    this.note.set_auto_grow(2, 8);
-    this.note.on('change', () => { if (this.selected) this.notes.set(this.selected, this.note.value()); });
     this.tokenInput = InputState.new({ placeholder: 'Personal access token' });
     this.tokenInput.set_masked(true);
     this.tokenInput.on('change', (_event, cx) => { this.tokenCopied = false; cx.notify(); });
@@ -340,13 +321,6 @@ export default class AsanaPanel {
         const mine = await myProjectTasks(this.token, gid, workspace);
         if (this.folder !== folder || this.loadedGid !== gid) return;
         this.mine = mine;
-        const missing = savedTasks(folder).filter(item => !mine.some(task => task.gid === item.gid));
-        const details = Object.fromEntries(await Promise.all(missing.map(async item => {
-          try { return [item.gid, await taskDetails(this.token, item.gid, gid)]; } catch { return [item.gid, undefined]; }
-        })));
-        // Saved tasks outside Mine that are still in this project count as listed, not moved.
-        const listed = [...mine, ...Object.values(details).filter(detail => detail?.projects?.includes(gid))];
-        setSavedTasks(folder, reconcileSaved(savedTasks(folder), listed, details, gid));
       });
     }
     if (gid && this.tab === 'all' && !this.all.loaded) this.more(cx);
@@ -420,12 +394,6 @@ export default class AsanaPanel {
     });
   }
 
-  toggleSaved(task) {
-    const list = savedTasks(this.folder);
-    setSavedTasks(this.folder, list.some(item => item.gid === task.gid) ? list.filter(item => item.gid !== task.gid)
-      : [...list, { gid: task.gid, name: task.name, parent: task.parent?.name || task.parent || null, moved: false }]);
-  }
-
   toggleExpanded(task, cx) {
     if (this.expanded.delete(task.gid)) { cx.notify(); return; }
     this.expanded.add(task.gid);
@@ -442,11 +410,10 @@ export default class AsanaPanel {
     });
   }
 
-  // The preview always reads the task fresh; saved entries only remember which task it was.
+  // The preview always reads the source task fresh.
   show(task, cx) {
     const gid = task.gid;
     this.selected = gid; this.cursor = gid; this.detail = null; this.detailError = null;
-    this.note.set_value(this.notes.get(gid) || '');
     cx.spawn(async cx => {
       try {
         const detail = await taskDetails(this.token, gid, binding(this.folder)?.gid);
@@ -474,14 +441,9 @@ export default class AsanaPanel {
     });
   }
 
-  // Saved rows use the live task when it is still in the project; the rest keep their saved name.
   visible() {
     const query = this.search.value();
-    const saved = savedTasks(this.folder);
-    const base = this.tab === 'saved' ? saved.map(item => {
-      const task = [...(this.mine || []), ...this.all.tasks].find(task => task.gid === item.gid);
-      return task || { ...item, subtasks: 0, section: item.parent ? 'Subtasks' : item.moved ? 'Not in this project' : 'Saved' };
-    }) : this.tab === 'mine' ? this.mine || [] : this.all.tasks;
+    const base = this.tab === 'mine' ? this.mine || [] : this.all.tasks;
     return filterTasks(base, query);
   }
 
@@ -498,7 +460,7 @@ export default class AsanaPanel {
   }
 
   rows() {
-    const nested = this.tab !== 'saved' && !this.search.value().trim() && this.view() === 'list';
+    const nested = !this.search.value().trim() && this.view() === 'list';
     return this.groups().flatMap(group => group.tasks.flatMap(task => [{ task, depth: 0 },
       ...(nested && this.expanded.has(task.gid) ? (this.subtasks.get(task.gid) || []).map(sub => ({ task: sub, depth: 1 })) : [])]));
   }
@@ -523,7 +485,6 @@ export default class AsanaPanel {
   toolbar(t, close) {
     const ready = this.needsToken === false;
     const bound = binding(this.folder);
-    const saved = savedTasks(this.folder).length;
     const toggle = (id, label, active, action) => asanaButton(id, t, { variant: 'ghost' }).h(28).px(10)
       .when(active, el => el.bg(t.selected).text_color(t.accent))
       .accessibility_label(`${label}${active ? ', selected' : ''}`)
@@ -559,7 +520,7 @@ export default class AsanaPanel {
           .child(tab('asana-view-board', 'Board', this.view() === 'board', () => setShared('devkits.asana-view', 'board'))))
         .child(h_flex().h(56).px(24).gap(8).items_center()
           .on_mouse_down('left', (_event, cx) => cx.stop_propagation()).border_b(1).border_color(t.border)
-          .children([['mine', 'Mine'], ['all', 'All'], ['saved', `Saved${saved ? ` ${saved}` : ''}`]].map(([value, label]) =>
+          .children([['mine', 'Mine'], ['all', 'All']].map(([value, label]) =>
             toggle(`asana-tab-${value}`, label, this.tab === value, () => { this.tab = value; setShared('devkits.asana-tab', value); })))
           .child(div().flex_1())
           .child(Input.new(this.search).id('asana-search').accessibility_label('Search tasks')
@@ -595,7 +556,7 @@ export default class AsanaPanel {
 
   // Section headers, task rows and Load more, in display order.
   listItems() {
-    const nested = this.tab !== 'saved' && !this.search.value().trim();
+    const nested = !this.search.value().trim();
     const items = this.groups().flatMap(group => [{ key: `section:${group.name}`, group },
       ...group.tasks.flatMap(task => [{ key: `task:${task.gid}`, task, depth: 0, section: group.name, nested },
         ...(nested && this.expanded.has(task.gid) ? (this.subtasks.get(task.gid) || []).map(sub => ({ key: `task:${sub.gid}:${task.gid}`, task: sub, depth: 1 })) : [])])]);
@@ -606,7 +567,6 @@ export default class AsanaPanel {
   // Asana's task table keeps assignees and due dates in aligned columns.
   // A plain scroll list: pages keep it to a few hundred rows, and hover then stays in GPUI instead of rebuilding rows in script each frame.
   list(t) {
-    const saved = new Set(savedTasks(this.folder).map(item => item.gid));
     const row = item => {
       if (item.group) return this.sectionLabel(item.group, t);
       if (!item.task) return h_flex().id('asana-load-more').h(36).flex_none().px(16).gap(8).items_center().text_size(12).text_color(t.muted)
@@ -614,7 +574,7 @@ export default class AsanaPanel {
         .child(glyph('chevron-down', 12)).child(this.loadingMore ? 'Loading…' : 'Load more tasks');
       const { task, depth } = item;
       return h_flex().id(`asana-${item.key}`).h(38).flex_none().pl(24 + depth * 22).pr(24).gap(10).items_center().border_b(1).border_color(t.border).cursor_pointer()
-        .opacity(task.moved ? 0.5 : 1).accessibility_label(task.name)
+        .accessibility_label(task.name)
         .bg(this.selected === task.gid ? t.selected : t.background).hover(el => el.bg(this.selected === task.gid ? t.selected : t.hover))
         .on_click((_event, cx) => { this.handle.focus(); this.show(task, cx); })
         .child(glyph('circle-check', 16).text_color(t.muted))
@@ -625,7 +585,6 @@ export default class AsanaPanel {
           .on_click((_event, cx) => { cx.stop_propagation(); this.toggleExpanded(task, cx); })
           .child(glyph(this.expanded.has(task.gid) ? 'chevron-down' : 'chevron-right', 10)).child(String(task.subtasks))))
         .when(Boolean(task.parent) && !depth, el => el.child(div().flex_none().max_w(200).truncate().text_size(12).text_color(t.muted).child(`↳ ${task.parent}`)))
-        .when(saved.has(task.gid), el => el.child(glyph('star-filled', 12).text_color(t.muted)))
         .child(h_flex().w(120).h_full().pl(12).border_l(1).border_color(t.border).flex_none().items_center().child(this.avatar(task, t, 24)))
         .child(h_flex().w(120).h_full().pl(12).border_l(1).border_color(t.border).flex_none().items_center().child(this.due(task, t)));
     };
@@ -638,7 +597,6 @@ export default class AsanaPanel {
   }
 
   board(t) {
-    const saved = new Set(savedTasks(this.folder).map(item => item.gid));
     return h_flex().id('asana-board').flex_1().min_h(0).overflow_x_scrollbar().bg(t.chrome).p(24).gap(16)
       .children(this.groups().map(group => v_flex().w(300).flex_none().h_full().min_h(0)
         .child(h_flex().h(40).flex_none().px(4).gap(8).items_center()
@@ -648,7 +606,7 @@ export default class AsanaPanel {
         .child(v_flex().id(`asana-column-${group.name}`).flex_1().min_h(0).overflow_y_scrollbar().gap(8)
           .children(group.tasks.map(task => v_flex().id(`asana-card-${task.gid}`).flex_none().p(16).gap(12).rounded(8).cursor_pointer()
             .bg(this.selected === task.gid ? t.selected : t.background).border(1).border_color(this.selected === task.gid ? t.solid : t.border)
-            .opacity(task.moved ? 0.5 : 1).hover(el => el.border_color(t.solid)).accessibility_label(task.name)
+            .hover(el => el.border_color(t.solid)).accessibility_label(task.name)
             .on_click((_event, cx) => { this.handle.focus(); this.show(task, cx); })
             .when(Boolean(task.parent), el => el.child(div().truncate().text_size(11).text_color(t.muted).child(`↳ ${task.parent}`)))
             .child(div().text_size(13).font_medium().child(task.name))
@@ -657,7 +615,6 @@ export default class AsanaPanel {
               .when(task.subtasks > 0, el => el.child(h_flex().h(20).px(6).items_center().rounded(4).border(1).border_color(t.border)
                 .text_size(11).text_color(t.muted).child(`${task.subtasks} subtasks`)))
               .child(div().flex_1())
-              .when(saved.has(task.gid), el => el.child(glyph('star-filled', 12).text_color(t.muted)))
               .child(this.due(task, t))
               .child(this.avatar(task, t))))))))
       .when(this.tab === 'all' && Boolean(this.all.next), el => el.child(asanaButton('asana-load-more', t, { variant: 'outline' }).flex_none()
@@ -689,9 +646,8 @@ export default class AsanaPanel {
   }
 
   // Asana's task detail pane, with properties followed by description and activity.
-  preview(t, agents, start) {
+  preview(t, importTask) {
     const task = this.detail;
-    const saved = task && savedTasks(this.folder).some(item => item.gid === task.gid);
     const subtasks = task ? this.subtasks.get(task.gid) : null;
     const width = this.previewWidth();
     const property = (label, value) => h_flex().h(36).gap(12).items_center()
@@ -706,12 +662,7 @@ export default class AsanaPanel {
             .hover(el => el.text_color(t.foreground)).on_click((_event, cx) => this.show(task.parent, cx)).child(task.parent.name))))
         .when(Boolean(task), el => el
           .child(asanaButton('asana-open', t, { variant: 'ghost' }).h(28).px(8).accessibility_label('Open in Asana')
-            .on_click((_event, cx) => cx.open_url(task.url)).child('Open in Asana'))
-          .child(asanaButton('asana-save', t, { variant: 'outline' }).h(28).px(8).gap(6)
-            .accessibility_label(saved ? 'Remove from Saved' : 'Save for later on this computer')
-            .on_click((_event, cx) => { this.toggleSaved(task); cx.notify(); })
-            .child(glyph(saved ? 'star-filled' : 'star', 12)).child(saved ? 'Saved' : 'Save for later'))
-)
+            .on_click((_event, cx) => cx.open_url(task.url)).child('Open in Asana')))
         .child(asanaButton('asana-close-preview', t, { variant: 'ghost', size: 'icon' }).accessibility_label('Close preview')
           .on_click((_event, cx) => { this.selected = null; this.detail = null; cx.notify(); }).child(glyph('close'))))
       .child(v_flex().id(`asana-preview-${this.selected}`).flex_1().min_h(0).overflow_y_scrollbar().px(32).py(28).gap(24)
@@ -753,9 +704,10 @@ export default class AsanaPanel {
                   .child(div().text_color(t.muted).child(relativeTime(comment.at))))
                 .child(TextView.markdown(`asana-comment-text-${comment.gid}`, comment.text).selectable(true).scrollable(false).w_full())))))))
       .when(Boolean(task), el => el.child(v_flex().flex_none().p(12).gap(8).border_t(1).border_color(t.border).bg(t.chrome)
-        .child(Textarea.new(this.note).id('asana-note').accessibility_label('Instructions for the agent')
-          .w_full().px(10).py(8).rounded(6).border(1).border_color(t.input).bg(t.background).text_size(13))
-        .child(this.launchRow(task, agents, start, t))));
+        .child(h_flex().items_center().justify_end()
+          .child(asanaButton('asana-import', t).h(28).px(10).accessibility_label('Import into Tasks')
+            .disabled(!task.comments && !task.commentsError)
+            .on_click(() => importTask(task)).child('Import into Tasks')))));
   }
 
   // Remembers the last agent, model and effort; a model or effort the chosen agent lacks falls back to Default.
@@ -824,20 +776,19 @@ export default class AsanaPanel {
         current.efforts.map(effort => option(effort, effortLabel(effort))), key => remember({ effort: key === 'default' ? null : key }))))
       .child(div().flex_1())
       .child(asanaButton('asana-start', t).h(28).px(10).gap(6).disabled(!current.agent).accessibility_label('Start a session for this task')
-        .on_click((_event, cx) => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, {
+        .on_click((_event, cx) => { if (current.agent) start(current.agent, task, {
           model: current.model || profile.model || null,
           effort: current.effort || defaultEffort,
         }, cx); })
         .child(glyph('plus', 12)).child('Start session'));
   }
 
-  // `start(agent, task, { model, effort })` opens the session; `agents` are the visible Add session agents.
-  render(project, agents, start, close, cx) {
+  render(project, importTask, close, cx) {
     this.cx = cx;
-    try { return this.panel(project, agents, start, close, cx); } finally { this.cx = null; }
+    try { return this.panel(project, importTask, close, cx); } finally { this.cx = null; }
   }
 
-  panel(project, agents, start, close, cx) {
+  panel(project, importTask, close, cx) {
     if (this.folder !== (project?.folder || null)) this.open(project, cx);
     this.sync(cx);
     // A thread's Asana link asks for its task; the preview shows it once the token is known.
@@ -849,7 +800,7 @@ export default class AsanaPanel {
     const t = asanaTheme();
     const ready = this.needsToken === false && !this.settingsOpen, bound = Boolean(binding(this.folder));
     const rows = ready && bound ? this.rows() : [];
-    const empty = !bound ? 'Choose the Asana project for this Devkits project from the menu above.' : this.tab === 'saved' ? 'No saved tasks.'
+    const empty = !bound ? 'Choose the Asana project for this Devkits project from the menu above.'
       : this.search.value().trim() ? 'No matching tasks.' : this.tab === 'mine' ? 'No open tasks assigned to you in this project.' : 'No open tasks in this project.';
     const status = text => div().p(12).text_size(12).text_color(t.muted).child(text);
     const stopResize = () => {
@@ -887,7 +838,7 @@ export default class AsanaPanel {
             .bg(this.resizing ? t.border : t.background).hover(el => el.bg(t.border))
             .accessibility_label('Resize preview')
             .on_mouse_down('left', (_event, cx) => { cx.stop_propagation(); this.width = this.previewWidth(); this.resizing = true; cx.notify(); }))
-          .child(this.preview(t, agents, start))));
+          .child(this.preview(t, importTask))));
   }
 
   // The tasks and the preview split the space evenly until the divider is dragged; the dragged width is remembered.

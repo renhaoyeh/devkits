@@ -1119,19 +1119,16 @@ test('thread maximize restores panels and exits when opening workspace controls'
   }
   assert.ok(!commands.some(([name]) => ['tab.close', 'pane.close', 'terminal.kill', 'pane.zoom'].includes(name)));
 });
-test('a thread started from an Asana task links back to it from the pane header', async () => {
+test('a linked Asana thread returns to its task in Tasks rather than opening another Asana panel', async () => {
   const ui = fakeElements(), commands = [], overlays = [], memory = { 'devkits.thread-tasks': { 'tab-1': { gid: 't1', name: 'Fix login', folder: '/Code/app' } } };
   const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }), spaces: () => projects, agents: () => agents,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args),
     openOverlay: spec => overlays.push(spec), panes: () => [{ pane: 'pane-1', tab: 'tab-1', program: { name: 'Codex' } }, { pane: 'pane-2', tab: 'tab-3', program: { name: 'Codex' } }] });
   new View().paneHeader({});
   ui.nodes.get('asana-link-tab-1').click({}, { stop_propagation() {} });
-  assert.equal(memory['devkits.asana'], null);
-  assert.equal(overlays[0].kind, 'dialog');
-  assert.equal(overlays[0].modal, true);
-  assert.equal(overlays[0].props.project.id, 'app');
-  assert.deepEqual(memory['devkits.asana-focus'], { folder: '/Code/app', gid: 't1' });
-  assert.ok(!commands.some(([name]) => name === 'space.select'));
+  assert.equal(memory['devkits.board-project'], 'app');
+  assert.equal(memory['devkits.board-focus'], 't1');
+  assert.deepEqual(overlays, []);
   assert.ok(!ui.nodes.has('asana-link-tab-3'));
 });
 test('pane header names the agent profile that started the thread', async () => {
@@ -1247,24 +1244,19 @@ test('the launcher stays alive until rules are read and suppresses duplicate sta
   }
 });
 
-test('Asana pop-out stays bound to its project and does not replace the workspace', async () => {
-  const ui = fakeElements(), commands = [], memory = {}, overlays = [];
-  const project = { id: 'one', name: 'One', folder: '/Code/one', machine: null, active: true, tabs: [] };
-  let target = { view: 'project-menu', overlay: 'menu', project };
-  const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces: () => [project],
-    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {},
-    openOverlay: spec => overlays.push(spec), run: (...args) => commands.push(args), closeOverlay() {} });
-  const menu = new View(); menu.handle = { focus() {} }; menu.render(); ui.nodes.get('menu-asana-tasks').click();
-  assert.equal(memory['devkits.asana'], null);
-  assert.equal(overlays[0].kind, 'dialog');
-  assert.equal(overlays[0].modal, true);
+test('Asana import opens from Tasks and stays bound to its originating project', async () => {
+  const overlays = [], memory = {}, project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] };
+  const View = await viewFor({ spaces: () => [project], openOverlay: spec => overlays.push(spec),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(); view.agentBoard = { render: (_p, _a, _l, actions) => actions };
+  view.boardPanel(project, {}).asana();
+  assert.equal(overlays[0].kind, 'dialog'); assert.equal(overlays[0].modal, true);
   assert.equal(overlays[0].props.project.folder, '/Code/one');
-  assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.child === 'asana'));
 });
-test('Start session from the Asana composer names the thread, adds the model, effort and task prompt, and unsaves it', async () => {
-  const ui = fakeElements(), commands = [], unsaved = [];
+test('starting a task from Tasks names the thread, adds the model, effort and task prompt, without a bookmark step', async () => {
+  const ui = fakeElements(), commands = [];
   const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), spaces: () => projects,
-    taskPrompt: task => `prompt:${task.name}`, unsaveTask: (...args) => unsaved.push(args), run: (...args) => commands.push(args),
+    taskPrompt: task => `prompt:${task.name}`, run: (...args) => commands.push(args),
     closeOverlay: () => assert.fail('no overlay to close'), notify: error => assert.fail(error.body) });
   const view = new View();
   view.startThread({ key: 'claude', name: 'Claude', run: ['claude'] }, { space: 'api', folder: '/Code/api', projectName: 'API', task: { gid: 't1', name: 'Fix login' } },
@@ -1272,31 +1264,19 @@ test('Start session from the Asana composer names the thread, adds the model, ef
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'),
     ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--model', 'opus', '--effort', 'max', 'prompt:Fix login'] }]);
-  assert.deepEqual(unsaved, [['/Code/api', 't1']]);
 });
-test('Asana tasks opens from a local project menu, sits beside Changes, and is absent for remote projects', async () => {
-  const ui = fakeElements(), commands = [], overlays = [], memory = {};
-  const project = { id: 'one', name: 'One', folder: '/Code/one', machine: null, active: true, tabs: [] };
+test('project menus have no separate Asana entry; Tasks remains available in the status bar', async () => {
+  const ui = fakeElements();
+  const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] };
   let target = { view: 'project-menu', overlay: 'menu', project };
-  const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces: () => [project],
-    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {},
-    openOverlay: spec => overlays.push(spec), run: (...args) => commands.push(args), closeOverlay() {} });
-  const menu = new View(); menu.handle = { focus() {} }; menu.render();
-  ui.nodes.get('menu-asana-tasks').click();
-  assert.equal(memory['devkits.asana'], null);
-  target = {}; const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
-  assert.equal(overlays[0].kind, 'dialog');
-  assert.equal(overlays[0].modal, true);
-  assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.child === 'asana'));
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => [project], theme: () => ({}) });
+  for (const machine of [null, 'vps']) {
+    ui.nodes.clear(); target = { view: 'project-menu', overlay: 'menu', project: { ...project, machine } };
+    const view = new View(); view.handle = { focus() {} }; view.render();
+    assert.ok(!ui.nodes.has('menu-asana-tasks')); assert.ok(ui.nodes.has('menu-close-project'));
+  }
   target = { view: 'status' }; new View().render();
-  assert.ok(!ui.nodes.has('open-asana'));
-  // Changes opens in the editor beside Asana instead of replacing it.
-  ui.nodes.get('open-diff').click();
-  assert.equal(memory['devkits.asana'], null);
-  ui.nodes.clear(); target = { view: 'project-menu', overlay: 'menu', project: { ...project, machine: 'vps' } };
-  const remote = new View(); remote.handle = { focus() {} }; remote.render();
-  assert.ok(!ui.nodes.has('menu-asana-tasks'));
-  assert.ok(ui.nodes.has('menu-close-project'));
+  assert.ok(ui.nodes.has('open-tasks')); assert.ok(!ui.nodes.has('open-asana'));
 });
 test('empty projects stay empty until an agent is explicitly chosen', async () => {
   const ui = fakeElements();
@@ -2177,8 +2157,10 @@ test('only panes sharing a thread get a bracket; independent threads have no tre
   assert.ok(!ui.nodes.has('thread-independent-guide-0'));
 });
 
-test('Agent board sidebar groups Saved and live threads, and opening a thread leaves the board', async () => {
-  const ui = fakeElements(), commands = [], memory = {};
+test('Tasks groups created tasks and live threads, while Asana bookmarks stay outside Todo until imported', async () => {
+  const ui = fakeElements(), commands = [], memory = { 'devkits.agent-board': { '["","/Code/api"]': {
+    'local:import': { gid: 'local:import', source: 'local', name: 'Imported task', status: 'todo', asana: { gid: 'original' } },
+  } } };
   const View = await viewFor({ ...ui, theme: () => ({}), agents: () => agents,
     spaces: () => projects, savedTasks: folder => folder === '/Code/api' ? [{ gid: 'saved', name: 'Queued task' }] : [],
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
@@ -2186,10 +2168,11 @@ test('Agent board sidebar groups Saved and live threads, and opening a thread le
   const view = new View(); view.folded = new Set(); view.render();
   assert.ok(!ui.nodes.has('board-api'));
   assert.ok(ui.nodes.has('thread-shell'));
-  assert.ok(ui.nodes.has('board-task-api-saved'));
-  ui.nodes.get('board-task-api-saved').click();
+  assert.ok(!ui.nodes.has('board-task-api-saved'));
+  assert.ok(ui.nodes.has('board-task-api-local:import'));
+  ui.nodes.get('board-task-api-local:import').click();
   assert.equal(memory['devkits.board-project'], 'api');
-  assert.equal(memory['devkits.board-focus'], 'saved');
+  assert.equal(memory['devkits.board-focus'], 'local:import');
   assert.ok(!commands.some(([name]) => ['tab.new', 'space.new', 'tab.close', 'terminal.kill'].includes(name)));
   ui.nodes.get('thread-tab-0').click();
   assert.equal(memory['devkits.board-project'], null);
@@ -2722,4 +2705,29 @@ test('empty property searches stay harmless and reopening clears the search draf
   board.render(); board.ui.nodes.get('board-task-status').click({}, board.cx);
   assert.equal(board.view.statusSelect.search.value(), '');
   board.render(); assert.ok(board.ui.nodes.has('board-task-status-option-todo'));
+});
+
+test('confirming an Asana selection closes the picker and opens a Tasks draft without launching a session', async () => {
+  const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] }, drafts = [], closed = [], commands = [];
+  const source = { gid: 'a1', name: 'Selected source', notes: 'Source instructions', comments: [] };
+  const View = await viewFor({ props: () => ({ view: 'asana', project, overlay: 'asana' }),
+    spaces: () => [project], closeOverlay: id => closed.push(id), openTaskComposer: (...args) => drafts.push(args),
+    run: (...args) => commands.push(args) });
+  const view = new View();
+  view.asana = { render: (bound, onImport) => { assert.equal(bound, project); onImport(source); } };
+  view.asanaPanel({});
+  assert.deepEqual(closed, ['asana']); assert.deepEqual(drafts, [[project, null, 'todo', source]]);
+  assert.deepEqual(commands, []);
+});
+
+test('imported local Todo descriptions remain editable and their source links open without changing Tasks', async () => {
+  const asana = { gid: 'a1', url: 'https://app.asana.com/0/p/a1', comments: [{ author: 'Amy', text: 'Source context' }] };
+  const board = await taskBoardFor({ 'local:import': { gid: 'local:import', source: 'local', name: 'Imported', status: 'todo', notes: 'Original', asana } });
+  board.ui.nodes.get('board-card-local:import').click({}, board.cx); board.render();
+  assert.ok(board.ui.nodes.has('board-task-description')); assert.ok(board.ui.nodes.has('board-delete-task'));
+  board.view.description.edit('Original\nAdditional requirement');
+  assert.equal(board.memory['devkits.agent-board'][board.key]['local:import'].notes, 'Original\nAdditional requirement');
+  assert.deepEqual(board.memory['devkits.agent-board'][board.key]['local:import'].asana, asana);
+  const urls = []; board.ui.nodes.get('board-asana-source').click({}, { open_url: url => urls.push(url) });
+  assert.deepEqual(urls, [asana.url]);
 });
