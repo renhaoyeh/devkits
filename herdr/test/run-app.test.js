@@ -32,19 +32,28 @@ test('{udid} is the simulator panel\'s choice, else the first booted simulator',
   assert.equal(await simulatorId(), 'BOOTED');
 });
 
-test('Run runs the shown project\'s chosen command in a Run tab, replacing the previous one', async () => {
+test('Run names its thread after the executed command and replaces its previous run regardless of title', async () => {
   const calls = [], notes = [];
   let runs = {}, booted = [];
-  const space = { id: 's1', name: 'app', active: true, folder: '/p', machine: null, tabs: [{ id: 't1', name: 'Run' }, { id: 't2', name: 'Codex' }] };
+  const space = { id: 's1', name: 'app', active: true, folder: '/p', machine: null, tabs: [{ id: 't1', name: 'Run' }, { id: 't2', name: 'bun run dev' }, { id: 't3', name: 'Run' }] };
+  const live = [
+    { labels: { 'herdr.space': 's1', 'herdr.tab': 't1' }, argv: ['/bin/zsh', '-lic', 'wrapper', '/bin/zsh', 'sh', '-c', SHELL, 'sh', 'bun run ios'] },
+    { labels: { 'herdr.space': 's1', 'herdr.tab': 't2' }, argv: ['bun', 'run', 'dev'] },
+    { labels: { 'herdr.space': 's1', 'herdr.tab': 't3' }, argv: ['zsh'] },
+    { labels: { 'herdr.space': 's0', 'herdr.tab': 'other' }, argv: ['sh', '-c', SHELL, 'sh', 'bun run ios'] },
+  ];
   const { runApp } = await load({ spaces: () => [{ id: 's0', tabs: [] }, space], run: (name, args) => calls.push([name, args]),
+    terminals: () => live,
     notify: n => notes.push(n.body), shared: key => key === 'devkits.run-commands' ? runs : null,
     exec: async () => ({ code: 0, stdout: JSON.stringify({ devices: { ios: booted } }) }) });
-  const tabNew = command => ['tab.new', { space: 's1', folder: '/p', name: 'Run', argv: ['sh', '-c', SHELL, 'sh', command] }];
+  const tabNew = command => ['tab.new', { space: 's1', folder: '/p', name: command, argv: ['sh', '-c', SHELL, 'sh', command] }];
   await runApp();
   assert.deepEqual(calls, []);
   runs = { '/p': 'bun run dev' };
   await runApp();
   assert.deepEqual(calls, [['tab.close', { id: 't1' }], ['devkits.reveal-conversation', undefined], tabNew('bun run dev')]);
+  space.tabs[0].name = 'bun run dev';
+  live[0].argv = ['sh', '-c', SHELL, 'sh', 'bun run dev'];
   runs = { '/p': 'bun expo run:ios --device {udid}' }; calls.length = 0;
   await runApp();
   assert.deepEqual(calls, []);

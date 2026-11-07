@@ -1,21 +1,26 @@
 import { div } from 'gpui-kit';
 import { h_flex, v_flex, InputState, Input } from 'gpui-base';
-import { exec, run, spaces, shared, setShared, props, notify, openOverlay, closeOverlay, readTextFile } from 'herdr';
+import { exec, run, spaces, terminals, shared, setShared, props, notify, openOverlay, closeOverlay, readTextFile } from 'herdr';
 import { DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/dropdown-menu.js';
 import { Button } from './components/button.js';
 import { glyph } from './components/icon.js';
 
 // Run (F5): each project runs the command chosen for it in the header's run menu (this computer
 // only): a package.json script or a typed command. {udid} is the simulator chosen in the simulator
-// panel, else the first booted one. The command runs in a Run tab of the project, in a login shell
+// panel, else the first booted one. The command names its project tab and runs in a login shell
 // as in the user's terminals, which stays open afterwards for the output.
 const RUNS = 'devkits.run-commands';
-const RUN_TAB = 'Run';
 const RUN_SHELL = '"${SHELL:-/bin/zsh}" -lic "$1"; exec "${SHELL:-/bin/zsh}" -l';
 const MENU_WIDTH = 320;
 
 export const savedRun = folder => (folder && shared(RUNS)?.[folder]) || null;
 const shownProject = () => spaces().find(s => s.active);
+
+// Match our launch wrapper, including when Herdr prepends its own login shell.
+const isRunTerminal = terminal => {
+  const argv = (terminal.argv || []).slice(-5);
+  return argv.length === 5 && argv[0] === 'sh' && argv[1] === '-c' && argv[2] === RUN_SHELL && argv[3] === 'sh';
+};
 
 // package.json's scripts through the project's package manager.
 export async function projectScripts(folder) {
@@ -51,9 +56,11 @@ export async function runApp() {
     if (!udid) return warn('Choose a simulator in the simulator panel first.');
     command = template.replaceAll('{udid}', udid);
   }
-  for (const tab of space.tabs.filter(tab => tab.name === RUN_TAB)) run('tab.close', { id: tab.id });
+  const previous = new Set(terminals().filter(terminal => terminal.labels?.['herdr.space'] === space.id && isRunTerminal(terminal))
+    .map(terminal => terminal.labels?.['herdr.tab']));
+  for (const tab of space.tabs.filter(tab => previous.has(tab.id))) run('tab.close', { id: tab.id });
   run('devkits.reveal-conversation');
-  run('tab.new', { space: space.id, folder: space.folder, name: RUN_TAB, argv: ['sh', '-c', RUN_SHELL, 'sh', command] });
+  run('tab.new', { space: space.id, folder: space.folder, name: command, argv: ['sh', '-c', RUN_SHELL, 'sh', command] });
 }
 
 // The header's run button, showing the command it runs, and the arrow that opens the run menu.
