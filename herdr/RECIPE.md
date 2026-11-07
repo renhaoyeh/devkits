@@ -7,7 +7,7 @@ A native Herdr workspace with a Zed-inspired project and thread sidebar and shad
 - A project and thread sidebar, agent profiles with local quota meters, and a settings footer.
 - The active thread's native terminal panes in the main workspace.
 - Native panels for files, Git changes and history, and token statistics.
-- Light and dark Devkits themes and an optional iOS Simulator panel on macOS.
+- Light and dark Devkits themes and an optional iOS Simulator panel. Simulator interaction and Xcode storage cleanup require macOS; other platforms show an unsupported message.
 
 See [README.md](README.md) for the current interactions and optional features, and [design.md](../design.md) for design decisions when adapting the interface.
 
@@ -43,7 +43,7 @@ No `npm install` is needed. The installer uses Node built-ins and honors `HERDR_
 ## Watch out
 
 - Add Devkits alongside the person's layouts. Preserve global settings, shortcuts, account data, and sessions.
-- Node.js must remain available for runtime helpers. Agent CLIs are needed only for the agents the person uses; iOS Simulator features require macOS and Xcode.
+- Node.js must remain available for runtime helpers. Agent CLIs are needed only for the agents the person uses; iOS Simulator interaction requires an Apple Silicon Mac with Xcode and an iOS simulator. The panel downloads serve-sim through `npx` on first use.
 - Installing the layout does not require signing into accounts, connecting Asana, installing plugins, or starting agents. Those are optional actions described in the README.
 - The layout hot reloads. Do not restart Herdr or its core, or disturb existing terminals, to install or validate it.
 - Do not edit Herdr's generated guides, type declarations, or bundled mods. For compatibility fixes, work from this repository's source and follow its development instructions.
@@ -60,4 +60,4 @@ herdr-app do layout.switch --name devkits
 herdr-app status
 ```
 
-All three mod checks pass before switching. The running window shows Devkits without new file or mod errors, and existing sessions remain available. Capture and inspect `herdr-app shot` to verify the visible result. If no window is running, report file installation and check results, and tell the person to select Devkits when they open Herdr; leave the visual check explicitly unverified.
+All three mod checks pass before switching. These checks cover initial rendering, not layout geometry or later async interactions. The running window shows Devkits without new file or mod errors, and existing sessions remain available. Capture and inspect `herdr-app shot` to verify the visible result. If no window is running, report file installation and check results, and tell the person to select Devkits when they open Herdr; leave the visual check explicitly unverified.

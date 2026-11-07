@@ -20,7 +20,7 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | Semantic colors | `themes/devkits.json`, `themes/devkits-light.json` |
 | Icons and preview | `mods/devkits/assets/` |
 | Installation | `install.js` |
-| Behavior checks | `test/native.test.js` |
+| Behavior checks | `test/*.test.js` (native UI mocks and focused module tests) |
 
 - Edit this repository first; it is the installable source. Modify only the custom layout, mod, and themes, not Herdr's bundled or generated files.
 - Use `theme()` tokens. Use native async and animation APIs; do not retain a view context beyond its lifetime or use browser timers.
@@ -32,9 +32,12 @@ Run from the repository root as appropriate for the change:
 
 ```sh
 npm test
-~/.local/bin/herdr-app check ./herdr/mods/devkits
-~/.local/bin/herdr-app check ./herdr/mods/devkits-simulator
+herdr-app check ./herdr/mods/devkits
+herdr-app check ./herdr/mods/devkits-simulator
+herdr-app check ./herdr/mods/devkits-sim-frames
 ```
+
+Use the installed `herdr-app` executable if it is not on PATH (`~/.local/bin/herdr-app` on a typical macOS/Linux installation). On Windows, Node.js and Git for Windows must be available on Herdr's PATH; WSL is not required. Check the relevant companion mods when their code or layout integration changes.
 
 A mod can import only files in its own folder, so `devkits-simulator` carries copies of the devkits components it uses. Edit `mods/devkits/components/`, never a copy, then run `npm run sync:shared`; `npm test` fails while a copy differs. `COPIES` lists which mods carry which components; add a line when a mod starts using another one. A copy edited by hand is never overwritten: keep its change with `npm run sync:shared -- --from <copy>`, or move it into the source.
 
@@ -55,10 +58,14 @@ The default destination is `~/.config/herdr-app/`; use the configured `HERDR_APP
 For the default installation:
 
 ```sh
-~/.local/bin/herdr-app check ~/.config/herdr-app/mods/devkits
-~/.local/bin/herdr-app status
-~/.local/bin/herdr-app shot /tmp/devkits-review.png
+herdr-app check ~/.config/herdr-app/mods/devkits
+herdr-app check ~/.config/herdr-app/mods/devkits-simulator
+herdr-app check ~/.config/herdr-app/mods/devkits-sim-frames
+herdr-app status
+herdr-app shot
 ```
+
+`shot` prints the saved image's path; inspect that image. Use a temporary destination outside the repository when supplying an explicit path.
 
 - Check reported errors and confirm the active layout. Inspect the app for spacing, alignment, hover and focus states, and the changed interaction.
 - `shot` captures the last rendered frame; it can be stale when the app is inactive. Confirm that the frame contains the change before treating it as visual evidence.
