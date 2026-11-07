@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
+import { terminalArgv } from '../mods/devkits/shell-command.js';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
@@ -98,7 +99,7 @@ test('Windows starts legacy account launchers locally and preserves commands on 
     await new View().launchThread(agent, { space: 'api', folder: 'C:/Project' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
     assert.equal(argv[0], machine ? 'env' : 'git');
-    assert.deepEqual(argv.slice(-3), agent.run);
+    assert.deepEqual(argv, machine ? agent.run : terminalArgv(agent.run, 'windows'));
   }
   assert.deepEqual(launcherArgv({ key: 'codex', run: ['C:\\bin\\codex.cmd'] }, 'read-only').slice(1),
     ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);

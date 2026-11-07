@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { commandArgv, gitShellCommand } from '../mods/devkits/shell-command.js';
+import { commandArgv, gitShellCommand, terminalArgv } from '../mods/devkits/shell-command.js';
 
 test('Windows account and CLI commands use Git shell, preserving arguments and existing wrappers', () => {
   for (const command of ['env', 'codex', 'claude', 'C:\\Program Files\\Codex\\codex.exe', 'C:/bin/claude.cmd']) {
@@ -16,6 +16,25 @@ test('Windows account and CLI commands use Git shell, preserving arguments and e
   const terminal = ['powershell.exe'];
   assert.equal(commandArgv(terminal, 'windows'), terminal);
   assert.equal(commandArgv(undefined, 'windows'), undefined);
+});
+
+test('Windows terminal launches preserve arguments through legacy PowerShell', { skip: process.platform !== 'win32' }, async () => {
+  const literal = 'developer_instructions="# Global rules\\n\\nThese rules use \\"quoted\\" text"';
+  const home = "C:\\Users\\測試 ' $(throw INJECTED)\\App Data\\account";
+  const prompts = [literal, "中文 ' $(throw INJECTED) & %PATH% `literal`\r\nsecond line", 'trailing\\', ''];
+  const argv = ['env', '-u', 'DEVKITS_TEST_SECRET', `CODEX_HOME=${home}`, process.execPath, '-e',
+    'console.log(JSON.stringify({ args: process.argv.slice(1), home: process.env.CODEX_HOME, secret: process.env.DEVKITS_TEST_SECRET }))', '--', ...prompts];
+  for (const input of [argv, commandArgv(argv, 'windows')]) {
+    const command = terminalArgv(input, 'windows');
+    const script = '& ' + command.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ');
+    const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-Command', script],
+      { env: { ...process.env, DEVKITS_TEST_SECRET: 'inherited' } });
+    assert.deepEqual(JSON.parse(stdout), { args: prompts, home });
+  }
+  assert.equal(terminalArgv(argv, 'macos'), argv);
+  assert.equal(terminalArgv(argv, 'linux'), argv);
+  const terminal = ['powershell.exe'];
+  assert.equal(terminalArgv(terminal, 'windows'), terminal);
 });
 
 test('Windows legacy env launchers isolate variables and preserve native paths and prompt text', async () => {
