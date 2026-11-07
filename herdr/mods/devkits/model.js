@@ -251,6 +251,13 @@ export const archivable = (thread, terminals = []) => (thread.agents || []).some
 })
   && !String(thread.space || '').includes('/');
 
+// An agent run inside an existing shell keeps the terminal's identity.
+export function threadProgram(thread, terminals, fallback = thread?.agent?.program) {
+  const agent = thread?.agent;
+  const terminal = terminals.find(terminal => terminal.address === agent?.address);
+  return terminal && ['claude-code', 'codex'].includes(agent?.app) && !commandKind(terminal.argv) ? null : fallback;
+}
+
 // The agent command inside a terminal's argv, without the login shell Herdr wraps it in.
 export function agentCommand(argv = []) {
   const start = argv.findIndex(arg => arg === 'env' || commandKind([arg]));

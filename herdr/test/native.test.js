@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 
@@ -83,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1576,6 +1576,31 @@ test('a Codex launched inside Terminal shows Close immediately, including after 
   assert.ok(!archivable(thread, [terminal]));
   assert.ok(!archivable(thread, [{ ...terminal, argv: ['env', 'SHELL=/bin/zsh', '/bin/zsh', '-l'] }]));
   assert.ok(archivable(thread, [{ ...terminal, argv: ['codex'] }]));
+});
+
+test('Terminal-launched agents keep the terminal icon in the sidebar and pane header', async () => {
+  for (const app of ['codex', 'claude-code']) {
+    const ui = fakeElements(), program = { icon: `icons/${app}.svg`, tint: false };
+    const agent = { address: 't1', app, space: 'api', tab: 'tab-0', program };
+    const thread = { space: 'api', tab: { id: 'tab-0' }, title: 'Task', agent, agents: [agent] };
+    let argv = ['/bin/zsh', '-l'];
+    const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
+      spaces: () => projects, agents: () => [agent],
+      terminals: () => [{ address: 't1', argv }],
+      panes: () => [{ pane: 'pane-1', tab: 'tab-0', program }] });
+    for (const render of [view => view.threadRow(thread, {}), view => view.paneHeader({})]) {
+      ui.assets.length = 0;
+      render(new View());
+      assert.ok(ui.assets.includes('mods/devkits/assets/icons/terminal.svg'));
+      assert.ok(!ui.assets.includes(program.icon));
+    }
+    argv = [app === 'codex' ? 'codex' : 'claude'];
+    for (const render of [view => view.threadRow(thread, {}), view => view.paneHeader({})]) {
+      ui.assets.length = 0;
+      render(new View());
+      assert.ok(ui.assets.includes(program.icon));
+    }
+  }
 });
 
 test('Codex without a readable rollout offers Close and only ends on the next click', async () => {
