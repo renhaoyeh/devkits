@@ -248,6 +248,25 @@ export function terminalLabel(terminal) {
   return (shell ? argv[2] : argv.join(' ')) || terminal.agent || terminal.address;
 }
 
+// A live shell is usually waiting for input; a foreground command is running.
+// Agent reports take precedence: an idle/blocked agent still owns a foreground process.
+export function terminalWorking(terminal) {
+  if (!terminal || (terminal.state && terminal.state !== 'live')) return false;
+  if (terminal.status) return terminal.status === 'working';
+  if (terminal.program?.agent) return false;
+  const foreground = terminal.foreground;
+  if (!foreground?.pid) return false;
+  const argv = foreground.argv || [];
+  const name = (foreground.name || argv[0] || '').split(/[/\\]/).pop().replace(/^-|\.exe$/gi, '').toLowerCase();
+  if (!name) return false;
+  const shell = /^(?:sh|bash|dash|ash|zsh|ksh|mksh|fish|nu|pwsh|powershell|cmd|elvish|xonsh|tcsh|csh)$/.test(name)
+    || (terminal.program?.shell && terminal.program.name?.toLowerCase() === name);
+  if (!shell) return true;
+  // A shell executing a script/command (including Herdr's Run wrapper) is busy.
+  return argv.slice(1).some(arg => /^-[a-z]*c(?:$|=)/i.test(arg) || /^(?:--command(?:=|$)|\/c$|-command$|-file$)/i.test(arg))
+    || Boolean(argv[1] && !argv[1].startsWith('-') && !/^\/[ck]$/i.test(argv[1]));
+}
+
 // Claude and Codex threads on this machine can be archived and resumed later; remote ids carry a machine/ prefix.
 export const archivable = (thread, terminals = []) => (thread.agents || []).some(agent => {
   const terminal = terminals.find(terminal => terminal.address === agent.address);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, rootSettings } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 import { terminalArgv } from '../mods/devkits/shell-command.js';
@@ -84,7 +84,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1627,6 +1627,40 @@ test('threads without agent status follow their primary pane program in the side
       assert.ok(!ui.assets.includes(peer.program.icon));
     }
   }
+});
+
+test('ordinary terminal icons follow live commands in primary, parallel and child panes', async () => {
+  const ui = fakeElements();
+  const thread = { space: 'api', tab: { id: 'tab-0' }, title: 'Terminal', agents: [] };
+  const primary = { pane: 'p-main', terminal: 't-main', tab: 'tab-0', program: { shell: true } };
+  const peer = { pane: 'p-peer', terminal: 't-peer', tab: 'tab-0', program: { shell: true } };
+  let foreground = { pid: 42, name: 'bun', argv: ['bun', 'run', 'test'] };
+  let target = primary.pane;
+  const live = () => [primary, peer].map(pane => ({ address: pane.terminal, state: 'live', foreground }));
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [],
+    panes: () => [primary, peer], terminals: live, props: () => ({ pane: target }) });
+  const view = new View();
+  const loader = 'mods/devkits/assets/icons/loader.svg';
+  for (const running of [true, false, true]) {
+    foreground = running ? { pid: 42, name: 'bun', argv: ['bun', 'run', 'test'] }
+      : { pid: 7, name: 'zsh', argv: ['/bin/zsh', '-l'] };
+    const renders = [() => view.threadRow(thread, {}),
+      ...[primary, peer].map(pane => () => { target = pane.pane; view.paneHeader({}); }),
+      () => view.childRow(thread, view.paneEntries(thread, live())[0], {}),
+      () => view.childRow(thread, { terminal: { address: 'child', state: 'live', foreground }, depth: 1, label: 'Build' }, {})];
+    for (const render of renders) {
+      ui.assets.length = 0;
+      render();
+      assert.equal(ui.assets.includes(loader), running);
+      assert.equal(ui.assets.includes('mods/devkits/assets/icons/terminal.svg'), !running);
+    }
+  }
+  // A parallel command has its own indicator; it does not mark an idle primary pane busy.
+  peer.status = 'working';
+  foreground = { pid: 7, name: 'zsh', argv: ['/bin/zsh', '-l'] };
+  ui.assets.length = 0;
+  view.threadRow(thread, {});
+  assert.ok(!ui.assets.includes(loader));
 });
 
 test('Terminal-launched agents keep the terminal icon in the sidebar and pane header', async () => {
