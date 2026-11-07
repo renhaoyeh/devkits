@@ -26,9 +26,7 @@
         { "id": "header", "type": "block", "size": { "px": 32 }, "window_drag": true,
           "content": { "mod": "devkits", "props": { "view": "header" } } },
         { "id": "workspace-row", "type": "row", "divider": { "width": 1, "color": "border" }, "children": [
-        { "id": "workspace-view", "type": "stack", "active": "main", "children": [
-        { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
-        { "id": "diff", "type": "block", "content": { "mod": "devkits", "props": { "view": "diff" } } },
+        { "id": "workspace-view", "type": "stack", "active": "main", "size": { "weight": 1 }, "min": 320, "children": [
         { "id": "asana", "type": "block", "content": { "mod": "devkits", "props": { "view": "asana" } } },
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
         { "id": "main", "type": "block",
@@ -36,6 +34,10 @@
             "gap": 0, "radius": 0, "background": "background", "lone": true,
             "header": { "content": { "mod": "devkits", "props": { "view": "pane" } }, "height": 32, "position": "top", "reveal": "always" }
           } } }
+        ] },
+        { "id": "editor", "type": "stack", "active": "files", "hidden": true, "size": { "weight": 1.6 }, "min": 420, "children": [
+        { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
+        { "id": "diff", "type": "block", "content": { "mod": "devkits", "props": { "view": "diff" } } }
         ] },
         { "id": "simulator", "type": "block", "hidden": true, "size": { "px": 380 }, "min": 300, "max": 900,
           "content": { "mod": "devkits-simulator", "props": { "view": "simulator" } } }

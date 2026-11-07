@@ -881,7 +881,7 @@ test('remote usage never queries local credentials or shows local account entrie
   assert.deepEqual(view.usageAgents.map(agent => agent.key), ['codex']);
   assert.deepEqual(view.usage, []);
 });
-test('status bar Files toggles an empty project browser without creating sessions; header has no file action', async () => {
+test('status bar Files shows the editor and tree beside the thread without creating sessions; header has no file action', async () => {
   const ui = fakeElements(), commands = [];
   const memory = { 'devkits.projects': ['/Code/new'], 'devkits.selected-project': 'project:/Code/new' };
   let target = {};
@@ -897,18 +897,9 @@ test('status bar Files toggles an empty project browser without creating session
   const status = new View(); status.render();
   assert.ok(!ui.nodes.has('commands'));
   ui.nodes.get('open-files').click();
+  assert.deepEqual(commands.slice(-2), [['layout.select', { stack: 'editor', child: 'files' }], ['layout.show', { id: 'editor' }]]);
   target = {}; sidebar.render();
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
-  target = { view: 'status' }; status.render(); ui.nodes.get('open-files').click();
-  target = {}; sidebar.render();
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'project-empty' }]);
-  target = { view: 'status' }; status.render(); ui.nodes.get('open-diff').click();
-  target = {}; sidebar.render();
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'diff' }]);
-  target = { view: 'status' }; status.render(); ui.nodes.get('open-files').click();
-  assert.equal(memory['devkits.diff'], null);
-  target = {}; sidebar.render();
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
+  assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.stack === 'workspace-view' && args.child !== 'project-empty'));
   assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new' || name === 'terminal.kill'));
 });
 test('sidebar menus align with the right edge of each button, 8px below its row, at the current zoom', async () => {
@@ -1200,19 +1191,20 @@ test('each project gets its open panel back when selected again, until a thread 
     tabs: [{ id: `${id}-a`, name: 'A', active: true }, { id: `${id}-b`, name: 'B' }] }));
   let target = {};
   const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces,
-    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {}, run: (...args) => commands.push(args) });
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {}, run: (...args) => commands.push(args), closeOverlay() {} });
   const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
-  target = { view: 'status' }; new View().render(); ui.nodes.get('open-files').click();
-  assert.equal(memory['devkits.files'], 'one');
+  target = { view: 'project-menu', overlay: 'menu', project: { id: 'one', name: 'one', folder: '/Code/one', machine: null } };
+  const menu = new View(); menu.handle = { focus() {} }; menu.render(); ui.nodes.get('menu-asana-tasks').click();
+  assert.equal(memory['devkits.asana'], 'one');
   target = {}; active = 'two'; sidebar.render();
-  assert.equal(memory['devkits.files'], null);
+  assert.equal(memory['devkits.asana'], null);
   active = 'one'; sidebar.render();
-  assert.equal(memory['devkits.files'], 'one');
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
+  assert.equal(memory['devkits.asana'], 'one');
+  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'asana' }]);
   ui.nodes.get('thread-one-b').click();
-  assert.equal(memory['devkits.files'], null);
+  assert.equal(memory['devkits.asana'], null);
   active = 'two'; sidebar.render(); active = 'one'; sidebar.render();
-  assert.equal(memory['devkits.files'], null);
+  assert.equal(memory['devkits.asana'], null);
 });
 test('Start session from the Asana composer names the thread, adds the model, effort and task prompt, and unsaves it', async () => {
   const ui = fakeElements(), commands = [], unsaved = [];
@@ -1227,7 +1219,7 @@ test('Start session from the Asana composer names the thread, adds the model, ef
     ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--model', 'opus', '--effort', 'max', 'prompt:Fix login'] }]);
   assert.deepEqual(unsaved, [['/Code/api', 't1']]);
 });
-test('Asana tasks opens from a local project menu, replaces Files and Changes, and is absent for remote projects', async () => {
+test('Asana tasks opens from a local project menu, sits beside Changes, and is absent for remote projects', async () => {
   const ui = fakeElements(), commands = [], memory = {};
   const project = { id: 'one', name: 'One', folder: '/Code/one', machine: null, active: true, tabs: [] };
   let target = { view: 'project-menu', overlay: 'menu', project };
@@ -1241,8 +1233,9 @@ test('Asana tasks opens from a local project menu, replaces Files and Changes, a
   assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'asana' }]);
   target = { view: 'status' }; new View().render();
   assert.ok(!ui.nodes.has('open-asana'));
-  ui.nodes.get('open-files').click();
-  assert.equal(memory['devkits.asana'], null);
+  // Changes opens in the editor beside Asana instead of replacing it.
+  ui.nodes.get('open-diff').click();
+  assert.equal(memory['devkits.asana'], 'one');
   ui.nodes.clear(); target = { view: 'project-menu', overlay: 'menu', project: { ...project, machine: 'vps' } };
   const remote = new View(); remote.handle = { focus() {} }; remote.render();
   assert.ok(!ui.nodes.has('menu-asana-tasks'));
@@ -1437,8 +1430,13 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   const ids = new Set();
   function visit(node) { assert.ok(!ids.has(node.id)); ids.add(node.id); for (const child of node.children || []) visit(child); }
   visit(layout);
-  const row = layout.children[1].children[1], stack = row.children[0], simulator = row.children[1];
+  // The thread, then the editor (Files or Changes, each with its list at the right), then the simulator at the window's edge.
+  const row = layout.children[1].children[1], [stack, editor, simulator] = row.children;
   assert.equal(stack.id, 'workspace-view');
+  assert.ok(!stack.children.some(child => ['files', 'diff'].includes(child.id)));
+  assert.equal(editor.id, 'editor');
+  assert.equal(editor.hidden, true);
+  assert.deepEqual(editor.children.map(child => child.content.props.view), ['files', 'diff']);
   assert.equal(simulator.id, 'simulator');
   assert.equal(simulator.hidden, true);
   assert.equal(simulator.content.mod, 'devkits-simulator');
@@ -1650,4 +1648,22 @@ test('terminals an agent started sit under its thread, peek when clicked and end
   commands.length = 0;
   ui.nodes.get('child-t8').click();
   assert.deepEqual(commands.slice(-2), [['tab.select', { id: 'tab-0' }], ['terminal.peek', { terminal: 't8' }]]);
+});
+
+test('Files and Changes share the editor beside the thread; the shown one hides it again', async () => {
+  const ui = fakeElements(), commands = [];
+  let editor = { id: 'editor', hidden: true, active: 'files' };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'status' }), theme: () => ({ selected: 'sel', background: 'bg' }), spaces: () => projects,
+    layout: () => ({ children: [editor] }), run: (...args) => commands.push(args) });
+  const status = new View();
+  status.render(); ui.nodes.get('open-diff').click();
+  assert.deepEqual(commands, [['layout.select', { stack: 'editor', child: 'diff' }], ['layout.show', { id: 'editor' }]]);
+  editor = { ...editor, hidden: false, active: 'diff' };
+  status.render();
+  assert.equal(ui.nodes.get('open-diff').background, 'sel');
+  assert.equal(ui.nodes.get('open-files').background, 'bg');
+  commands.length = 0; ui.nodes.get('open-files').click();
+  assert.deepEqual(commands, [['layout.select', { stack: 'editor', child: 'files' }], ['layout.show', { id: 'editor' }]]);
+  commands.length = 0; ui.nodes.get('open-diff').click();
+  assert.deepEqual(commands, [['layout.hide', { id: 'editor' }]]);
 });
