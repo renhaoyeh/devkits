@@ -34,6 +34,7 @@ export async function install(home) {
       writtenThemes.push(themes[index]);
     }
     await writeFile(layout, await readFile(new URL('./layouts/devkits.json', import.meta.url)), { flag: 'wx' }); layoutWritten = true;
+    await bindKeys(join(home, 'keys.json'));
   } catch (error) {
     if (layoutWritten) await rm(layout);
     if (installed) await rm(mod, { recursive: true });
@@ -43,6 +44,19 @@ export async function install(home) {
     throw error;
   } finally { await rm(stage, { recursive: true, force: true }); }
   return layout;
+}
+
+// F5 runs the shown project's chosen command (the header's run button). The person's other keys stay, and a key they
+// already use for the Devkits layout is left alone.
+export const KEYS = { 'layout:devkits': { f5: 'devkits.run' } };
+async function bindKeys(path) {
+  let keys = {};
+  try { keys = JSON.parse(await readFile(path, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  let changed = false;
+  for (const [section, bindings] of Object.entries(KEYS))
+    for (const [key, action] of Object.entries(bindings))
+      if (!keys[section]?.[key]) { keys[section] = { ...keys[section], [key]: action }; changed = true; }
+  if (changed) await writeFile(path, `${JSON.stringify(keys, null, 2)}\n`);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

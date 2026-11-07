@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
@@ -73,7 +73,7 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'session-menu', 'account-actions', 'usage']
+  const features = await Promise.all(['shell-command', 'session-menu', 'account-actions', 'usage', 'run-app']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
@@ -83,7 +83,7 @@ async function loadView(host) {
 async function viewFor(host) {
   const memory = {};
   host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
-    setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), ...host };
+    setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
 }
@@ -1442,15 +1442,25 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(await readFile(join(home, 'mods', 'devkits-sim-frames', 'main.js'), 'utf8'),
     await readFile(new URL('../mods/devkits-sim-frames/main.js', import.meta.url), 'utf8'));
   assert.equal(stack.children.find(node => node.id === 'main').content.tab, 'active');
-  assert.deepEqual((await readdir(home)).sort(), ['layouts', 'mods', 'themes']);
+  assert.deepEqual((await readdir(home)).sort(), ['keys.json', 'layouts', 'mods', 'themes']);
   for (const name of Object.values(layout.theme)) {
     const theme = JSON.parse(await readFile(join(home, 'themes', `${name}.json`), 'utf8'));
     assert.equal(theme.ansi.length, 16);
     assert.ok(Object.values(theme.colors).every(color => /^#[0-9a-f]{6}$/i.test(color)));
   }
+  assert.deepEqual(JSON.parse(await readFile(join(home, 'keys.json'), 'utf8')), { 'layout:devkits': { f5: 'devkits.run' } });
   const before = await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8');
   await assert.rejects(install(home), /Refusing to overwrite/);
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
+});
+
+test('installer keeps the person\'s keys and an F5 they already bound', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const keys = { global: { 'cmd-t': 'tab.new' }, 'layout:devkits': { f5: 'app.help' } };
+  await writeFile(join(home, 'keys.json'), JSON.stringify(keys));
+  await install(home);
+  assert.deepEqual(JSON.parse(await readFile(join(home, 'keys.json'), 'utf8')), keys);
 });
 
 test('status bar toggles the simulator panel, with a selected background while it shows', async () => {
