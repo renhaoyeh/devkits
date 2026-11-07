@@ -37,8 +37,8 @@ export const claudePermissionModes = [
 ];
 
 export const isAccountLauncher = agent => /^devkits-(?:codex|claude)-/.test(agent?.key || '');
-export const isCodexLauncher = agent => agent?.key === 'codex' || Boolean(agent?.key?.startsWith('devkits-codex-'));
-export const isClaudeLauncher = agent => agent?.key === 'claude' || Boolean(agent?.key?.startsWith('devkits-claude-'));
+export const isCodexLauncher = agent => (agent?.profileKey || agent?.key) === 'codex' || Boolean((agent?.profileKey || agent?.key)?.startsWith('devkits-codex-'));
+export const isClaudeLauncher = agent => (agent?.profileKey || agent?.key) === 'claude' || Boolean((agent?.profileKey || agent?.key)?.startsWith('devkits-claude-'));
 export const permissionModes = agent => isCodexLauncher(agent) ? codexPermissionModes
   : isClaudeLauncher(agent) ? claudePermissionModes : null;
 
@@ -84,18 +84,47 @@ export function codexModels(source) {
 
 export const sessionKind = agent => isClaudeLauncher(agent) ? 'claude' : isCodexLauncher(agent) ? 'codex' : null;
 
-// Claude and Codex settings belong to the provider, whichever account starts a session: every account shares
-// the root launcher's (claude, codex). Other launchers keep their own.
-export const settingsKey = agent => sessionKind(agent) || agent?.key;
+// Each profile's default agent and each named agent configuration have independent settings.
+export const settingsKey = agent => agent?.key;
 
-// Moves settings saved per account to their provider, keeping the provider's own first, then each account's
-// in order; `merge(kept, account)` combines two values. Returns the same object when nothing moves.
-export function rootSettings(saved = {}, merge = (kept, value) => kept ?? value) {
-  const entries = Object.entries(saved), account = ([key]) => sessionKind({ key }) && sessionKind({ key }) !== key;
-  if (!entries.some(account)) return saved;
-  const next = Object.fromEntries(entries.filter(entry => !account(entry)));
-  for (const [key, value] of entries.filter(account)) next[sessionKind({ key })] = merge(next[sessionKind({ key })], value);
+// Program icons identify the provider; account and agent labels carry only their useful names.
+const providerLabel = /^(?:codex(?: cli)?|claude(?: code)?)$/i;
+export const launcherLabel = name => {
+  const label = (name || '').trim().replace(/^(?:codex(?: cli)?|claude(?: code)?)\s*(?:·|\/)\s*/i, '').trim();
+  return providerLabel.test(label) ? 'Default account' : label;
+};
+
+// All account and agent selects share their label, provider icon and tint policy.
+export function launcherOption(agent) {
+  const kind = sessionKind(agent);
+  return { key: agent.key, label: launcherLabel(agent.name || kind || 'Unnamed agent'),
+    icon: agent.icon || (kind ? `icons/${kind}.svg` : 'agent'), iconTint: agent.icon ? Boolean(agent.tint) : !kind };
+}
+
+// Seed existing profiles from legacy provider defaults without overwriting their independent values.
+export function profileSettings(saved = {}, profiles = []) {
+  let next = saved;
+  for (const profile of profiles) {
+    const kind = sessionKind(profile);
+    if (!kind || Object.hasOwn(next, profile.key) || !Object.hasOwn(saved, kind)) continue;
+    if (next === saved) next = { ...saved };
+    next[profile.key] = typeof saved[kind] === 'object' ? { ...saved[kind] } : saved[kind];
+  }
   return next;
+}
+
+// Configurations reuse the profile's executable and credentials, with their own stable launcher identity.
+export function configuredAgents(profiles = [], configs = []) {
+  const originals = profiles.filter(agent => !agent.profileKey);
+  const known = new Set(originals.map(agent => agent.key));
+  return [...originals, ...configs.flatMap(config => {
+    const profile = originals.find(agent => agent.key === config.profileKey);
+    if (!profile || !sessionKind(profile) || !config.key?.startsWith('devkits-preset-') || known.has(config.key)) return [];
+    known.add(config.key);
+    const defaultProfile = profile.key === sessionKind(profile) && (!profile.name || providerLabel.test(profile.name.trim()));
+    return [{ ...profile, key: config.key, profileKey: profile.key, configName: config.name,
+      name: defaultProfile ? config.name : `${config.name} - ${launcherLabel(profile.name || profile.key)}` }];
+  })];
 }
 
 // Every Codex profile shares one choice of models, so their caches are merged by model.
@@ -137,17 +166,19 @@ export function moveOption(keys, key, target) {
   return next;
 }
 
-export function sessionArgv(agent, argv, { model, effort } = {}) {
-  if (!model && !effort) return argv;
+export function sessionArgv(agent, argv, { model, effort, serviceTier } = {}) {
   const kind = isCodexLauncher(agent) ? 'codex' : isClaudeLauncher(agent) ? 'claude' : null;
-  if (!kind) return argv;
+  const fast = kind === 'codex' && serviceTier === 'fast';
+  if (!kind || (!model && !effort && !fast)) return argv;
   const executable = argv.findIndex(arg => !arg.includes('=') && permissionFlags[kind].executable.test(arg));
-  if (executable < 0) throw new Error(`Could not find ${permissionFlags[kind].name} in this launcher. Choose Default for model and effort.`);
+  if (executable < 0) throw new Error(`Could not find ${permissionFlags[kind].name} in this launcher. Choose Default for session settings.`);
   const flags = kind === 'claude'
     ? [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
-    : [...(model ? ['-m', model] : []), ...(effort ? ['-c', `model_reasoning_effort="${effort}"`] : [])];
+    : [...(model ? ['-m', model] : []), ...(effort ? ['-c', `model_reasoning_effort="${effort}"`] : []),
+      ...(fast ? ['-c', 'service_tier="fast"'] : [])];
   const rest = [];
-  const overridesConfig = value => (model && /^model\s*=/.test(value)) || (effort && /^model_reasoning_effort\s*=/.test(value));
+  const overridesConfig = value => (model && /^model\s*=/.test(value)) || (effort && /^model_reasoning_effort\s*=/.test(value)) ||
+    (fast && /^service_tier\s*=/.test(value));
   for (let i = executable + 1; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--') { rest.push(...argv.slice(i)); break; }
@@ -177,8 +208,8 @@ export function rulesArgv(agent, argv, rules) {
 
 export function launcherChoices(agents, order = []) {
   const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
-    ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,
-      group: isAccountLauncher(agent) ? 2 : 1 }))];
+    ...agents.map(agent => ({ key: `agent:${agent.key}`, name: launcherLabel(agent.name), agent,
+      group: agent.profileKey ? 3 : isAccountLauncher(agent) ? 2 : 1 }))];
   const ranks = new Map(order.map((key, index) => [key, index]));
   return choices.sort((a, b) => a.group - b.group || (ranks.get(a.key) ?? order.length) - (ranks.get(b.key) ?? order.length));
 }
@@ -225,8 +256,9 @@ export function resolveThreadProfiles(spaces, pending = [], profiles = {}, now =
 
 // Threads started before profiles were recorded are still named after their launcher.
 export function threadProfile(tab, launchers = [], profiles = {}) {
-  return (launchers.find(agent => agent.key === profiles[tab.id])
-    || (tab.named ? launchers.find(agent => agent.name === tab.name) : null))?.name || null;
+  const profile = launchers.find(agent => agent.key === profiles[tab.id])
+    || (tab.named ? launchers.find(agent => agent.name === tab.name) : null);
+  return profile ? launcherLabel(profile.name) || null : null;
 }
 
 // Live terminals an agent started with hc run (and theirs, one level deeper each), in start order.

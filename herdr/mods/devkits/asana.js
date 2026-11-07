@@ -1,7 +1,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex, InputState, Input, TextView } from 'gpui-base';
 import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
-import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions, settingsKey } from './model.js';
+import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions, settingsKey, launcherOption } from './model.js';
 import { Select, SelectState } from './components/select.js';
 import { Button } from './components/button.js';
 import { DialogDescription } from './components/dialog.js';
@@ -771,8 +771,7 @@ export default class AsanaPanel {
       [option('default', fallback[name] ? `Default (${fallback[name]})` : 'Default'), ...options], label, onChange, t, { width: 168, prefix: label, boxed: t.appearance !== 'linear', radius: 6 });
     return h_flex().gap(8).items_center().flex_wrap()
       .when(agents.length > 0, el => el.child(Select('asana-agent', this.selects.agent, current.agent.key,
-        agents.map(agent => ({ key: agent.key, label: agent.name, color: t.foreground,
-          icon: agent.icon || 'agent', iconTint: agent.icon ? Boolean(agent.tint) : true })), 'Agent',
+        agents.map(agent => ({ ...launcherOption(agent), color: t.foreground })), 'Agent',
         key => remember({ agent: key, model: null, effort: null }), t, { width: 200, prefix: 'Agent', boxed: t.appearance !== 'linear', radius: 6 })))
       .when(current.models.length > 0, el => el.child(pick('asana-model', 'model', 'Model', current.model,
         current.models.map(model => option(model.key, model.label)), key => remember({ model: key === 'default' ? null : key }))))
