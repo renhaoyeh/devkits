@@ -28,7 +28,7 @@ export function asanaTheme(host = theme()) {
 }
 
 // Asana controls use their own geometry inside the project's Sera shell.
-const asanaButton = (id, t, options = {}) => Button(id, t, options).rounded(6)
+const asanaButton = (id, t, options = {}) => Button(id, t, options).rounded(t.appearance === 'linear' ? 999 : 6)
   .when(options.variant === 'outline', el => el.border(1).border_color(t.input));
 
 const api = 'https://app.asana.com/api/1.0';
@@ -152,12 +152,12 @@ const commentLimit = 5, commentLength = 500;
 
 // The prompt carries the latest comments, which often hold the decisions the description lacks.
 export function taskPrompt(task) {
-  const notes = task.notes.trim();
+  const notes = (task.notes || '').trim();
   const comments = (task.comments || []).slice(-commentLimit).map(comment => {
     const text = comment.text.length > commentLength ? `${comment.text.slice(0, commentLength)}…` : comment.text;
     return `- ${comment.author}${comment.at ? ` (${comment.at.slice(0, 10)})` : ''}: ${text.replace(/\s*\n\s*/g, ' ')}`;
   });
-  return [`Work on this Asana task: ${task.name}`, task.url,
+  return [`Work on this ${task.source && task.source !== 'asana' ? '' : 'Asana '}task: ${task.name}`, task.url,
     task.parent && [`It is a subtask of: ${task.parent.name}`, task.parent.url].filter(Boolean).join('\n'),
     notes && `Description:\n${clip(notes)}`,
     comments.length && `Latest comments${task.comments.length > comments.length ? ` (${comments.length} of ${task.comments.length})` : ''}:\n${comments.join('\n')}`,
@@ -812,21 +812,22 @@ export default class AsanaPanel {
     const fallback = { model: profile.model && (this.allModels(current.agent).find(item => item.key === profile.model)?.label || profile.model),
       effort: defaultEffort && effortLabel(defaultEffort) };
     const pick = (id, name, label, value, options, onChange) => Select(id, this.selects[name], value || 'default',
-      [option('default', fallback[name] ? `Default (${fallback[name]})` : 'Default'), ...options], label, onChange, t, { width: 168, prefix: label, boxed: true, radius: 6 });
+      [option('default', fallback[name] ? `Default (${fallback[name]})` : 'Default'), ...options], label, onChange, t, { width: 168, prefix: label, boxed: t.appearance !== 'linear', radius: 6 });
     return h_flex().gap(8).items_center().flex_wrap()
       .when(agents.length > 0, el => el.child(Select('asana-agent', this.selects.agent, current.agent.key,
-        agents.map(agent => ({ key: agent.key, label: agent.name, color: t.foreground })), 'Agent',
-        key => remember({ agent: key, model: null, effort: null }), t, { width: 200, prefix: 'Agent', boxed: true, radius: 6 })))
+        agents.map(agent => ({ key: agent.key, label: agent.name, color: t.foreground,
+          icon: agent.icon || 'agent', iconTint: agent.icon ? Boolean(agent.tint) : true })), 'Agent',
+        key => remember({ agent: key, model: null, effort: null }), t, { width: 200, prefix: 'Agent', boxed: t.appearance !== 'linear', radius: 6 })))
       .when(current.models.length > 0, el => el.child(pick('asana-model', 'model', 'Model', current.model,
         current.models.map(model => option(model.key, model.label)), key => remember({ model: key === 'default' ? null : key }))))
       .when(current.efforts.length > 0, el => el.child(pick('asana-effort', 'effort', 'Effort', current.effort,
         current.efforts.map(effort => option(effort, effortLabel(effort))), key => remember({ effort: key === 'default' ? null : key }))))
       .child(div().flex_1())
       .child(asanaButton('asana-start', t).h(28).px(10).gap(6).disabled(!current.agent).accessibility_label('Start a session for this task')
-        .on_click(() => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, {
+        .on_click((_event, cx) => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, {
           model: current.model || profile.model || null,
           effort: current.effort || defaultEffort,
-        }); })
+        }, cx); })
         .child(glyph('plus', 12)).child('Start session'));
   }
 

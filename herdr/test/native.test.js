@@ -75,7 +75,7 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive', 'branch-menu', 'project-layout']
+  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'agent-board-model', 'agent-task-evidence', 'agent-board-state']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
@@ -84,7 +84,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -127,6 +127,7 @@ function fakeElements() {
         if (key === 'on_mouse_down_out') data.mouseDownOut = args[0];
         if (key === 'on_mouse_up') data.mouseUp = args[1];
         if (key === 'on_mouse_move') data.mouseMove = args[0];
+        if (key === 'on_size_change') data.sizeChange = args[0];
         if (key === 'overflow_y_scrollbar') data.scrollbar = true;
         if (key === 'on_hover') data.hover = args[0];
         if (key === 'h') data.height = args[0];
@@ -1107,7 +1108,7 @@ test('thread maximize restores panels and exits when opening workspace controls'
   clickMaximize();
   assert.ok(root.children.slice(1).every(node => !node.hidden));
   assert.deepEqual(root.children[1].size, { px: 630 });
-  for (const control of ['open-files', 'open-diff', 'open-simulator', 'open-conversation']) {
+  for (const control of ['open-files', 'open-diff', 'open-simulator', 'open-conversation', 'open-tasks']) {
     memory['devkits.conversation-visible'] = { '["","/Code/api"]': true };
     memory['devkits.right-panel'] = 'files';
     clickMaximize(); view.statusBar({}); ui.nodes.get(control).click();
@@ -1976,6 +1977,14 @@ test('close-file closes only the shown file in the visible Files editor', async 
   assert.deepEqual(commands, []);
 });
 
+test('close-file delegates to the shared editor tab strip for files, graph and commit views', async () => {
+  let editor = { id: 'editor', hidden: false, active: 'diff' }, closed = 0;
+  const View = await viewFor({ layout: () => editor });
+  const view = new View(); view.editor = { closeActiveTab() { closed++; } };
+  view.closeFileTab(renderContext); assert.equal(closed, 1);
+  editor.hidden = true; view.closeFileTab(renderContext); assert.equal(closed, 1);
+});
+
 test('conversation controls hide without closing sessions and retain visibility per project', async () => {
   const ui = fakeElements(), commands = [], memory = {};
   let selected = projects[0], target = { view: 'status' };
@@ -2168,10 +2177,549 @@ test('only panes sharing a thread get a bracket; independent threads have no tre
   assert.ok(!ui.nodes.has('thread-independent-guide-0'));
 });
 
-test('close-file delegates to the shared editor tab strip for files, graph and commit views', async () => {
-  let editor = { id: 'editor', hidden: false, active: 'diff' }, closed = 0;
-  const View = await viewFor({ layout: () => editor });
-  const view = new View(); view.editor = { closeActiveTab() { closed++; } };
-  view.closeFileTab(renderContext); assert.equal(closed, 1);
-  editor.hidden = true; view.closeFileTab(renderContext); assert.equal(closed, 1);
+test('Agent board sidebar groups Saved and live threads, and opening a thread leaves the board', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  const View = await viewFor({ ...ui, theme: () => ({}), agents: () => agents,
+    spaces: () => projects, savedTasks: folder => folder === '/Code/api' ? [{ gid: 'saved', name: 'Queued task' }] : [],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), setAgentOrder() {} });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.ok(!ui.nodes.has('board-api'));
+  assert.ok(ui.nodes.has('thread-shell'));
+  assert.ok(ui.nodes.has('board-task-api-saved'));
+  ui.nodes.get('board-task-api-saved').click();
+  assert.equal(memory['devkits.board-project'], 'api');
+  assert.equal(memory['devkits.board-focus'], 'saved');
+  assert.ok(!commands.some(([name]) => ['tab.new', 'space.new', 'tab.close', 'terminal.kill'].includes(name)));
+  ui.nodes.get('thread-tab-0').click();
+  assert.equal(memory['devkits.board-project'], null);
+  assert.ok(commands.some(([name, args]) => name === 'tab.select' && args.id === 'tab-0'));
+});
+
+test('Tasks opens from the visible bottom status bar without creating a terminal', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => agents,
+    layout: () => ({ id: 'root', children: [{ id: 'editor' }, { id: 'workspace-view' }] }),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args) });
+  const view = new View(); view.statusBar({});
+  assert.ok(ui.nodes.has('open-tasks'));
+  const order = [...ui.nodes.keys()];
+  assert.ok(order.indexOf('open-tasks') > order.indexOf('open-files'));
+  assert.ok(order.indexOf('open-tasks') > order.indexOf('settings'));
+  assert.ok(ui.textOf('open-tasks').includes('Tasks'));
+  ui.nodes.get('open-tasks').click();
+  assert.equal(memory['devkits.board-project'], 'api');
+  assert.ok(!commands.some(([name]) => ['tab.new', 'space.new', 'tab.close', 'terminal.kill'].includes(name)));
+  view.statusBar({}); ui.nodes.get('open-tasks').click();
+  assert.equal(memory['devkits.board-project'], null);
+});
+
+
+test('Tasks stays open when selecting projects; opening a conversation explicitly leaves Tasks', async () => {
+  const ui = fakeElements(), memory = {}, commands = [];
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => agents,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args) });
+  const view = new View();
+  view.openBoard(projects[0]);
+  assert.equal(memory['devkits.tasks-open'], true);
+  view.selectProject(projects[1]);
+  assert.equal(memory['devkits.tasks-open'], true);
+  view.openBoard(projects[1]);
+  assert.equal(memory['devkits.board-project'], 'app');
+  view.showConversation(true, projects[1]);
+  assert.equal(memory['devkits.tasks-open'], false);
+  assert.ok(!commands.some(([name]) => ['tab.new', 'space.new', 'tab.close'].includes(name)));
+});
+
+test('restoring an unfinished archived task retains progress and reconnects the same task identity', async () => {
+  const folder = '/Code/api', key = JSON.stringify(['', folder]);
+  const task = { gid: 'thread:previous', name: 'Unfinished', source: 'thread', status: 'todo', threadId: 'previous' };
+  const entry = { id: 'claude:unfinished', folder, title: task.name, argv: ['claude', '--resume', 'unfinished'], profile: 'claude', boardTask: task };
+  const memory = { 'devkits.archived-threads': [entry], 'devkits.agent-board': { [key]: { [task.gid]: { ...task, archived: true } } } };
+  const View = await viewFor({ spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(); let reopened;
+  view.openThread = (...args) => { reopened = args; };
+  view.restoreThread(entry);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].archived, false);
+  assert.equal(reopened[4].gid, 'thread:previous');
+  assert.deepEqual(memory['devkits.archived-threads'], []);
+});
+
+test('finishing a run keeps unarchived threads visible and navigable; only archive hides them', async () => {
+  const memory = {}, commands = [];
+  let status = 'done', order;
+  const nativeProjects = [{ id: 'p', name: 'Project', folder: '/project', active: true, tabs: [{ id: 'work', name: 'Fix login', named: true, active: true }] }];
+  const currentAgents = () => [{ address: 't1', space: 'p', tab: 'work', status, seq: 1, program: { name: 'Codex' } }];
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => nativeProjects, agents: currentAgents,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), setAgentOrder: value => { order = value; }, theme: () => ({}) });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.ok(ui.nodes.has('thread-work')); assert.deepEqual(order, ['t1']);
+  const key = '["","/project"]';
+  assert.equal(memory['devkits.agent-board'][key]['thread:work'].status, 'done');
+  status = 'idle'; ui.nodes.clear(); view.render();
+  assert.ok(ui.nodes.has('thread-work')); assert.deepEqual(order, ['t1']);
+  assert.equal(memory['devkits.archived-threads'], undefined);
+  memory['devkits.agent-board'][key]['thread:work'].archived = true;
+  ui.nodes.clear(); view.render();
+  assert.ok(!ui.nodes.has('thread-work')); assert.deepEqual(order, []);
+  memory['devkits.agent-board'][key]['thread:work'].archived = false;
+  status = 'working'; ui.nodes.clear(); view.render();
+  assert.ok(ui.nodes.has('thread-work')); assert.deepEqual(order, ['t1']);
+  assert.ok(!commands.some(([name]) => ['tab.close', 'terminal.kill'].includes(name)));
+});
+
+test('status and priority selects show semantic icons in the trigger and every option', async () => {
+  const { boardStatusOptions, boardPriorityOptions } = await import('../mods/devkits/agent-board-model.js');
+  const ui = fakeElements(), source = await readFile(new URL('../mods/devkits/components/select.js', import.meta.url), 'utf8');
+  const host = { ...ui, DropdownMenuContent: () => ui.element(), DropdownMenuItem: id => ui.element().id(id) };
+  const Select = new Function(...Object.keys(host), source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn Select;')(...Object.values(host));
+  const state = { trigger: { focus() {} }, list: { focus() {} }, open: true, index: 0 };
+  const t = { foreground: '#eee', muted: '#888' };
+  let chosen;
+  Select('icon-status', state, 'done', boardStatusOptions(t), 'Status', value => { chosen = value; }, t);
+  assert.equal(ui.assets.filter(path => path.endsWith('/circle-check.svg')).length, 2);
+  assert.ok(ui.assets.some(path => path.endsWith('/circle-half.svg')));
+  assert.ok(ui.assets.some(path => path.endsWith('/clock.svg')));
+  ui.nodes.get('icon-status-option-todo').click({}, { stop_propagation() {}, notify() {} });
+  assert.equal(chosen, 'todo');
+  Select('icon-priority', state, 'urgent', boardPriorityOptions(t), 'Priority', () => {}, t);
+  for (const key of ['none', 'low', 'medium', 'high', 'urgent'])
+    assert.ok(ui.assets.some(path => path.endsWith(`/priority-${key}.svg`)));
+  assert.equal(ui.assets.filter(path => path.endsWith('/priority-urgent.svg')).length, 2);
+});
+
+test('Tasks assignment shares visible launcher profiles, account labels and saved order with session launchers', async () => {
+  const profiles = [
+    { key: 'codex', name: 'Codex', installed: true, run: ['codex'] },
+    { key: 'pi', name: 'Pi', installed: true, run: ['pi'] },
+    { key: 'devkits-codex-rick', name: 'Codex · RickYeh', installed: true, run: ['env', 'CODEX_HOME=/rick', 'codex'] },
+    { key: 'devkits-codex-ren', name: 'Codex · RenHaoYeh', installed: true, run: ['env', 'CODEX_HOME=/ren', 'codex'] },
+    { key: 'devkits-claude-night', name: 'Claude · 夜班', installed: true, run: ['claude'] },
+    { key: 'unavailable', name: 'Unavailable', installed: false },
+  ];
+  const memory = { 'devkits.agent-cache': { null: profiles }, 'devkits.hidden-launchers': ['agent:codex', 'agent:pi'],
+    'devkits.launcher-order': ['terminal', 'agent:devkits-codex-ren', 'agent:devkits-codex-rick', 'agent:devkits-claude-night'] };
+  const target = { view: 'task-composer', project: projects[0] };
+  const View = await viewFor({ props: () => target, theme: () => ({}), agents: () => [], shared: key => memory[key] });
+  const view = new View();
+  const result = view.taskAssignees(projects[0]);
+  assert.deepEqual(result.map(agent => agent.name), ['RenHaoYeh', 'RickYeh', '夜班']);
+  assert.deepEqual(result[0].run, ['env', 'CODEX_HOME=/ren', 'codex']);
+  assert.equal(result[0].key, 'devkits-codex-ren');
+  assert.equal(profiles[3].name, 'Codex · RenHaoYeh');
+  view.taskComposer = { render: choices => choices };
+  assert.deepEqual(view.render(), result);
+  view.agentBoard = { render: (_project, _agents, choices) => choices };
+  assert.deepEqual(view.boardPanel(projects[0], {}), result);
+});
+
+
+test('old thread snapshots stay on the board without becoming phantom sidebar threads', async () => {
+  const ui = fakeElements(), memory = { 'devkits.agent-board': { '["","/project"]': {
+    'thread:closed': { gid: 'thread:closed', name: 'Old completed thread', source: 'thread', threadId: 'closed', status: 'done' },
+  } } };
+  const View = await viewFor({ ...ui, spaces: () => [{ id: 'p', folder: '/project', name: 'Project', tabs: [], active: true }],
+    agents: () => [], shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run() {}, setAgentOrder() {}, theme: () => ({}) });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.ok(!ui.nodes.has('board-task-p-thread:closed'));
+  assert.equal(memory['devkits.agent-board']['["","/project"]']['thread:closed'].status, 'done');
+});
+
+test('a stale task composer cannot start a Done task, while an unstarted Todo can start', async () => {
+  const key = '["","/Code/api"]', gid = 'local:execution-test';
+  const memory = { 'devkits.agent-board': { [key]: { [gid]: { gid, source: 'local', name: 'Fix login', status: 'done' } } } };
+  const View = await viewFor({ spaces: () => projects, agents: () => [],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View();
+  view.agentBoard = { render: (_project, _agents, _launchers, actions) => actions };
+  let starts = 0; view.startThread = async () => { starts++; };
+  const actions = view.boardPanel(projects[0], {});
+  const eventCx = { spawn: task => task({ notify() {} }) };
+  const task = { gid, source: 'local', name: 'Fix login', notes: 'Validate form' };
+  await actions.start({ key: 'codex' }, task, {}, eventCx);
+  assert.equal(starts, 0);
+  memory['devkits.agent-board'][key][gid].status = 'todo';
+  await actions.start({ key: 'codex' }, task, {}, eventCx);
+  assert.equal(starts, 1);
+  memory['devkits.agent-board'][key][gid].status = 'fail';
+  await actions.start({ key: 'codex' }, task, {}, eventCx);
+  assert.equal(starts, 1);
+});
+
+test('task archive events recheck runtime activity instead of trusting an old enabled button', async () => {
+  const key = '["","/Code/api"]', gid = 'local:busy';
+  const memory = { 'devkits.thread-tasks': { 'tab-0': { gid, folder: '/Code/api', source: 'local' } },
+    'devkits.agent-board': { [key]: { [gid]: { gid, source: 'local', name: 'Work', status: 'done' } } } };
+  const View = await viewFor({ spaces: () => projects, agents: () => [{ address: 't1', tab: 'tab-0', space: 'api', status: 'working' }],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(); view.agentBoard = { render: (_p, _a, _l, actions) => actions };
+  let archives = 0; view.archiveThread = async () => { archives++; };
+  view.boardPanel(projects[0], {}).archive({ gid, status: 'done', tabs: [] }, { spawn: task => task({ notify() {} }) });
+  assert.equal(archives, 0); assert.ok(!memory['devkits.agent-board'][key][gid].archived);
+});
+
+async function taskBoardFor(records = {}) {
+  const ui = fakeElements(), model = await import('../mods/devkits/agent-board-model.js');
+  const project = { id: 'p', name: 'Project', folder: '/project', tabs: [] };
+  const projects = [project], runtime = { agents: [] }, dialogs = [], launches = [];
+  const key = model.boardKey(project), memory = { 'devkits.agent-board': { [key]: structuredClone(records) } };
+  const field = { new: () => {
+    const events = new Map(); let value = '';
+    return { value: () => value, set_value(next) { value = next; },
+      edit(next) { value = next; events.get('change')?.({}, renderContext); },
+      on(event, handler) { events.set(event, handler); }, set_auto_grow() {}, focus() {},
+      blur() { events.get('blur')?.({}, renderContext); } };
+  } };
+  const host = { ...ui, ...model, folderKey, InputState: field, TextareaState: field,
+    Input: { new: () => ui.element() }, Textarea: { new: () => ui.element() },
+    TextView: { markdown: () => ui.element() },
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = structuredClone(value); },
+    currentAgents: () => runtime.agents, currentSpaces: () => projects, terminals: () => [],
+    withTaskInputEvidence: agents => agents, savedTasks: () => [],
+    AsanaPanel: class { init() {} launchRow(task) { launches.push(task); return ui.element(); } },
+    boardTheme: () => ({ appearance: 'linear', fontFamily: 'Arial', foreground: '#fff', secondary: '#eee',
+      background: '#121213', muted: '#959597', border: '#232426', selected: '#29292b', hover: '#232424',
+      popover: '#1c1c1d', control: '#1c1c1d', controlBorder: '#303032', menuHover: '#29292b',
+      card: '#1a1a1b', cardHover: '#212223', cardBorder: '#ffffff0c', cardSelected: '#242426', cardSelectedBorder: '#454548' }),
+    readTaskOutput: async () => runtime.output || '', readAsanaToken: async () => null,
+    taskIdentifier: task => task.gid, outputMarkdown: text => text,
+    openTaskComposer: (...args) => dialogs.push(args),
+  };
+  const sources = await Promise.all(['components/button', 'components/dropdown-menu', 'components/select', 'components/icon', 'components/side-panel', 'agent-board-state', 'agent-board']
+    .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
+  const Board = new Function(...Object.keys(host), sources.join('\n')
+    .replace(/^import .*;\r?\n/gm, '').replace(/^export \{.*\} from .*;\r?\n/gm, '')
+    .replace('export default class', 'class').replace(/^export /gm, '') + '\nreturn AgentBoard;')(...Object.values(host));
+  const view = new Board(), cx = { ...renderContext, timer: { every() {} }, spawn: fn => fn(renderContext) };
+  view.init(cx);
+  const launchers = [{ key: 'profile', name: 'Rick', icon: 'icons/codex.svg', tint: false }];
+  const render = () => { ui.nodes.clear(); return view.render(project, runtime.agents, launchers, {}, cx); };
+  render();
+  return { ui, view, project, projects, runtime, memory, key, cx, render, dialogs, launches, Board };
+}
+
+test('Todo details edit title, empty descriptions and assignment in place with automatic persistence', async () => {
+  const task = { gid: 'local:edit', source: 'local', name: 'Original', notes: 'Old description', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  const { view, ui, memory, key, dialogs, launches } = board;
+  view.selected = task.gid; board.render();
+  assert.ok(ui.nodes.has('board-task-title')); assert.ok(ui.nodes.has('board-task-description'));
+  assert.ok(!ui.nodes.has('board-edit-task')); assert.ok(!ui.nodes.has('board-add-description'));
+  view.title.edit('Updated title'); view.description.edit('New instructions\n');
+  board.render();
+  assert.equal(memory['devkits.agent-board'][key][task.gid].name, 'Updated title');
+  assert.equal(launches.at(-1).notes, 'New instructions\n');
+  ui.nodes.get('board-task-agent-option-profile').click({}, board.cx);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].agentKey, 'profile');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].agentName, 'Rick');
+  view.description.edit(''); view.title.edit('   '); view.title.blur();
+  assert.equal(memory['devkits.agent-board'][key][task.gid].notes, '');
+  assert.equal(view.title.value(), 'Updated title');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  assert.deepEqual(dialogs, []);
+});
+
+test('inline edits reject stale Todo fields after a task starts or is archived', async () => {
+  const task = { gid: 'local:edit', source: 'local', name: 'Original', notes: 'Original notes', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  const { view, project, memory, key, runtime, ui } = board;
+  view.selected = task.gid; board.render();
+  project.tabs = [{ id: 'running' }]; memory['devkits.agent-board'][key][task.gid].threadId = 'running';
+  runtime.agents = [{ address: 't1', tab: 'running', status: 'working' }];
+  view.title.edit('Stale title'); view.description.edit('Stale notes');
+  ui.nodes.get('board-task-agent-option-profile').click({}, board.cx);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].name, 'Original');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].notes, 'Original notes');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].agentKey, undefined);
+  board.render();
+  assert.ok(!ui.nodes.has('board-task-title')); assert.ok(!ui.nodes.has('board-task-description'));
+  runtime.agents = []; project.tabs = [];
+  memory['devkits.agent-board'][key][task.gid] = { ...task, archived: true };
+  view.saveField('notes');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].notes, 'Original notes');
+});
+
+test('local Todo editing and dragging work before a saved project has any native session', async () => {
+  const task = { gid: 'local:pending', source: 'local', name: 'Original', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  board.project.pending = true; board.projects.length = 0;
+  board.view.selected = task.gid; board.render();
+  board.view.description.edit('Prepare before starting any agent');
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].notes, 'Prepare before starting any agent');
+  assert.equal(board.view.setStatus(board.project, task.gid, 'done'), true);
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].status, 'done');
+});
+
+test('card dragging changes manual task progress, suppresses the click and never fabricates live activity', async () => {
+  const task = { gid: 'local:drag', source: 'local', name: 'Drag me', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  const { view, ui, cx, memory, key } = board;
+  const drag = destination => {
+    board.render();
+    ui.nodes.get(`board-card-${task.gid}`).mouseDown({ position: { x: 0, y: 0 } }, cx);
+    ui.nodes.get(`board-lane-${destination}`).mouseMove({ position: { x: 20, y: 0 } }, cx);
+    board.render();
+    ui.nodes.get(`board-lane-${destination}`).mouseUp({}, cx);
+    ui.nodes.get(`board-card-${task.gid}`).click({}, cx);
+  };
+  drag('done');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'done');
+  assert.equal(view.selected, null);
+  assert.equal(view.drag, null);
+  drag('todo');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  for (const status of ['doing', 'waiting']) {
+    drag(status);
+    assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  }
+  drag('fail');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'fail');
+  assert.deepEqual(board.dialogs, []); assert.deepEqual(board.launches, []);
+});
+
+test('dragging respects movement thresholds, cancellation and live state at release', async () => {
+  const task = { gid: 'local:drag', source: 'local', name: 'Drag me', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  const { view, ui, cx, project, runtime, memory, key } = board;
+  const start = distance => {
+    board.render();
+    ui.nodes.get(`board-card-${task.gid}`).mouseDown({ position: { x: 0, y: 0 } }, cx);
+    ui.nodes.get('board-lane-done').mouseMove({ position: { x: distance, y: 0 } }, cx);
+  };
+  start(2); ui.nodes.get('board-lane-done').mouseUp({}, cx);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  start(20); ui.nodes.get('agent-board').keyDown({ key: 'escape' }, cx);
+  ui.nodes.get('board-lane-done').mouseUp({}, cx);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  start(20); ui.nodes.get('agent-board').hover(false, cx);
+  ui.nodes.get('board-lane-done').mouseUp({}, cx);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
+  start(20);
+  project.tabs = [{ id: 'running' }]; memory['devkits.agent-board'][key][task.gid].threadId = 'running';
+  runtime.agents = [{ address: 't1', tab: 'running', status: 'working' }];
+  ui.nodes.get('board-lane-done').mouseUp({}, cx);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'doing');
+  assert.equal(memory['devkits.agent-board'][key][task.gid].manual, false);
+  assert.equal(view.drag, null);
+});
+
+test('deleting a local task removes its card and sidebar row across reloads while other task sources stay', async () => {
+  const task = { gid: 'local:delete', name: 'Delete me', notes: 'Instructions', source: 'local', status: 'todo' };
+  const others = { saved: { gid: 'saved', name: 'Saved task', source: 'asana', status: 'todo' } };
+  const board = await taskBoardFor({ [task.gid]: task, ...others });
+  board.view.selected = task.gid; board.render();
+  board.ui.nodes.get('board-delete-task').click({}, board.cx);
+  board.render();
+  assert.ok(!board.ui.nodes.has(`board-card-${task.gid}`));
+  assert.ok(!board.ui.nodes.has('board-detail'));
+  assert.ok(board.ui.nodes.has('board-card-saved'));
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid], undefined);
+  // A late field event cannot recreate a removed task.
+  board.view.description.edit('Late input');
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid], undefined);
+  const reopened = await taskBoardFor(JSON.parse(JSON.stringify(board.memory['devkits.agent-board'][board.key])));
+  assert.ok(!reopened.ui.nodes.has(`board-card-${task.gid}`));
+  const ui = fakeElements(), commands = [];
+  const View = await viewFor({ ...ui, spaces: () => [board.project], agents: () => [], theme: () => ({}),
+    shared: key => board.memory[key], setShared: (key, value) => { board.memory[key] = value; },
+    run: (...args) => commands.push(args), setAgentOrder() {} });
+  const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
+  assert.ok(!ui.nodes.has(`board-task-p-${task.gid}`));
+  assert.ok(!commands.some(([name]) => ['tab.close', 'terminal.kill'].includes(name)));
+});
+
+test('deletion preserves open and archived conversations and detaches only the selected project task', async () => {
+  const task = { gid: 'local:delete', name: 'Finished', source: 'local', status: 'done' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  const { project, runtime, memory, key, view, cx } = board;
+  project.tabs = [{ id: 'conversation', name: 'Finished' }];
+  runtime.agents = [{ address: 't1', tab: 'conversation', status: 'idle', turn: 1 }];
+  memory['devkits.thread-tasks'] = {
+    conversation: { gid: task.gid, name: task.name, folder: '/project', source: 'local' },
+    closed: { gid: task.gid, name: task.name, folder: '/project/', source: 'local' },
+    other: { gid: task.gid, name: 'Other project', folder: '/other', source: 'local' },
+  };
+  const archive = { id: 'codex:session', title: task.name, folder: project.folder, argv: ['codex', 'resume', 'session'],
+    task: { gid: task.gid }, boardTask: task };
+  const unrelated = { ...archive, id: 'codex:other', folder: '/other' };
+  memory['devkits.archived-threads'] = [archive, unrelated];
+  view.selected = task.gid; board.render();
+  board.ui.nodes.get('board-delete-task').click({}, cx);
+  board.render();
+  assert.equal(memory['devkits.agent-board'][key][task.gid], undefined);
+  assert.equal(project.tabs[0].id, 'conversation'); assert.equal(runtime.agents[0].address, 't1');
+  assert.ok(board.ui.nodes.has('board-card-thread:conversation'));
+  assert.deepEqual(Object.keys(memory['devkits.thread-tasks']), ['other']);
+  assert.deepEqual(memory['devkits.archived-threads'][0], { ...archive, task: null, boardTask: null });
+  assert.deepEqual(memory['devkits.archived-threads'][1], unrelated);
+});
+
+test('archived local tasks may be deleted, while busy, waiting, launching and external tasks cannot be', async () => {
+  const task = { gid: 'local:delete', name: 'Delete me', source: 'local', status: 'todo' };
+  for (const status of ['working', 'blocked', 'needsInput']) {
+    const board = await taskBoardFor({ [task.gid]: task });
+    board.view.selected = task.gid; board.render();
+    const staleDelete = board.ui.nodes.get('board-delete-task').click;
+    board.project.tabs = [{ id: 'busy' }];
+    board.memory['devkits.agent-board'][board.key][task.gid].threadId = 'busy';
+    board.runtime.agents = [{ address: 't1', tab: 'busy', status: status === 'needsInput' ? 'working' : status, needsInput: status === 'needsInput' }];
+    staleDelete({}, board.cx); board.render();
+    assert.ok(board.memory['devkits.agent-board'][board.key][task.gid]);
+    assert.ok(!board.ui.nodes.has('board-delete-task'));
+  }
+  const pending = await taskBoardFor({ [task.gid]: task });
+  pending.memory['devkits.pending-profiles'] = [{ at: Date.now(), task: { gid: task.gid, folder: '/project' } }];
+  pending.view.deleteTask(pending.project, task.gid, pending.cx);
+  assert.ok(pending.memory['devkits.agent-board'][pending.key][task.gid]);
+  for (const source of ['thread', 'asana']) {
+    const external = await taskBoardFor({ [task.gid]: { ...task, source } });
+    external.view.selected = task.gid; external.render();
+    assert.ok(!external.ui.nodes.has('board-delete-task'));
+    external.view.deleteTask(external.project, task.gid, external.cx);
+    assert.ok(external.memory['devkits.agent-board'][external.key][task.gid]);
+  }
+  const archived = await taskBoardFor({ [task.gid]: { ...task, archived: true } });
+  archived.view.archived = true; archived.view.selected = task.gid; archived.render();
+  archived.ui.nodes.get('board-delete-task').click({}, archived.cx);
+  assert.equal(archived.memory['devkits.agent-board'][archived.key][task.gid], undefined);
+});
+
+test('an output read already in flight cannot recreate a deleted local task', async () => {
+  const task = { gid: 'local:delete', name: 'Finished', source: 'local', status: 'done' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  board.runtime.output = 'Late result from the original conversation';
+  // Retain the real queued continuation, then delete before it runs.
+  let continuation;
+  board.view.loadOutput({ ...task, agents: [{ address: 't1' }] }, board.project, { spawn: fn => { continuation = fn; } });
+  board.view.deleteTask(board.project, task.gid, board.cx);
+  await continuation(board.cx);
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid], undefined);
+});
+
+test('a local task deleted during launch-rule loading cannot start or reappear', async () => {
+  const project = { id: 'p', name: 'Project', folder: '/project', tabs: [], active: true };
+  const task = { gid: 'local:delete', name: 'Delete me', source: 'local', status: 'todo' };
+  const memory = { 'devkits.agent-board': { '["","/project"]': { [task.gid]: task } } }, commands = [];
+  let finishRead;
+  const ruleRead = new Promise(resolve => { finishRead = resolve; });
+  const View = await viewFor({ spaces: () => [project], agents: () => [], shared: key => memory[key],
+    setShared: (key, value) => { memory[key] = value; }, readTextFile: () => ruleRead,
+    run: (...args) => commands.push(args) });
+  const view = new View();
+  const launch = view.startThread({ key: 'codex', name: 'Codex', run: ['codex'] }, { space: 'p', folder: '/project', task });
+  await settle();
+  delete memory['devkits.agent-board']['["","/project"]'][task.gid];
+  finishRead('Rules'); await launch;
+  assert.equal(memory['devkits.agent-board']['["","/project"]'][task.gid], undefined);
+  assert.ok(!commands.some(([name]) => ['tab.new', 'space.new'].includes(name)));
+});
+
+test('the task detail divider resizes the pane and retains its width across tasks and view recreation', async () => {
+  const task = { gid: 'local:resize', source: 'local', name: 'Task', notes: 'Keep these instructions', status: 'todo' };
+  const other = { gid: 'local:other', source: 'local', name: 'Other', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task, [other.gid]: other });
+  const { view, ui, cx, memory, key } = board;
+  assert.ok(!ui.nodes.has('board-detail-split-handle'));
+  view.selected = task.gid; board.render();
+  assert.equal(view.detailPanel.width, 500);
+  ui.nodes.get('board-detail-split').sizeChange({ width: 1400, height: 700 }, cx);
+  ui.nodes.get('board-detail-split-handle').mouseDown({ position: { x: 1000 } }, cx);
+  ui.nodes.get('board-detail-split').mouseMove({ position: { x: 850 }, bounds: { width: 1400 } }, cx);
+  assert.equal(view.detailPanel.width, 650);
+  assert.equal(memory['devkits.task-detail-width'], undefined); // Persist on release, not every pointer movement.
+  ui.nodes.get('board-detail-split').mouseUp({}, cx);
+  assert.equal(memory['devkits.task-detail-width'], 650);
+  view.selected = other.gid; board.render();
+  assert.equal(view.detailPanel.width, 650);
+  const reopened = new board.Board(); reopened.init(cx);
+  assert.equal(reopened.detailPanel.width, 650);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].notes, 'Keep these instructions');
+  assert.equal(view.drag, null); // Resizing never starts a card drag.
+  ui.nodes.get('board-detail-split-handle').click({ click_count: 2 }, cx);
+  assert.equal(memory['devkits.task-detail-width'], 500);
+  assert.equal(view.detailPanel.width, 500);
+});
+
+test('the task divider honors bounds and zoom, and saves on leaving the split area', async () => {
+  const task = { gid: 'local:resize', source: 'local', name: 'Task', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  const { view, ui, cx, memory } = board;
+  view.selected = task.gid; board.render();
+  const root = ui.nodes.get('board-detail-split'), handle = ui.nodes.get('board-detail-split-handle');
+  root.sizeChange({ width: 1400, height: 700 }, cx);
+  handle.mouseDown({ position: { x: 1800 } }, cx);
+  root.mouseMove({ position: { x: 1600 }, bounds: { width: 2800 } }, cx); // 2x UI zoom: 200 screen pixels = 100 logical pixels.
+  assert.equal(view.detailPanel.width, 600);
+  root.hover(false, cx);
+  assert.equal(view.detailPanel.drag, null); assert.equal(memory['devkits.task-detail-width'], 600);
+  handle.mouseDown({ position: { x: 1000 } }, cx);
+  root.mouseMove({ position: { x: -5000 }, bounds: { width: 1400 } }, cx);
+  assert.equal(view.detailPanel.width, 880);
+  root.mouseUp({}, cx);
+  root.sizeChange({ width: 700, height: 700 }, cx);
+  assert.equal(view.detailPanel.width, 380); // Leave 320px for the board.
+  assert.equal(memory['devkits.task-detail-width'], 880); // A smaller window does not overwrite the preference.
+  handle.mouseDown({ position: { x: 400 } }, cx);
+  root.mouseMove({ position: { x: 5000 }, bounds: { width: 700 } }, cx);
+  assert.equal(view.detailPanel.width, 360);
+  root.mouseUp({}, cx);
+  assert.equal(memory['devkits.task-detail-width'], 360);
+  root.sizeChange({ width: 1400, height: 700 }, cx);
+  handle.click({ click_count: 2 }, cx);
+  assert.equal(view.detailPanel.width, 500);
+});
+
+test('closing details during a resize commits the width and removes the divider', async () => {
+  const task = { gid: 'local:resize', source: 'local', name: 'Task', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  board.view.selected = task.gid; board.render();
+  board.ui.nodes.get('board-detail-split-handle').mouseDown({ position: { x: 900 } }, board.cx);
+  board.ui.nodes.get('board-detail-split').mouseMove({ position: { x: 820 } }, board.cx);
+  board.ui.nodes.get('board-close-detail').click({}, board.cx);
+  board.render();
+  assert.equal(board.view.detailPanel.drag, null);
+  assert.equal(board.memory['devkits.task-detail-width'], 580);
+  assert.ok(!board.ui.nodes.has('board-detail-split-handle'));
+});
+
+test('Linear task property menus filter options and select with Enter without submitting typed spaces', async () => {
+  const task = { gid: 'local:properties', source: 'local', name: 'Task', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  board.view.selected = task.gid; board.render();
+  board.ui.nodes.get('board-task-status').click({}, board.cx); board.render();
+  assert.ok(board.ui.nodes.has('board-task-status-search'));
+  board.view.statusSelect.search.edit('done'); board.render();
+  assert.ok(board.ui.nodes.has('board-task-status-option-done'));
+  assert.ok(!board.ui.nodes.has('board-task-status-option-todo'));
+  board.ui.nodes.get('board-task-status-options').keyDown({ key: 'enter' }, board.cx);
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].status, 'done');
+  assert.equal(board.view.statusSelect.open, false);
+  board.view.setStatus(board.project, task.gid, 'todo'); board.render();
+  board.ui.nodes.get('board-task-priority').click({}, board.cx); board.render();
+  board.view.prioritySelect.search.edit('No priority'); board.render();
+  board.ui.nodes.get('board-task-priority-options').keyDown({ key: 'space' }, board.cx);
+  assert.equal(board.view.prioritySelect.open, true);
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].priority, undefined);
+  board.ui.nodes.get('board-task-priority-options').keyDown({ key: 'enter' }, board.cx);
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].priority, 'none');
+});
+
+test('empty property searches stay harmless and reopening clears the search draft', async () => {
+  const task = { gid: 'local:properties', source: 'local', name: 'Task', status: 'todo' };
+  const board = await taskBoardFor({ [task.gid]: task });
+  board.view.selected = task.gid; board.render();
+  board.ui.nodes.get('board-task-status').click({}, board.cx); board.render();
+  board.view.statusSelect.search.edit('No matching status'); board.render();
+  board.ui.nodes.get('board-task-status-options').keyDown({ key: 'down' }, board.cx);
+  board.ui.nodes.get('board-task-status-options').keyDown({ key: 'enter' }, board.cx);
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].status, 'todo');
+  assert.equal(board.view.statusSelect.open, true);
+  board.ui.nodes.get('board-task-status-options').keyDown({ key: 'escape' }, board.cx);
+  board.render(); board.ui.nodes.get('board-task-status').click({}, board.cx);
+  assert.equal(board.view.statusSelect.search.value(), '');
+  board.render(); assert.ok(board.ui.nodes.has('board-task-status-option-todo'));
 });
