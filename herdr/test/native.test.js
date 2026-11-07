@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 
+const settle = () => new Promise(resolve => setImmediate(resolve));
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
 
 const agents = [
@@ -73,7 +74,7 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive']
+  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
@@ -82,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -238,6 +239,7 @@ test('launcher shows installed agents at content height without a scroll contain
   assert.equal(view.launchers.length, 1);
   assert.deepEqual(commands, []);
   ui.nodes.get('start-codex-work').click();
+  await settle();
   assert.ok(commands.some(([name, args]) => name === 'tab.new' && args.argv[0] === 'codex'));
   ui.nodes.clear();
   view.launchers = Array.from({ length: 20 }, (_, index) => ({ key: `account-${index}`, name: `Account ${index}`, installed: true }));
@@ -329,6 +331,7 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   assert.ok(!ui.nodes.has('new-terminal'));
   assert.ok(ui.nodes.has('start-claude'));
   ui.nodes.get('thread-launcher').keyDown({ key: '1', modifiers: {} });
+  await settle();
   assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'claude');
   commands.length = 0;
   const reopened = new View(); reopened.launchers = choices; reopened.render(renderContext);
@@ -420,6 +423,7 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
   assert.ok(rows.indexOf(ui.nodes.get('start-codex').element) < rows.indexOf(ui.nodes.get('launcher-section-2').element));
   assert.ok(!ui.nodes.has('start-claude'));
   ui.nodes.get('thread-launcher').keyDown({ key: '1', modifiers: {} });
+  await settle();
   assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'pi');
 });
 test('profile rename blocks duplicate saves, refreshes labels, and returns to Manage', async () => {
@@ -522,6 +526,7 @@ test('Manage saves Codex permissions per launcher and applies them to new tabs a
   assert.ok(!ui.texts.includes('Applies to new sessions only. Existing sessions keep their permissions.'));
   assert.deepEqual(commands, []);
   target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
+  await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
     ['codex', '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
   target = { ...target, space: null, projectName: 'New project' }; await view.startThread(work);
@@ -1030,6 +1035,7 @@ test('each Claude or Codex profile sets its default model and effort, which new 
   ui.nodes.get('session-claude-efforts-high').change(false, renderContext);
   assert.deepEqual(memory['devkits.profile-sessions'].claude, { model: 'opus', effort: null });
   view.startThread(claude, space);
+  await settle();
   assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'opus']);
 });
 test('local account profiles and their login action stay out of remote project menus', async () => {
@@ -1164,6 +1170,7 @@ test('New thread without a project opens the native folder picker; launcher pass
   const view = new View(), cx = { notify() {}, spawn(task) { pending = task(cx); } };
   view.newThread(cx); await pending; assert.deepEqual(commands, []);
   view.startThread({ name: 'Codex', run: ['codex', '--profile', 'work'] });
+  await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', { space: 'api', folder: '/Code/project name', name: 'Codex', argv: ['codex', '--profile', 'work'] }]);
   assert.deepEqual(closed, ['popup']);
 });
@@ -1177,6 +1184,7 @@ test('Codex account sessions start immediately with existing plugins and no sync
   const pending = view.startThread({ key: 'devkits-codex-work', name: 'Work',
     run: ['env', 'CODEX_HOME=/account', 'codex'] }, { space: 'one', folder: '/project', overlay: 'launcher' });
   assert.deepEqual(closed, ['launcher']);
+  await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', {
     space: 'one', folder: '/project', name: 'Work', argv: ['env', 'CODEX_HOME=/account', 'codex'],
   }]);
@@ -1214,6 +1222,7 @@ test('Start session from the Asana composer names the thread, adds the model, ef
   const view = new View();
   view.startThread({ key: 'claude', name: 'Claude', run: ['claude'] }, { space: 'api', folder: '/Code/api', projectName: 'API', task: { gid: 't1', name: 'Fix login' } },
     { model: 'opus', effort: 'max' });
+  await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'),
     ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--model', 'opus', '--effort', 'max', 'prompt:Fix login'] }]);
   assert.deepEqual(unsaved, [['/Code/api', 't1']]);
@@ -1258,6 +1267,7 @@ test('empty projects stay empty until an agent is explicitly chosen', async () =
   assert.deepEqual(commands, []);
   assert.equal(overlays[0].props.space, null);
   view.startThread({ name: 'Codex', run: ['codex'] });
+  await settle();
   assert.deepEqual(commands.find(([name]) => name === 'space.new'), ['space.new', { name: 'new', folder: '/Code/new', machine: '', tab: 'Codex', argv: ['codex'] }]);
   assert.ok(!commands.some(([name]) => name === 'tab.new'));
   catalog = projectCatalog([{ id: 's1', folder: '/Code/new', tabs: [{ id: 't1' }], active: true }], saved);
@@ -1583,4 +1593,37 @@ test('Claude and Codex threads show an archive button; terminals keep a close bu
   view.threadRow({ space: 'api', tab: { id: 'run' }, agents: [], title: 'Run app' }, {});
   assert.ok(ui.nodes.has('archive-thread-tab-0') && !ui.nodes.has('close-thread-tab-0'));
   assert.ok(ui.nodes.has('close-thread-run') && !ui.nodes.has('archive-thread-run'));
+});
+
+test('global rules join Claude and Codex system prompts in local sessions only', async () => {
+  const claude = { key: 'devkits-claude-work', run: ['env', 'CLAUDE_CONFIG_DIR=/a', 'claude', '--permission-mode', 'plan'] };
+  const codex = { key: 'codex', run: ['codex', '-m', 'gpt'] };
+  const rules = { file: '/herdr/data/devkits/AGENTS.md', text: 'Use "hc run".\nAlways.' };
+  assert.deepEqual(rulesArgv(claude, claude.run, rules),
+    ['env', 'CLAUDE_CONFIG_DIR=/a', 'claude', '--append-system-prompt-file', rules.file, '--permission-mode', 'plan']);
+  assert.deepEqual(rulesArgv(codex, codex.run, rules), ['codex', '-c', 'developer_instructions="Use \\"hc run\\".\\nAlways."', '-m', 'gpt']);
+  assert.deepEqual(rulesArgv(codex, codex.run, null), codex.run);
+  assert.deepEqual(rulesArgv({ key: 'aider', run: ['aider'] }, ['aider'], rules), ['aider']);
+  for (const [machine, text, expected] of [[null, 'Rules', true], ['linux-server', 'Rules', false], [null, '  \n', false]]) {
+    const commands = [];
+    const View = await viewFor({ spaces: () => [{ id: 'api', machine, tabs: [] }], run: (...args) => commands.push(args),
+      readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? text : null });
+    await new View().launchThread(claude, { space: 'api', folder: '/Code/api' }, {});
+    const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
+    assert.equal(argv.includes('--append-system-prompt-file'), expected);
+  }
+});
+
+test('Edit creates the starting rules once and opens them in the default editor', async () => {
+  const writes = [], runs = [];
+  let file = null;
+  const View = await viewFor({ window: () => ({ platform: 'macos' }), readTextFile: async () => file,
+    writeTextFile: async (path, text, expected) => { writes.push([path, expected]); file = text; },
+    exec: async (...args) => { runs.push(args); return { code: 0, stderr: '' }; } });
+  const view = new View();
+  await view.editGlobalRules();
+  await view.editGlobalRules();
+  assert.deepEqual(writes, [['/herdr/data/devkits/AGENTS.md', null]]);
+  assert.match(file, /hc run --bg --name/);
+  assert.deepEqual(runs, [['open', ['-t', '/herdr/data/devkits/AGENTS.md']], ['open', ['-t', '/herdr/data/devkits/AGENTS.md']]]);
 });

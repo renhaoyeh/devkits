@@ -150,6 +150,17 @@ export function sessionArgv(agent, argv, { model, effort } = {}) {
   return [...argv.slice(0, executable + 1), ...flags, ...rest];
 }
 
+// Global rules join the session's system prompt: Claude reads the file, Codex takes the text as developer instructions.
+export function rulesArgv(agent, argv, rules) {
+  const kind = sessionKind(agent);
+  const executable = argv.findIndex(arg => !arg.includes('=') && /(?:^|[/\\])(?:claude|codex)(?:\.exe|\.cmd)?$/i.test(arg));
+  if (!rules || !kind || executable < 0) return argv;
+  const flags = kind === 'claude' ? ['--append-system-prompt-file', rules.file]
+    // A JSON string is also a valid TOML basic string.
+    : ['-c', `developer_instructions=${JSON.stringify(rules.text)}`];
+  return [...argv.slice(0, executable + 1), ...flags, ...argv.slice(executable + 1)];
+}
+
 export function launcherChoices(agents, order = []) {
   const choices = [{ key: 'terminal', name: 'Terminal', group: 0 },
     ...agents.map(agent => ({ key: `agent:${agent.key}`, name: agent.name, agent,
