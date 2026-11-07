@@ -1586,6 +1586,27 @@ test('a Codex launched inside Terminal shows Close immediately, including after 
   assert.ok(archivable(thread, [{ ...terminal, argv: ['codex'] }]));
 });
 
+test('threads without agent status follow their primary pane program in the sidebar and title bar', async () => {
+  const ui = fakeElements();
+  const thread = { space: 'api', tab: { id: 'tab-0' }, title: 'Run app', agents: [] };
+  const primary = { pane: 'p-bun', terminal: 't-bun', tab: 'tab-0' };
+  const peer = { pane: 'p-peer', terminal: 't-peer', tab: 'tab-0', focused: true,
+    program: { icon: 'icons/node.svg', tint: false } };
+  const View = await viewFor({ ...ui, props: () => ({ pane: primary.pane }),
+    spaces: () => projects, agents: () => [], panes: () => [primary, peer] });
+  const view = new View();
+  for (const program of [{ icon: 'icons/bun.svg', tint: false },
+    { icon: 'icons/bun.svg', tint: true }, { icon: null, shell: true }]) {
+    primary.program = program;
+    for (const render of [() => view.threadRow(thread, {}), () => view.paneHeader({})]) {
+      ui.assets.length = 0;
+      render();
+      assert.ok(ui.assets.includes(program.icon || 'mods/devkits/assets/icons/terminal.svg'));
+      assert.ok(!ui.assets.includes(peer.program.icon));
+    }
+  }
+});
+
 test('Terminal-launched agents keep the terminal icon in the sidebar and pane header', async () => {
   for (const app of ['codex', 'claude-code']) {
     const ui = fakeElements(), program = { icon: `icons/${app}.svg`, tint: false };
