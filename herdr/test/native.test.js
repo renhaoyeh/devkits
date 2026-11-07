@@ -1078,15 +1078,18 @@ test('pane header uses the sidebar thread title without split, zoom, or close co
   for (const name of ['split-right', 'split-down', 'zoom', 'close']) assert.ok(!ui.nodes.has(`${name}-pane-1`));
 });
 test('a thread started from an Asana task links back to it from the pane header', async () => {
-  const ui = fakeElements(), commands = [], memory = { 'devkits.thread-tasks': { 'tab-1': { gid: 't1', name: 'Fix login', folder: '/Code/app' } } };
+  const ui = fakeElements(), commands = [], overlays = [], memory = { 'devkits.thread-tasks': { 'tab-1': { gid: 't1', name: 'Fix login', folder: '/Code/app' } } };
   const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }), spaces: () => projects, agents: () => agents,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args),
-    panes: () => [{ pane: 'pane-1', tab: 'tab-1', program: { name: 'Codex' } }, { pane: 'pane-2', tab: 'tab-3', program: { name: 'Codex' } }] });
+    openOverlay: spec => overlays.push(spec), panes: () => [{ pane: 'pane-1', tab: 'tab-1', program: { name: 'Codex' } }, { pane: 'pane-2', tab: 'tab-3', program: { name: 'Codex' } }] });
   new View().paneHeader({});
   ui.nodes.get('asana-link-tab-1').click({}, { stop_propagation() {} });
-  assert.equal(memory['devkits.asana'], 'app');
+  assert.equal(memory['devkits.asana'], null);
+  assert.equal(overlays[0].kind, 'dialog');
+  assert.equal(overlays[0].modal, true);
+  assert.equal(overlays[0].props.project.id, 'app');
   assert.deepEqual(memory['devkits.asana-focus'], { folder: '/Code/app', gid: 't1' });
-  assert.ok(commands.some(([name, args]) => name === 'space.select' && args.id === 'app'));
+  assert.ok(!commands.some(([name]) => name === 'space.select'));
   assert.ok(!ui.nodes.has('asana-link-tab-3'));
 });
 test('pane header names the agent profile that started the thread', async () => {
@@ -1202,27 +1205,19 @@ test('the launcher stays alive until rules are read and suppresses duplicate sta
   }
 });
 
-test('each project gets its open panel back when selected again, until a thread is chosen there', async () => {
-  const ui = fakeElements(), commands = [], memory = {};
-  let active = 'one';
-  const spaces = () => ['one', 'two'].map(id => ({ id, name: id, folder: `/Code/${id}`, active: id === active,
-    tabs: [{ id: `${id}-a`, name: 'A', active: true }, { id: `${id}-b`, name: 'B' }] }));
-  let target = {};
-  const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces,
-    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {}, run: (...args) => commands.push(args), closeOverlay() {} });
-  const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
-  target = { view: 'project-menu', overlay: 'menu', project: { id: 'one', name: 'one', folder: '/Code/one', machine: null } };
+test('Asana pop-out stays bound to its project and does not replace the workspace', async () => {
+  const ui = fakeElements(), commands = [], memory = {}, overlays = [];
+  const project = { id: 'one', name: 'One', folder: '/Code/one', machine: null, active: true, tabs: [] };
+  let target = { view: 'project-menu', overlay: 'menu', project };
+  const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces: () => [project],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {},
+    openOverlay: spec => overlays.push(spec), run: (...args) => commands.push(args), closeOverlay() {} });
   const menu = new View(); menu.handle = { focus() {} }; menu.render(); ui.nodes.get('menu-asana-tasks').click();
-  assert.equal(memory['devkits.asana'], 'one');
-  target = {}; active = 'two'; sidebar.render();
   assert.equal(memory['devkits.asana'], null);
-  active = 'one'; sidebar.render();
-  assert.equal(memory['devkits.asana'], 'one');
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'asana' }]);
-  ui.nodes.get('thread-one-b').click();
-  assert.equal(memory['devkits.asana'], null);
-  active = 'two'; sidebar.render(); active = 'one'; sidebar.render();
-  assert.equal(memory['devkits.asana'], null);
+  assert.equal(overlays[0].kind, 'dialog');
+  assert.equal(overlays[0].modal, true);
+  assert.equal(overlays[0].props.project.folder, '/Code/one');
+  assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.child === 'asana'));
 });
 test('Start session from the Asana composer names the thread, adds the model, effort and task prompt, and unsaves it', async () => {
   const ui = fakeElements(), commands = [], unsaved = [];
@@ -1238,22 +1233,24 @@ test('Start session from the Asana composer names the thread, adds the model, ef
   assert.deepEqual(unsaved, [['/Code/api', 't1']]);
 });
 test('Asana tasks opens from a local project menu, sits beside Changes, and is absent for remote projects', async () => {
-  const ui = fakeElements(), commands = [], memory = {};
+  const ui = fakeElements(), commands = [], overlays = [], memory = {};
   const project = { id: 'one', name: 'One', folder: '/Code/one', machine: null, active: true, tabs: [] };
   let target = { view: 'project-menu', overlay: 'menu', project };
   const View = await viewFor({ ...ui, props: () => target, agents: () => [], theme: () => ({}), spaces: () => [project],
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {},
-    run: (...args) => commands.push(args), closeOverlay() {} });
+    openOverlay: spec => overlays.push(spec), run: (...args) => commands.push(args), closeOverlay() {} });
   const menu = new View(); menu.handle = { focus() {} }; menu.render();
   ui.nodes.get('menu-asana-tasks').click();
-  assert.equal(memory['devkits.asana'], 'one');
+  assert.equal(memory['devkits.asana'], null);
   target = {}; const sidebar = new View(); sidebar.folded = new Set(); sidebar.render();
-  assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'asana' }]);
+  assert.equal(overlays[0].kind, 'dialog');
+  assert.equal(overlays[0].modal, true);
+  assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.child === 'asana'));
   target = { view: 'status' }; new View().render();
   assert.ok(!ui.nodes.has('open-asana'));
   // Changes opens in the editor beside Asana instead of replacing it.
   ui.nodes.get('open-diff').click();
-  assert.equal(memory['devkits.asana'], 'one');
+  assert.equal(memory['devkits.asana'], null);
   ui.nodes.clear(); target = { view: 'project-menu', overlay: 'menu', project: { ...project, machine: 'vps' } };
   const remote = new View(); remote.handle = { focus() {} }; remote.render();
   assert.ok(!ui.nodes.has('menu-asana-tasks'));

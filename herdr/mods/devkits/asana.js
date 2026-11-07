@@ -4,8 +4,32 @@ import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, s
 import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions, settingsKey } from './model.js';
 import { Select, SelectState } from './components/select.js';
 import { Button } from './components/button.js';
-import { DialogTitle, DialogDescription } from './components/dialog.js';
+import { DialogDescription } from './components/dialog.js';
 import { DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel } from './components/dropdown-menu.js';
+
+// Asana owns its palette; the host theme chooses only light or dark mode.
+// Reference: Asana project List view (the main canvas is #1e1f21 in dark mode).
+export function asanaTheme(host = theme()) {
+  const color = String(host.background || '#1e1f21').replace('#', '');
+  const rgb = color.length === 3 ? color.split('').map(c => parseInt(c + c, 16))
+    : [0, 2, 4].map(i => parseInt(color.slice(i, i + 2), 16));
+  const light = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722 > 150;
+  return light ? {
+    background: '#ffffff', chrome: '#f9f8f8', popover: '#ffffff', foreground: '#1e1f21',
+    muted: '#6d6e6f', hover: '#f9f8f8', selected: '#e9f2fe', border: '#edeae9', input: '#cfcbcb',
+    solid: '#4573d2', solid_foreground: '#ffffff', destructive: '#c92f54',
+    working: '#f1bd6c', done: '#58a182', accent: '#4573d2', project: '#a9e5e2',
+  } : {
+    background: '#1e1f21', chrome: '#252628', popover: '#1e1f21', foreground: '#f5f4f3',
+    muted: '#a2a0a2', hover: '#363639', selected: '#2b3b55', border: '#424244', input: '#565557',
+    solid: '#4573d2', solid_foreground: '#ffffff', destructive: '#f06a6a',
+    working: '#f1bd6c', done: '#5da283', accent: '#a4cafe', project: '#a9e5e2',
+  };
+}
+
+// Asana controls use their own geometry inside the project's Sera shell.
+const asanaButton = (id, t, options = {}) => Button(id, t, options).rounded(6)
+  .when(options.variant === 'outline', el => el.border(1).border_color(t.input));
 
 const api = 'https://app.asana.com/api/1.0';
 const tokenPath = () => `${appHome()}/data/devkits/asana.json`;
@@ -158,7 +182,7 @@ const setSavedTasks = (folder, list) => setShared('devkits.asana-saved', { ...(s
 // Bounds and positions are in zoomed pixels; the list and the preview each keep at least 320px.
 export const previewWidthAt = (bounds, x, zoom) =>
   Math.round(Math.max(320, Math.min(bounds.width / zoom - 320, (bounds.x + bounds.width - x) / zoom)));
-// Asana sections are free text; their names map to Linear's status kinds.
+// Asana sections are free text; infer a status for task properties.
 export const statusKind = section => /done|complete|closed|shipped|released|resolved/i.test(section || '') ? 'done'
   : /progress|doing|review|testing|qa|active|started|wip/i.test(section || '') ? 'started'
     : /backlog|later|icebox|someday|idea|triage/i.test(section || '') ? 'backlog' : 'todo';
@@ -213,8 +237,8 @@ export class AsanaProjectPicker {
   }
 
   render() {
-    const t = theme(), current = binding(this.folder)?.gid;
-    return DropdownMenuContent('asana-project-picker', 360, t).track_focus(this.handle)
+    const t = asanaTheme(), current = binding(this.folder)?.gid;
+    return DropdownMenuContent('asana-project-picker', 360, t).rounded(8).shadow_lg().overflow_hidden().p(8).font_family('Arial').track_focus(this.handle)
       .on_key_down((event, cx) => {
         if (event.key === 'escape') closeOverlay(this.overlay);
         else if (event.key === 'enter') this.choose(this.projects[this.index]);
@@ -224,10 +248,10 @@ export class AsanaProjectPicker {
         cx.stop_propagation(); cx.notify();
       })
       .child(Input.new(this.search).id('asana-project-search').accessibility_label('Search Asana projects')
-        .h(32).flex_none().px(8).rounded(0).border_b(1).border_color(t.input).text_size(13))
-      .child(DropdownMenuLabel(t).child('PROJECTS'))
+        .h(36).flex_none().px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(13))
+      .child(DropdownMenuLabel(t).text_size(12).child('Projects'))
       .child(v_flex().id('asana-project-list').flex_1().min_h(0).overflow_y_scrollbar().gap(1)
-        .children(this.projects.map((project, index) => DropdownMenuItem(`asana-project-${project.gid}`, t)
+        .children(this.projects.map((project, index) => DropdownMenuItem(`asana-project-${project.gid}`, t).rounded(4)
           .bg(this.index === index ? t.selected : t.popover)
           .on_hover((inside, cx) => { if (inside) { this.index = index; cx.notify(); } })
           .on_click(() => this.choose(project))
@@ -258,6 +282,7 @@ export default class AsanaPanel {
     this.note.on('change', () => { if (this.selected) this.notes.set(this.selected, this.note.value()); });
     this.tokenInput = InputState.new({ placeholder: 'Personal access token' });
     this.tokenInput.set_masked(true);
+    this.tokenInput.on('change', (_event, cx) => { this.tokenCopied = false; cx.notify(); });
     this.tokenInput.on('submit', (_event, cx) => this.saveToken(cx));
   }
 
@@ -351,13 +376,47 @@ export default class AsanaPanel {
     });
   }
 
+  openSettings(cx) {
+    this.settingsOpen = true;
+    this.tokenCopied = false;
+    this.tokenInput.set_value(this.token || '');
+    this.error = null;
+    cx.notify();
+  }
+
   saveToken(cx) {
     const token = this.tokenInput.value().trim();
-    if (!token) return;
+    if (this.tokenBusy) return;
+    if (!token) { this.error = 'Enter a personal access token.'; cx.notify(); return; }
+    if (token === this.token && this.needsToken === false) {
+      this.settingsOpen = false; this.tokenInput.set_value(''); this.error = null; cx.notify(); return;
+    }
+    this.tokenBusy = true;
     cx.spawn(async cx => {
-      try { await saveAsanaToken(token); this.token = token; this.needsToken = false; this.error = null; this.loadedGid = null; }
+      try { await saveAsanaToken(token); this.token = token; this.needsToken = false; this.settingsOpen = false; this.states?.clear(); this.reset(); this.tokenInput.set_value(''); }
       catch (error) { this.error = error.message; }
-      cx.notify();
+      this.tokenBusy = false; cx.notify();
+    });
+  }
+
+  copyToken(cx) {
+    const token = this.tokenInput.value().trim();
+    if (!token) return;
+    cx.write_to_clipboard(token);
+    this.tokenCopied = true;
+    cx.notify();
+  }
+
+  clearToken(cx) {
+    if (this.tokenBusy) return;
+    this.tokenBusy = true;
+    cx.spawn(async cx => {
+      try {
+        await saveAsanaToken('');
+        this.token = null; this.needsToken = true; this.states?.clear(); this.reset();
+        this.settingsOpen = true; this.tokenInput.set_value('');
+      } catch (error) { this.error = error.message; }
+      this.tokenBusy = false; cx.notify();
     });
   }
 
@@ -465,32 +524,47 @@ export default class AsanaPanel {
     const ready = this.needsToken === false;
     const bound = binding(this.folder);
     const saved = savedTasks(this.folder).length;
-    const toggle = (id, label, active, action) => Button(id, t, { variant: 'ghost' }).h(24).px(8)
-      .when(active, el => el.bg(t.selected).text_color(t.foreground))
+    const toggle = (id, label, active, action) => asanaButton(id, t, { variant: 'ghost' }).h(28).px(10)
+      .when(active, el => el.bg(t.selected).text_color(t.accent))
       .accessibility_label(`${label}${active ? ', selected' : ''}`)
       .on_click((_event, cx) => { action(); cx.notify(); }).child(label);
-    return h_flex().h(40).flex_none().pl(12).pr(4).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
-      .child(DropdownMenuTrigger(Button('asana-project-menu', t, { variant: 'ghost' }).h(28).px(8).gap(6).font_medium().text_color(t.foreground)
-        .accessibility_label('Choose Asana project').disabled(!ready), 360,
-        (_cx, at) => { if (ready) openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 360, at, props: { view: 'asana-projects', folder: this.folder } }); },
-        'start', { x: 0, y: 14.5 }) // A 28px button centred in the 40px toolbar: 8px below its bottom border
-        .child(div().max_w(220).truncate().child(bound?.name || 'Choose Asana project'))
-        .child(glyph('chevron-down', 12).text_color(t.muted)))
-      .when(ready && Boolean(bound), el => el
-        .child(h_flex().gap(2)
-          .child(toggle('asana-view-list', 'List', this.view() === 'list', () => setShared('devkits.asana-view', 'list')))
-          .child(toggle('asana-view-board', 'Board', this.view() === 'board', () => setShared('devkits.asana-view', 'board'))))
-        .child(div().w(1).h(16).bg(t.border))
-        .child(h_flex().gap(2)
+    const tab = (id, label, active, action) => div().id(id).h(36).px(4).gap(6).flex().items_center()
+      .border_b(2).border_color(active ? t.muted : t.background).text_size(14)
+      .text_color(active ? t.foreground : t.muted).cursor_pointer().hover(el => el.bg(t.hover))
+      .accessibility_label(`${label}${active ? ', selected' : ''}`)
+      .on_mouse_down('left', (_event, cx) => cx.stop_propagation())
+      .on_click((_event, cx) => { action(); cx.notify(); })
+      .child(glyph(label === 'List' ? 'list-todo' : 'columns-3', 14)).child(label);
+    return v_flex().flex_none().bg(t.background)
+      .child(h_flex().h(56).px(24).gap(12).items_center()
+        .child(div().size(32).rounded(6).bg(t.project).flex().items_center().justify_center()
+          .child(glyph('list-todo', 20).text_color('#1e1f21')))
+        .child(DropdownMenuTrigger(asanaButton('asana-project-menu', t, { variant: 'ghost' }).h(36).px(4).gap(8).text_size(20).font_semibold().text_color(t.foreground)
+          .accessibility_label('Choose Asana project').disabled(!ready)
+          .on_mouse_down('left', (_event, cx) => cx.stop_propagation()), 360,
+          (_cx, at) => { if (ready) openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 360, at,
+            props: { view: 'asana-projects', folder: this.folder } }); }, 'start', { x: 0, y: 4 })
+          .child(div().max_w(400).truncate().child(bound?.name || 'Choose Asana project'))
+          .child(glyph('chevron-down', 14).text_color(t.muted)))
+        .child(div().flex_1())
+        .when(this.needsToken !== null && !this.settingsOpen, el => el.child(asanaButton('asana-settings', t, { variant: 'ghost', size: 'icon' })
+          .disabled(this.tokenBusy).accessibility_label('Asana settings')
+          .on_click((_event, cx) => this.openSettings(cx))
+          .child(glyph('gear', 14))))
+        .child(asanaButton('asana-close', t, { variant: 'ghost', size: 'icon' }).rounded(6).accessibility_label('Close Asana tasks')
+          .on_mouse_down('left', (_event, cx) => cx.stop_propagation()).on_click(close).child(glyph('close'))))
+      .when(ready && Boolean(bound) && !this.settingsOpen, el => el
+        .child(h_flex().h(36).px(24).gap(20).items_center().border_b(1).border_color(t.border)
+          .child(tab('asana-view-list', 'List', this.view() === 'list', () => setShared('devkits.asana-view', 'list')))
+          .child(tab('asana-view-board', 'Board', this.view() === 'board', () => setShared('devkits.asana-view', 'board'))))
+        .child(h_flex().h(56).px(24).gap(8).items_center()
+          .on_mouse_down('left', (_event, cx) => cx.stop_propagation()).border_b(1).border_color(t.border)
           .children([['mine', 'Mine'], ['all', 'All'], ['saved', `Saved${saved ? ` ${saved}` : ''}`]].map(([value, label]) =>
-            toggle(`asana-tab-${value}`, label, this.tab === value, () => { this.tab = value; setShared('devkits.asana-tab', value); })))))
-      .child(div().flex_1())
-      .when(ready && Boolean(bound), el => el.child(Input.new(this.search).id('asana-search').accessibility_label('Search tasks')
-        .w(220).h(28).px(8).rounded(0).border_b(1).border_color(t.input).text_size(12)))
-      .when(ready, el => el.child(Button('asana-change-token', t, { variant: 'ghost' }).h(24).px(8)
-        .on_click((_event, cx) => { this.needsToken = true; this.error = null; this.tokenInput.focus(); cx.notify(); }).child('Token')))
-      .child(Button('asana-close', t, { variant: 'ghost', size: 'icon' }).accessibility_label('Close Asana tasks')
-        .on_click(close).child(glyph('close')));
+            toggle(`asana-tab-${value}`, label, this.tab === value, () => { this.tab = value; setShared('devkits.asana-tab', value); })))
+          .child(div().flex_1())
+          .child(Input.new(this.search).id('asana-search').accessibility_label('Search tasks')
+            .w(200).h(30).px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(12))
+          ));
   }
 
   status(section, t, size = 14) {
@@ -511,12 +585,12 @@ export default class AsanaPanel {
     return div().flex_none().text_size(12).text_color(due.overdue ? t.destructive || t.ansi1 : t.muted).child(due.text);
   }
 
-  // Section headers read as dividers, not issues: a ruled strip with a small uppercase muted label, like menu section labels.
+  // Asana section headings sit between ruled task groups.
   sectionLabel(group, t) {
-    return h_flex().h(32).flex_none().px(16).gap(8).items_center().bg(t.chrome).border_t(1).border_b(1).border_color(t.border)
-      .child(this.status(group.name, t, 12))
-      .child(div().min_w(0).truncate().text_size(11).font_medium().text_color(t.muted).child(group.name.toUpperCase()))
-      .child(div().flex_none().text_size(11).text_color(t.muted).child(String(group.tasks.length)));
+    return h_flex().h(52).flex_none().px(24).gap(8).items_center().border_b(1).border_color(t.border)
+      .child(glyph('chevron-down', 12).text_color(t.muted))
+      .child(div().min_w(0).truncate().text_size(16).font_semibold().child(group.name))
+      .child(div().flex_none().text_size(12).text_color(t.muted).child(String(group.tasks.length)));
   }
 
   // Section headers, task rows and Load more, in display order.
@@ -529,7 +603,7 @@ export default class AsanaPanel {
     return items;
   }
 
-  // Linear's list: borderless rows with status, title, then quiet metadata on the right.
+  // Asana's task table keeps assignees and due dates in aligned columns.
   // A plain scroll list: pages keep it to a few hundred rows, and hover then stays in GPUI instead of rebuilding rows in script each frame.
   list(t) {
     const saved = new Set(savedTasks(this.folder).map(item => item.gid));
@@ -539,105 +613,123 @@ export default class AsanaPanel {
         .cursor_pointer().hover(el => el.bg(t.hover)).on_click((_event, cx) => this.more(cx))
         .child(glyph('chevron-down', 12)).child(this.loadingMore ? 'Loading…' : 'Load more tasks');
       const { task, depth } = item;
-      return h_flex().id(`asana-${item.key}`).h(36).flex_none().pl(16 + depth * 22).pr(16).gap(10).items_center().cursor_pointer()
+      return h_flex().id(`asana-${item.key}`).h(38).flex_none().pl(24 + depth * 22).pr(24).gap(10).items_center().border_b(1).border_color(t.border).cursor_pointer()
         .opacity(task.moved ? 0.5 : 1).accessibility_label(task.name)
         .bg(this.selected === task.gid ? t.selected : t.background).hover(el => el.bg(this.selected === task.gid ? t.selected : t.hover))
         .on_click((_event, cx) => { this.handle.focus(); this.show(task, cx); })
-        .child(this.status(depth ? null : item.section, t))
-        .child(div().min_w(0).truncate().text_size(13).child(task.name))
+        .child(glyph('circle-check', 16).text_color(t.muted))
+        .child(div().flex_1().min_w(0).truncate().text_size(13).child(task.name))
         .when(item.nested && task.subtasks > 0, el => el.child(h_flex().id(`asana-expand-${task.gid}`).h(20).px(6).gap(4).flex_none().items_center()
-          .border(1).border_color(t.border).text_size(11).text_color(t.muted).cursor_pointer().hover(el => el.bg(t.hover))
+          .rounded(4).border(1).border_color(t.border).text_size(11).text_color(t.muted).cursor_pointer().hover(el => el.bg(t.hover))
           .accessibility_label(`${this.expanded.has(task.gid) ? 'Hide' : 'Show'} ${task.subtasks} subtasks`)
           .on_click((_event, cx) => { cx.stop_propagation(); this.toggleExpanded(task, cx); })
           .child(glyph(this.expanded.has(task.gid) ? 'chevron-down' : 'chevron-right', 10)).child(String(task.subtasks))))
         .when(Boolean(task.parent) && !depth, el => el.child(div().flex_none().max_w(200).truncate().text_size(12).text_color(t.muted).child(`↳ ${task.parent}`)))
-        .child(div().flex_1())
         .when(saved.has(task.gid), el => el.child(glyph('star-filled', 12).text_color(t.muted)))
-        .child(this.due(task, t))
-        .child(this.avatar(task, t));
+        .child(h_flex().w(120).h_full().pl(12).border_l(1).border_color(t.border).flex_none().items_center().child(this.avatar(task, t, 24)))
+        .child(h_flex().w(120).h_full().pl(12).border_l(1).border_color(t.border).flex_none().items_center().child(this.due(task, t)));
     };
-    return v_flex().id('asana-list').flex_1().min_h(0).overflow_y_scrollbar().children(this.listItems().map(row));
+    return v_flex().id('asana-list').flex_1().min_h(0)
+      .child(h_flex().h(34).px(24).gap(10).flex_none().items_center().border_b(1).border_color(t.border).text_size(12).text_color(t.muted)
+        .child(div().flex_1().child('Task name'))
+        .child(div().w(120).h_full().pl(12).border_l(1).border_color(t.border).flex_none().flex().items_center().child('Assignee'))
+        .child(div().w(120).h_full().pl(12).border_l(1).border_color(t.border).flex_none().flex().items_center().child('Due date')))
+      .child(v_flex().id('asana-list-rows').flex_1().min_h(0).overflow_y_scrollbar().children(this.listItems().map(row)));
   }
 
   board(t) {
     const saved = new Set(savedTasks(this.folder).map(item => item.gid));
-    return h_flex().id('asana-board').flex_1().min_h(0).overflow_x_scrollbar().p(12).gap(12)
+    return h_flex().id('asana-board').flex_1().min_h(0).overflow_x_scrollbar().bg(t.chrome).p(24).gap(16)
       .children(this.groups().map(group => v_flex().w(300).flex_none().h_full().min_h(0)
-        .child(h_flex().h(32).flex_none().px(4).gap(8).items_center()
+        .child(h_flex().h(40).flex_none().px(4).gap(8).items_center()
           .child(this.status(group.name, t))
           .child(div().text_size(12).font_medium().child(group.name))
           .child(div().text_size(12).text_color(t.muted).child(String(group.tasks.length))))
         .child(v_flex().id(`asana-column-${group.name}`).flex_1().min_h(0).overflow_y_scrollbar().gap(8)
-          .children(group.tasks.map(task => v_flex().id(`asana-card-${task.gid}`).flex_none().p(12).gap(10).cursor_pointer()
-            .bg(this.selected === task.gid ? t.selected : t.popover).border(1).border_color(this.selected === task.gid ? t.solid : t.border)
+          .children(group.tasks.map(task => v_flex().id(`asana-card-${task.gid}`).flex_none().p(16).gap(12).rounded(8).cursor_pointer()
+            .bg(this.selected === task.gid ? t.selected : t.background).border(1).border_color(this.selected === task.gid ? t.solid : t.border)
             .opacity(task.moved ? 0.5 : 1).hover(el => el.border_color(t.solid)).accessibility_label(task.name)
             .on_click((_event, cx) => { this.handle.focus(); this.show(task, cx); })
             .when(Boolean(task.parent), el => el.child(div().truncate().text_size(11).text_color(t.muted).child(`↳ ${task.parent}`)))
             .child(div().text_size(13).font_medium().child(task.name))
             .child(h_flex().gap(8).items_center()
               .child(this.status(group.name, t, 12))
-              .when(task.subtasks > 0, el => el.child(h_flex().h(20).px(6).items_center().border(1).border_color(t.border)
+              .when(task.subtasks > 0, el => el.child(h_flex().h(20).px(6).items_center().rounded(4).border(1).border_color(t.border)
                 .text_size(11).text_color(t.muted).child(`${task.subtasks} subtasks`)))
               .child(div().flex_1())
               .when(saved.has(task.gid), el => el.child(glyph('star-filled', 12).text_color(t.muted)))
               .child(this.due(task, t))
               .child(this.avatar(task, t))))))))
-      .when(this.tab === 'all' && Boolean(this.all.next), el => el.child(Button('asana-load-more', t, { variant: 'outline' }).flex_none()
+      .when(this.tab === 'all' && Boolean(this.all.next), el => el.child(asanaButton('asana-load-more', t, { variant: 'outline' }).flex_none()
         .on_click((_event, cx) => this.more(cx)).child(this.loadingMore ? 'Loading…' : 'Load more tasks')));
   }
 
-  connect(t) {
-    return v_flex().flex_1().max_w(560).p(24).gap(16)
-      .child(DialogTitle().child('Connect Asana'))
-      .child(DialogDescription(t).child('Paste a personal access token from the Asana developer console. It is saved only on this computer, and Devkits never changes anything in Asana.'))
-      .child(Input.new(this.tokenInput).id('asana-token').accessibility_label('Asana personal access token')
-        .h(36).px(10).rounded(0).border_b(1).border_color(t.input).text_size(13))
-      .when(Boolean(this.error), el => el.child(div().id('asana-error').text_size(12).text_color(t.destructive || t.foreground).child(this.error)))
-      .child(h_flex().child(Button('asana-save-token', t).on_click((_event, cx) => this.saveToken(cx)).child('Connect')));
+  connect(t, close) {
+    const back = cx => { this.settingsOpen = false; this.tokenInput.set_value(''); this.error = null; cx.notify(); };
+    return v_flex().flex_1().max_w(560).p(32).gap(16)
+      .child(h_flex().child(asanaButton('asana-settings-back', t, { variant: 'ghost' }).gap(6).disabled(this.tokenBusy)
+        .on_click((_event, cx) => this.token ? back(cx) : close()).child(glyph('chevron-right', 14)).child(this.token ? 'Back to tasks' : 'Close')))
+      .child(div().text_size(24).font_semibold().child('Asana settings'))
+      .child(div().text_size(14).font_medium().child('Personal access token'))
+      .child(DialogDescription(t).child(this.token ? 'Your saved token is masked below. Replace it to change accounts, or clear it below.'
+        : 'No token is saved. Paste a personal access token from the Asana developer console to connect.'))
+      .child(h_flex().gap(8).items_center()
+        .child(Input.new(this.tokenInput).id('asana-token').accessibility_label('Asana personal access token')
+        .flex_1().min_w(0).h(36).px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(13))
+        .child(asanaButton('asana-copy-token', t, { variant: 'outline' }).w(80).h(36).disabled(!this.tokenInput.value().trim())
+          .accessibility_label('Copy personal access token').on_click((_event, cx) => this.copyToken(cx))
+          .child(this.tokenCopied ? 'Copied' : 'Copy')))
+      .when(Boolean(this.error), el => el.child(div().id('asana-error').text_size(12).text_color(t.destructive).child(this.error)))
+      .child(h_flex().gap(8)
+        .child(asanaButton('asana-save-token', t).disabled(this.tokenBusy).on_click((_event, cx) => this.saveToken(cx)).child(this.tokenBusy ? 'Saving…' : this.token ? 'Save token' : 'Connect'))
+        .child(asanaButton('asana-cancel-token', t, { variant: 'outline' }).disabled(this.tokenBusy)
+          .on_click((_event, cx) => this.token ? back(cx) : close()).child('Cancel'))
+        .when(Boolean(this.token), el => el.child(asanaButton('asana-clear-token', t, { variant: 'outline' }).text_color(t.destructive)
+          .disabled(this.tokenBusy).on_click((_event, cx) => this.clearToken(cx)).child('Clear saved token'))));
   }
 
-  // Linear's issue view: title, description and sub-issues, with properties as label and value rows.
+  // Asana's task detail pane, with properties followed by description and activity.
   preview(t, agents, start) {
     const task = this.detail;
     const saved = task && savedTasks(this.folder).some(item => item.gid === task.gid);
     const subtasks = task ? this.subtasks.get(task.gid) : null;
     const width = this.previewWidth();
-    const property = (label, value) => h_flex().h(28).gap(12).items_center()
-      .child(div().w(80).flex_none().text_size(12).text_color(t.muted).child(label))
+    const property = (label, value) => h_flex().h(36).gap(12).items_center()
+      .child(div().w(112).flex_none().text_size(12).text_color(t.muted).child(label))
       .child(h_flex().flex_1().min_w(0).gap(8).items_center().text_size(13).children([].concat(value)));
     return v_flex().id('asana-preview').when(Boolean(width), el => el.w(width).flex_none()).when(!width, el => el.flex_1().min_w(0))
       .min_h(0).h_full().bg(t.background).border_l(1).border_color(t.border)
-      .child(h_flex().h(40).flex_none().pl(16).pr(4).gap(6).items_center().border_b(1).border_color(t.border).text_size(12)
+      .child(h_flex().h(48).flex_none().pl(16).pr(8).gap(6).items_center().border_b(1).border_color(t.border).text_size(12)
         .child(h_flex().flex_1().min_w(0).gap(6).items_center().text_color(t.muted)
           .child(div().flex_none().max_w(160).truncate().child(binding(this.folder)?.name || 'Asana'))
           .when(Boolean(task?.parent), el => el.child('›').child(div().id('asana-parent-crumb').min_w(0).truncate().cursor_pointer()
             .hover(el => el.text_color(t.foreground)).on_click((_event, cx) => this.show(task.parent, cx)).child(task.parent.name))))
         .when(Boolean(task), el => el
-          .child(Button('asana-open', t, { variant: 'ghost' }).h(28).px(8).accessibility_label('Open in Asana')
+          .child(asanaButton('asana-open', t, { variant: 'ghost' }).h(28).px(8).accessibility_label('Open in Asana')
             .on_click((_event, cx) => cx.open_url(task.url)).child('Open in Asana'))
-          .child(Button('asana-save', t, { variant: 'outline' }).h(28).px(8).gap(6)
+          .child(asanaButton('asana-save', t, { variant: 'outline' }).h(28).px(8).gap(6)
             .accessibility_label(saved ? 'Remove from Saved' : 'Save for later on this computer')
             .on_click((_event, cx) => { this.toggleSaved(task); cx.notify(); })
             .child(glyph(saved ? 'star-filled' : 'star', 12)).child(saved ? 'Saved' : 'Save for later'))
 )
-        .child(Button('asana-close-preview', t, { variant: 'ghost', size: 'icon' }).accessibility_label('Close preview')
+        .child(asanaButton('asana-close-preview', t, { variant: 'ghost', size: 'icon' }).accessibility_label('Close preview')
           .on_click((_event, cx) => { this.selected = null; this.detail = null; cx.notify(); }).child(glyph('close'))))
       .child(v_flex().id(`asana-preview-${this.selected}`).flex_1().min_h(0).overflow_y_scrollbar().px(32).py(28).gap(24)
         .when(!task, el => el.child(div().text_size(13).text_color(this.detailError ? t.destructive || t.foreground : t.muted)
           .child(this.detailError || 'Loading…')))
         .when(Boolean(task), el => el
-          .child(div().text_size(22).font_semibold().line_height('30px').child(task.name))
+          .child(div().text_size(24).font_semibold().line_height('32px').child(task.name))
           .child(v_flex().gap(2)
             .child(property('Status', [this.status(task.section, t), div().child(task.section || 'No section')]))
             .child(property('Assignee', [this.avatar(task, t), div().text_color(task.assignee ? t.foreground : t.muted).child(task.assignee || 'Unassigned')]))
             .child(property('Due date', task.due ? this.due(task, t).text_size(13) : div().text_color(t.muted).child('No due date'))))
-          .child(div().h(1).flex_none().bg(t.border))
+          .child(div().text_size(12).text_color(t.muted).child('Description'))
           .child(task.notes.trim() ? TextView.markdown(`asana-notes-${task.gid}`, task.notes).selectable(true).scrollable(false).w_full()
             : div().text_size(13).text_color(t.muted).child('No description.'))
           .when(task.subtasks > 0, el => el.child(v_flex().gap(4)
             .child(h_flex().gap(8).items_center().text_size(13).font_medium()
-              .child('Sub-issues').child(div().text_color(t.muted).font_normal().child(String(task.subtasks))))
-            .child(v_flex().border(1).border_color(t.border)
+              .child('Subtasks').child(div().text_color(t.muted).font_normal().child(String(task.subtasks))))
+            .child(v_flex().rounded(6).overflow_hidden().border(1).border_color(t.border)
               .when(!subtasks, el => el.child(div().p(12).text_size(12).text_color(t.muted).child('Loading…')))
               .children((subtasks || []).map((sub, index) => h_flex().id(`asana-subtask-${sub.gid}`).h(36).flex_none().px(12).gap(10).items_center()
                 .when(index > 0, el => el.border_t(1).border_color(t.border))
@@ -662,7 +754,7 @@ export default class AsanaPanel {
                 .child(TextView.markdown(`asana-comment-text-${comment.gid}`, comment.text).selectable(true).scrollable(false).w_full())))))))
       .when(Boolean(task), el => el.child(v_flex().flex_none().p(12).gap(8).border_t(1).border_color(t.border).bg(t.chrome)
         .child(Textarea.new(this.note).id('asana-note').accessibility_label('Instructions for the agent')
-          .w_full().px(10).py(8).rounded(0).border(1).border_color(t.input).bg(t.background).text_size(13))
+          .w_full().px(10).py(8).rounded(6).border(1).border_color(t.input).bg(t.background).text_size(13))
         .child(this.launchRow(task, agents, start, t))));
   }
 
@@ -720,17 +812,17 @@ export default class AsanaPanel {
     const fallback = { model: profile.model && (this.allModels(current.agent).find(item => item.key === profile.model)?.label || profile.model),
       effort: defaultEffort && effortLabel(defaultEffort) };
     const pick = (id, name, label, value, options, onChange) => Select(id, this.selects[name], value || 'default',
-      [option('default', fallback[name] ? `Default (${fallback[name]})` : 'Default'), ...options], label, onChange, t, { width: 168, prefix: label });
+      [option('default', fallback[name] ? `Default (${fallback[name]})` : 'Default'), ...options], label, onChange, t, { width: 168, prefix: label, boxed: true, radius: 6 });
     return h_flex().gap(8).items_center().flex_wrap()
       .when(agents.length > 0, el => el.child(Select('asana-agent', this.selects.agent, current.agent.key,
         agents.map(agent => ({ key: agent.key, label: agent.name, color: t.foreground })), 'Agent',
-        key => remember({ agent: key, model: null, effort: null }), t, { width: 200, prefix: 'Agent' })))
+        key => remember({ agent: key, model: null, effort: null }), t, { width: 200, prefix: 'Agent', boxed: true, radius: 6 })))
       .when(current.models.length > 0, el => el.child(pick('asana-model', 'model', 'Model', current.model,
         current.models.map(model => option(model.key, model.label)), key => remember({ model: key === 'default' ? null : key }))))
       .when(current.efforts.length > 0, el => el.child(pick('asana-effort', 'effort', 'Effort', current.effort,
         current.efforts.map(effort => option(effort, effortLabel(effort))), key => remember({ effort: key === 'default' ? null : key }))))
       .child(div().flex_1())
-      .child(Button('asana-start', t).h(28).px(10).gap(6).disabled(!current.agent).accessibility_label('Start a session for this task')
+      .child(asanaButton('asana-start', t).h(28).px(10).gap(6).disabled(!current.agent).accessibility_label('Start a session for this task')
         .on_click(() => { if (current.agent) start(current.agent, { ...task, note: this.notes.get(task.gid) || '' }, {
           model: current.model || profile.model || null,
           effort: current.effort || defaultEffort,
@@ -753,8 +845,8 @@ export default class AsanaPanel {
       setShared('devkits.asana-focus', null);
       if (this.selected !== focus.gid) this.show({ gid: focus.gid }, cx);
     }
-    const t = theme();
-    const ready = this.needsToken === false, bound = Boolean(binding(this.folder));
+    const t = asanaTheme();
+    const ready = this.needsToken === false && !this.settingsOpen, bound = Boolean(binding(this.folder));
     const rows = ready && bound ? this.rows() : [];
     const empty = !bound ? 'Choose the Asana project for this Devkits project from the menu above.' : this.tab === 'saved' ? 'No saved tasks.'
       : this.search.value().trim() ? 'No matching tasks.' : this.tab === 'mine' ? 'No open tasks assigned to you in this project.' : 'No open tasks in this project.';
@@ -764,7 +856,10 @@ export default class AsanaPanel {
       this.resizing = false;
       if (this.width) setShared('devkits.asana-preview-width', this.width);
     };
-    return v_flex().id('asana-panel').size_full().min_h(0).bg(t.background).text_color(t.foreground)
+    return v_flex().id('asana-panel').size_full().min_h(0).rounded(10).shadow_xl().overflow_hidden().font_family('Arial').border(1).border_color(t.border).bg(t.background).text_color(t.foreground)
+      .on_mouse_down('right', (_event, cx) => cx.stop_propagation())
+      .on_click((_event, cx) => cx.stop_propagation())
+      .on_scroll_wheel((_event, cx) => cx.stop_propagation())
       .when(Boolean(this.resizing), el => el.cursor_col_resize())
       .on_mouse_move((event, cx) => {
         if (!this.resizing) return;
@@ -773,12 +868,15 @@ export default class AsanaPanel {
       })
       .on_mouse_up('left', (_event, cx) => { stopResize(); cx.notify(); })
       .on_hover((inside, cx) => { if (!inside) { stopResize(); cx.notify(); } })
-      .track_focus(this.handle).on_key_down((event, cx) => this.navigate(event, cx))
+      .track_focus(this.handle).on_key_down((event, cx) => {
+        if (!this.settingsOpen && this.needsToken === false) this.navigate(event, cx);
+      })
       .child(this.toolbar(t, close))
       .child(h_flex().flex_1().min_h(0)
+        .on_mouse_down('left', (_event, cx) => cx.stop_propagation())
         .child(v_flex().flex_1().min_w(0).min_h(0).h_full()
-          .when(this.needsToken === null || this.loading, el => el.child(status('Loading…')))
-          .when(this.needsToken === true, el => el.child(this.connect(t)))
+          .when(this.needsToken === null || (this.loading && !this.settingsOpen), el => el.child(status('Loading…')))
+          .when(this.needsToken === true || this.settingsOpen, el => el.child(this.connect(t, close)))
           .when(ready && Boolean(this.error), el => el.child(div().id('asana-error').p(12).text_size(12)
             .text_color(t.destructive || t.foreground).child(this.error)))
           .when(ready && !this.loading && !this.error && !rows.length, el => el.child(status(empty)))
