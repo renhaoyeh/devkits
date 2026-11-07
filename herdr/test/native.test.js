@@ -1061,7 +1061,7 @@ test('project dropdown switches projects and creates a default terminal for a ne
     ['space.new', { name: 'new project', folder: '/Code/new project', machine: '', tab: '__devkits_default_terminal__' }]);
   assert.ok(!commands.some(([name]) => name === 'tab.new'));
 });
-test('pane header uses the sidebar thread title without split, zoom, or close controls', async () => {
+test('pane header uses the sidebar thread title without split or close controls', async () => {
   const ui = fakeElements();
   const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
     spaces: () => projects, agents: () => agents,
@@ -1076,6 +1076,41 @@ test('pane header uses the sidebar thread title without split, zoom, or close co
   assert.ok(!ui.texts.includes('/Code/project'));
   assert.ok(!ui.texts.includes('Codex'));
   for (const name of ['split-right', 'split-down', 'zoom', 'close']) assert.ok(!ui.nodes.has(`${name}-pane-1`));
+});
+test('thread maximize restores panels and exits when opening workspace controls', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  const root = { children: [
+    { id: 'workspace-view', hidden: false, size: { weight: 1 } },
+    { id: 'editor', hidden: false, size: { px: 630 } },
+    { id: 'simulator', hidden: false, size: { px: 400 } },
+  ] };
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => agents,
+    props: () => ({ pane: 'p1' }), layout: () => root,
+    panes: () => [{ pane: 'p1', tab: 'tab-0' }],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (name, args) => {
+      commands.push([name, args]);
+      const node = root.children.find(node => node.id === args?.id);
+      if (node && ['layout.show', 'layout.hide'].includes(name)) node.hidden = name === 'layout.hide';
+    } });
+  const view = new View();
+  const clickMaximize = () => { view.paneHeader({}); ui.nodes.get('maximize-thread-p1').click({}, renderContext); };
+  clickMaximize();
+  assert.ok(root.children.slice(1).every(node => node.hidden));
+  view.paneHeader({}); assert.ok(ui.assets.includes('mods/devkits/assets/icons/minimize.svg'));
+  clickMaximize();
+  assert.ok(root.children.slice(1).every(node => !node.hidden));
+  assert.deepEqual(root.children[1].size, { px: 630 });
+  for (const control of ['open-files', 'open-diff', 'open-simulator', 'open-conversation']) {
+    memory['devkits.conversation-visible'] = { '["","/Code/api"]': true };
+    memory['devkits.right-panel'] = 'files';
+    clickMaximize(); view.statusBar({}); ui.nodes.get(control).click();
+    assert.equal(memory['devkits.conversation-maximized'], null, control);
+    assert.equal(root.children[1].hidden, false, control);
+    if (control === 'open-files') assert.equal(memory['devkits.right-panel'], 'files');
+    if (control === 'open-simulator') assert.equal(root.children[2].hidden, false);
+  }
+  assert.ok(!commands.some(([name]) => ['tab.close', 'pane.close', 'terminal.kill', 'pane.zoom'].includes(name)));
 });
 test('a thread started from an Asana task links back to it from the pane header', async () => {
   const ui = fakeElements(), commands = [], overlays = [], memory = { 'devkits.thread-tasks': { 'tab-1': { gid: 't1', name: 'Fix login', folder: '/Code/app' } } };
