@@ -74,7 +74,7 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive']
+  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive', 'branch-menu']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
@@ -1681,4 +1681,29 @@ test('the header shows the branch beside the project; the status bar names only 
   assert.ok(!ui.texts.includes('Local project') && !ui.texts.includes('feature/login'));
   machine = 'vps'; new View().render();
   assert.ok(ui.texts.includes('vps'));
+});
+
+test('the header branch opens a read-only list of local and remote branches, newest first', async () => {
+  const ui = fakeElements(), overlays = [], runs = [];
+  let target = { view: 'header' }, pending;
+  const space = { ...projects[0], branch: 'main', machine: null };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => [space], theme: () => ({}), settings: () => ({ zoom: 1 }),
+    layout: () => ({ children: [] }), run() {}, openOverlay: spec => overlays.push(spec), closeOverlay() {},
+    execShell: async (args, options) => { runs.push([args.at(-1), options]); return { code: 0, stdout: [
+      'refs/heads/feature/login\t2 hours ago', 'refs/heads/main\t3 days ago',
+      'refs/remotes/origin/HEAD\t3 days ago', 'refs/remotes/origin/main\t3 days ago', ''].join('\n') }; } });
+  new View().render();
+  const trigger = ui.nodes.get('branch-switcher');
+  trigger.mouseDown({ bounds: { x: 100, y: 0, width: 60, height: 32 } }, { stop_propagation() {} });
+  trigger.click({}, { stop_propagation() {} });
+  assert.deepEqual(overlays[0].props, { view: 'branch-menu', folder: '/Code/api', machine: null, branch: 'main' });
+  target = { view: 'branch-menu', overlay: 'branches', ...overlays[0].props };
+  const menu = new View(), cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { pending = task(cx); } };
+  menu.init({}, cx); menu.render();
+  assert.ok(ui.texts.includes('Loading…'));
+  await pending; menu.render();
+  assert.deepEqual(runs, [['/Code/api', { on: null }]]);
+  assert.ok(ui.nodes.has('branch-local-feature/login') && ui.nodes.has('branch-local-main') && ui.nodes.has('branch-remote-origin/main'));
+  assert.ok(!ui.nodes.has('branch-remote-origin/HEAD'));
+  assert.equal(ui.nodes.get('branch-local-main').click, undefined);
 });
