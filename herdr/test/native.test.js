@@ -906,7 +906,7 @@ test('status bar Files toggles an empty project browser without creating session
   assert.deepEqual(commands.at(-1), ['layout.select', { stack: 'workspace-view', child: 'files' }]);
   assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new' || name === 'terminal.kill'));
 });
-test('sidebar menus align below the right edge of each button at the current zoom', async () => {
+test('sidebar menus align with the right edge of each button, 8px below its row, at the current zoom', async () => {
   const ui = fakeElements(), overlays = [];
   const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], theme: () => ({}),
     settings: () => ({ zoom: 1.5 }), setAgentOrder() {}, run() {},
@@ -917,7 +917,7 @@ test('sidebar menus align below the right edge of each button at the current zoo
     const button = ui.nodes.get(id);
     button.mouseDown({ bounds: { x: 350, y: 105, width: 42, height: 42 } }, cx);
     button.click({}, cx);
-    assert.deepEqual(overlays.at(-1).at, { x: 392 - width * 1.5, y: 153 });
+    assert.deepEqual(overlays.at(-1).at, { x: 392 - width * 1.5, y: 147 + 10 * 1.5 });
   }
   assert.equal(overlays[0].props.view, 'launcher');
   assert.equal(overlays[1].props.view, 'project-menu');

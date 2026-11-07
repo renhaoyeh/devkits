@@ -472,7 +472,8 @@ export default class AsanaPanel {
     return h_flex().h(40).flex_none().pl(12).pr(4).gap(8).items_center().bg(t.chrome).border_b(1).border_color(t.border).text_size(12)
       .child(DropdownMenuTrigger(Button('asana-project-menu', t, { variant: 'ghost' }).h(28).px(8).gap(6).font_medium().text_color(t.foreground)
         .accessibility_label('Choose Asana project').disabled(!ready), 360,
-        (_cx, at) => { if (ready) openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 360, at, props: { view: 'asana-projects', folder: this.folder } }); })
+        (_cx, at) => { if (ready) openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 360, at, props: { view: 'asana-projects', folder: this.folder } }); },
+        'start', { x: 0, y: 14.5 }) // A 28px button centred in the 40px toolbar: 8px below its bottom border
         .child(div().max_w(220).truncate().child(bound?.name || 'Choose Asana project'))
         .child(glyph('chevron-down', 12).text_color(t.muted)))
       .when(ready && Boolean(bound), el => el
