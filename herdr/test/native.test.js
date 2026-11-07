@@ -2073,6 +2073,35 @@ test('Terminal-launched agents keep the terminal icon in the sidebar and pane he
   }
 });
 
+test('Windows account launchers keep provider icons in the sidebar and pane header', async () => {
+  for (const app of ['codex', 'claude-code']) {
+    const command = ['env', 'CODEX_HOME=C:/Account', app === 'codex' ? 'codex' : 'claude'];
+    const wrapped = terminalArgv(command, 'windows');
+    const argv = ['powershell.exe', '-NoExit', '-Command',
+      '& ' + wrapped.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ')];
+    const ui = fakeElements(), program = { icon: `icons/${app}.svg`, tint: app === 'claude-code' };
+    const agent = { address: 't1', app, space: 'api', tab: 'tab-0', program, status: 'idle' };
+    const thread = { space: 'api', tab: { id: 'tab-0' }, title: 'Task', agent, agents: [agent] };
+    const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
+      spaces: () => projects, agents: () => [agent], terminals: () => [{ address: 't1', argv }],
+      panes: () => [{ pane: 'pane-1', tab: 'tab-0', program }] });
+    assert.equal(commandKind(argv), app === 'codex' ? 'codex' : 'claude');
+    assert.deepEqual(agentCommand(argv), command);
+    assert.ok(archivable(thread, [{ address: 't1', argv }]));
+    for (const render of [view => view.threadRow(thread, {}), view => view.paneHeader({})]) {
+      ui.assets.length = 0;
+      render(new View());
+      assert.ok(ui.assets.includes(program.icon));
+      assert.ok(!ui.assets.includes('mods/devkits/assets/icons/terminal.svg'));
+    }
+    ui.assets.length = 0;
+    agent.status = 'working';
+    new View().threadRow(thread, {});
+    assert.ok(ui.assets.includes('mods/devkits/assets/icons/loader.svg'));
+    assert.ok(!ui.assets.includes(program.icon));
+  }
+});
+
 test('Codex without a readable rollout offers Close and only ends on the next click', async () => {
   const commands = [], notes = [], ui = fakeElements();
   const View = await viewFor({ ...ui, spaces: () => projects, run: (...args) => commands.push(args),

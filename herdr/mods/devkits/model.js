@@ -1,3 +1,5 @@
+import { unwrapTerminalArgv } from './shell-command.js';
+
 export function quotaElapsedPercent(window, now = Date.now()) {
   const duration = window.minutes * 60000;
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(window.resetsAt) || window.resetsAt <= 0) return null;
@@ -320,11 +322,13 @@ export function threadProgram(thread, terminals, fallback = thread?.agent?.progr
 
 // The agent command inside a terminal's argv, without the login shell Herdr wraps it in.
 export function agentCommand(argv = []) {
+  argv = unwrapTerminalArgv(argv);
   const start = argv.findIndex(arg => arg === 'env' || commandKind([arg]));
   return start < 0 ? null : argv.slice(start);
 }
 
 export function commandKind(command = []) {
+  command = unwrapTerminalArgv(command);
   const executable = command.find(arg => !arg.includes('=') && /(?:^|[/\\])(?:claude|codex)(?:\.exe|\.cmd)?$/i.test(arg));
   return executable ? (/codex(?:\.exe|\.cmd)?$/i.test(executable) ? 'codex' : 'claude') : null;
 }

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { commandArgv, gitShellCommand, terminalArgv } from '../mods/devkits/shell-command.js';
+import { commandArgv, gitShellCommand, terminalArgv, unwrapTerminalArgv } from '../mods/devkits/shell-command.js';
 
 test('Windows account and CLI commands use Git shell, preserving arguments and existing wrappers', () => {
   for (const command of ['env', 'codex', 'claude', 'C:\\Program Files\\Codex\\codex.exe', 'C:/bin/claude.cmd']) {
@@ -16,6 +16,26 @@ test('Windows account and CLI commands use Git shell, preserving arguments and e
   const terminal = ['powershell.exe'];
   assert.equal(commandArgv(terminal, 'windows'), terminal);
   assert.equal(commandArgv(undefined, 'windows'), undefined);
+});
+
+test('Windows launcher recognition recovers literal argv through PowerShell and nested Git shells', () => {
+  for (const executable of ['codex', 'claude', 'C:\\Program Files\\Codex\\codex.cmd']) {
+    const command = ['env', '-u', 'API_KEY', "CODEX_HOME=C:\\Users\\測試 ' work", executable,
+      '--model', 'literal $(throw INJECTED) & `text` "quoted"\r\nsecond line', '', 'trailing\\'];
+    const wrapped = terminalArgv(command, 'windows');
+    const powershell = ['powershell.exe', '-NoExit', '-Command',
+      '& ' + wrapped.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ')];
+    assert.deepEqual(unwrapTerminalArgv(commandArgv(command, 'windows')), command);
+    assert.deepEqual(unwrapTerminalArgv(wrapped), command);
+    assert.deepEqual(unwrapTerminalArgv(powershell), command);
+    assert.deepEqual(unwrapTerminalArgv(['C:\\bin\\pwsh.exe', ...powershell.slice(1)]), command);
+  }
+  for (const argv of [[], ['powershell.exe'], ['powershell.exe', '-Command', "Write-Output 'codex'"],
+    ['powershell.exe', '-Command', "& 'git' '-c' 'alias.devkits-shell=!sh'; codex"],
+    gitShellCommand(['-c', "exec $'codex' ; echo injected"]),
+    gitShellCommand(['-c', "exec $'codex\\q'"])]) {
+    assert.equal(unwrapTerminalArgv(argv), argv);
+  }
 });
 
 test('Windows terminal launches preserve arguments through legacy PowerShell', { skip: process.platform !== 'win32' }, async () => {
