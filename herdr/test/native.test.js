@@ -1667,3 +1667,18 @@ test('Files and Changes share the editor beside the thread; the shown one hides 
   commands.length = 0; ui.nodes.get('open-diff').click();
   assert.deepEqual(commands, [['layout.hide', { id: 'editor' }]]);
 });
+
+test('the header shows the branch beside the project; the status bar names only a remote machine', async () => {
+  const ui = fakeElements();
+  let target = { view: 'header' }, machine = null;
+  const space = () => ({ ...projects[0], branch: 'feature/login', machine });
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => [space(), projects[1]], theme: () => ({}),
+    settings: () => ({ zoom: 1 }), layout: () => ({ children: [] }), run() {} });
+  new View().render();
+  assert.ok(ui.texts.includes('feature/login'));
+  target = { view: 'status' }; ui.texts.length = 0;
+  new View().render();
+  assert.ok(!ui.texts.includes('Local project') && !ui.texts.includes('feature/login'));
+  machine = 'vps'; new View().render();
+  assert.ok(ui.texts.includes('vps'));
+});
