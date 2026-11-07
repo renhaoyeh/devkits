@@ -83,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -886,14 +886,13 @@ test('sidebar menus align with the right edge of each button, 8px below its row,
     openOverlay: value => overlays.push(value) });
   const view = new View(); view.init(); view.render();
   const cx = { stop_propagation() {} };
-  for (const [id, width] of [['new-thread-api', 280], ['project-menu-api', 200]]) {
+  for (const [id, width] of [['project-menu-api', 200]]) {
     const button = ui.nodes.get(id);
     button.mouseDown({ bounds: { x: 350, y: 105, width: 42, height: 42 } }, cx);
     button.click({}, cx);
     assert.deepEqual(overlays.at(-1).at, { x: 392 - width * 1.5, y: 147 + 10 * 1.5 });
   }
-  assert.equal(overlays[0].props.view, 'launcher');
-  assert.equal(overlays[1].props.view, 'project-menu');
+  assert.equal(overlays[0].props.view, 'project-menu');
 });
 test('only the base Codex row offers Add account, including when Codex is hidden from the launcher', async () => {
   const ui = fakeElements(), overlays = [], closed = [];
@@ -1064,7 +1063,12 @@ test('pane header uses the sidebar thread title without split, zoom, or close co
   const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }),
     spaces: () => projects, agents: () => agents,
     panes: () => [{ pane: 'pane-1', tab: 'tab-1', cwd: '/Code/project', program: { name: 'Codex', icon: 'icons/codex.svg', tint: false } }] });
-  new View().paneHeader({});
+  const view = new View(), opened = [];
+  view.newThread = (...args) => opened.push(args);
+  view.paneHeader({});
+  ui.nodes.get('new-thread-pane-1').click({}, { stop_propagation() {} });
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][1], 'app');
   assert.ok(ui.texts.includes(projectGroups(projects, agents)[1].threads.find(thread => thread.tab.id === 'tab-1').title));
   assert.ok(!ui.texts.includes('/Code/project'));
   assert.ok(!ui.texts.includes('Codex'));
@@ -1468,7 +1472,7 @@ test('installer adds only its own files and refuses to overwrite an existing ins
     assert.equal(theme.ansi.length, 16);
     assert.ok(Object.values(theme.colors).every(color => /^#[0-9a-f]{6}$/i.test(color)));
   }
-  assert.deepEqual(JSON.parse(await readFile(join(home, 'keys.json'), 'utf8')), { 'layout:devkits': { f5: 'devkits.run' } });
+  assert.deepEqual(JSON.parse(await readFile(join(home, 'keys.json'), 'utf8')), { 'layout:devkits': { f5: 'devkits.run', 'cmd-n': 'devkits.new-thread', 'cmd-w': 'devkits.close-file' } });
   const before = await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8');
   await assert.rejects(install(home), /Refusing to overwrite/);
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
@@ -1477,7 +1481,7 @@ test('installer adds only its own files and refuses to overwrite an existing ins
 test('installer keeps the person\'s keys and an F5 they already bound', async t => {
   const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const keys = { global: { 'cmd-t': 'tab.new' }, 'layout:devkits': { f5: 'app.help' } };
+  const keys = { global: { 'cmd-t': 'tab.new' }, 'layout:devkits': { f5: 'app.help', 'cmd-n': 'custom.action', 'cmd-w': 'custom.close' } };
   await writeFile(join(home, 'keys.json'), JSON.stringify(keys));
   await install(home);
   assert.deepEqual(JSON.parse(await readFile(join(home, 'keys.json'), 'utf8')), keys);
@@ -1799,4 +1803,109 @@ test('Settings is the one place for the rules: a Rules page with icons beside ea
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
   assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-claude']);
   assert.ok(['assets/icons/terminal.svg', 'assets/icons/book-open.svg', 'icons/claude.svg'].every(icon => ui.assets.some(asset => asset.endsWith(icon))));
+});
+
+test('new thread shortcut repeats the project agent and falls back for missing or hidden profiles', async () => {
+  const memory = {}, started = [], menus = [];
+  let selected = projects[0];
+  const View = await viewFor({ shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View();
+  view.projects = () => [{ ...selected, active: true }];
+  view.newThread = (_cx, id) => menus.push(id);
+  view.cachedAgents = async () => [{ key: 'codex', installed: true }, { key: 'claude', installed: true }];
+  view.startThread = async (agent, target) => started.push([agent.key, target]);
+  await view.repeatThread({});
+  assert.deepEqual(menus, []);
+  assert.equal(started.at(-1)[0], 'codex');
+  memory['devkits.last-thread-agents'] = { '["","/Code/api"]': 'codex', '["","/Code/app"]': 'claude' };
+  await view.repeatThread({});
+  assert.equal(started.at(-1)[0], 'codex');
+  assert.equal(started.at(-1)[1].space, 'api');
+  selected = projects[1]; await view.repeatThread({});
+  assert.equal(started.at(-1)[0], 'claude');
+  memory['devkits.hidden-launchers'] = ['agent:claude']; await view.repeatThread({});
+  assert.equal(started.at(-1)[0], 'codex');
+  assert.equal(started.length, 4);
+  memory['devkits.hidden-launchers'] = ['agent:codex', 'agent:claude'];
+  await view.repeatThread({});
+  assert.equal(menus.at(-1), 'app');
+});
+
+test('starting an agent remembers its profile; terminals do not replace it', async () => {
+  const memory = {};
+  const View = await viewFor({ spaces: () => projects, shared: key => memory[key],
+    setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(); view.openThread = () => {};
+  const target = { space: 'api', folder: '/Code/api' };
+  await view.launchThread({ key: 'codex', name: 'Codex', run: ['codex'] }, target, {});
+  assert.equal(memory['devkits.last-thread-agents']['["","/Code/api"]'], 'codex');
+  await view.launchThread(null, target, {});
+  assert.equal(memory['devkits.last-thread-agents']['["","/Code/api"]'], 'codex');
+});
+
+test('Add session shows the effective new-thread shortcut only beside the project default agent', async () => {
+  const ui = fakeElements();
+  const memory = { 'devkits.last-thread-agents': { '["","/Code/api"]': 'codex' } };
+  let binding = 'devkits.new-thread';
+  const View = await viewFor({ ...ui, props: () => ({ space: 'api', folder: '/Code/api' }), spaces: () => projects,
+    shared: key => memory[key], window: () => ({ platform: 'macos' }),
+    keys: () => [{ section: 'global', keys: 'cmd-n', action: 'space.new' },
+      { section: 'layout:devkits', keys: 'cmd-n', action: binding }] });
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', installed: true }, { key: 'claude', name: 'Claude', installed: true }];
+  view.launcher({});
+  assert.ok(ui.textOf('start-codex').includes('⌘N'));
+  assert.ok(!ui.textOf('start-claude').includes('⌘N'));
+  assert.ok(!ui.textOf('new-terminal').includes('⌘N'));
+  binding = 'app.help'; view.launcher({});
+  assert.ok(!ui.textOf('start-codex').includes('⌘N'));
+});
+
+
+test('sidebar plus repeats the clicked project agent and expands that project', async () => {
+  const ui = fakeElements(), memory = {
+    'devkits.last-thread-agents': { '["","/Code/api"]': 'codex', '["","/Code/app"]': 'claude' },
+  }, started = [];
+  const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, setAgentOrder() {}, run() {} });
+  const view = new View(); view.init(); view.folded.add('app'); view.render();
+  view.cachedAgents = async () => [{ key: 'codex' }, { key: 'claude' }];
+  view.startThread = async (agent, target) => started.push([agent.key, target.space]);
+  let pending, stopped = false;
+  ui.nodes.get('new-thread-app').click({}, { stop_propagation() { stopped = true; }, notify() {},
+    spawn: task => { pending = task({}); } });
+  await pending;
+  assert.equal(stopped, true);
+  assert.equal(view.folded.has('app'), false);
+  assert.deepEqual(started, [['claude', 'app']]);
+});
+
+
+test('new projects inherit the global agent then fall back to the first visible installed agent', async () => {
+  const memory = { 'devkits.last-thread-agent': 'claude' };
+  const View = await viewFor({ shared: key => memory[key] });
+  const view = new View(), project = { id: 'new', folder: '/new' };
+  const agents = [{ key: 'codex' }, { key: 'claude' }];
+  assert.equal(view.defaultThreadAgent(project, agents).key, 'claude');
+  memory['devkits.last-thread-agent'] = 'removed';
+  assert.equal(view.defaultThreadAgent(project, agents).key, 'codex');
+  memory['devkits.hidden-launchers'] = ['agent:codex'];
+  assert.equal(view.defaultThreadAgent(project, agents).key, 'claude');
+  assert.equal(view.defaultThreadAgent(project, [{ key: 'missing', installed: false }]), undefined);
+});
+
+
+test('close-file closes only the shown file in the visible Files editor', async () => {
+  let editor = { id: 'editor', hidden: false, active: 'files' };
+  const commands = [], closed = [];
+  const View = await viewFor({ layout: () => editor, run: (...args) => commands.push(args) });
+  const view = new View();
+  view.files = { file: 'one.md', closeTab: path => closed.push(path) };
+  view.closeFileTab(renderContext);
+  assert.deepEqual(closed, ['one.md']);
+  editor.hidden = true; view.closeFileTab(renderContext);
+  editor.hidden = false; editor.active = 'diff'; view.closeFileTab(renderContext);
+  editor.active = 'files'; view.files.file = null; view.closeFileTab(renderContext);
+  editor = null; view.closeFileTab(renderContext);
+  assert.deepEqual(closed, ['one.md']);
+  assert.deepEqual(commands, []);
 });

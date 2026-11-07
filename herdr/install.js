@@ -46,9 +46,8 @@ export async function install(home) {
   return layout;
 }
 
-// F5 runs the shown project's chosen command (the header's run button). The person's other keys stay, and a key they
-// already use for the Devkits layout is left alone.
-export const KEYS = { 'layout:devkits': { f5: 'devkits.run' } };
+// F5 runs the project command; Cmd+N repeats its last agent. Preserve existing layout overrides and other keys.
+export const KEYS = { 'layout:devkits': { f5: 'devkits.run', 'cmd-n': 'devkits.new-thread', 'cmd-w': 'devkits.close-file' } };
 async function bindKeys(path) {
   let keys = {};
   try { keys = JSON.parse(await readFile(path, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
