@@ -1319,7 +1319,7 @@ test('sidebar leaves the project list blank when no workspace is open', async ()
   assert.ok(!ui.nodes.has('open-first-project'));
   assert.ok(!ui.texts.includes('Open a project'));
   assert.ok(!ui.texts.includes('Open folder…'));
-  assert.ok(ui.nodes.has('settings'));
+  assert.ok(!ui.nodes.has('settings'));
 });
 test('project menu moves persist and boundary actions leave order unchanged', async () => {
   const ui = fakeElements(), memory = {}, commands = [], closed = [];
@@ -1373,7 +1373,8 @@ test('native sidebar renders project/thread nesting and a shell row can be selec
   project.hover(true, { notify() {} }); view.render();
   assert.equal(nodes.get('new-thread-api').opacity, 1);
   const bar = nodes.get('sidebar-bottom-bar');
-  assert.equal(bar.children[0], nodes.get('settings').element);
+  assert.equal(bar.children[0], nodes.get('archived-threads').element);
+  assert.ok(!nodes.has('settings'));
   assert.ok(!nodes.has('toggle-sidebar'));
   assert.ok(!nodes.has('show-sidebar'));
   assert.ok(!nodes.has('open-project'));
@@ -1736,15 +1737,18 @@ test('Files and Changes share the editor beside the thread; the shown one hides 
 });
 
 test('the header shows the branch beside the project; the status bar names only a remote machine', async () => {
-  const ui = fakeElements();
+  const ui = fakeElements(), commands = [];
   let target = { view: 'header' }, machine = null;
   const space = () => ({ ...projects[0], branch: 'feature/login', machine });
   const View = await viewFor({ ...ui, props: () => target, spaces: () => [space(), projects[1]], theme: () => ({}),
-    settings: () => ({ zoom: 1 }), layout: () => ({ children: [] }), run() {} });
+    settings: () => ({ zoom: 1 }), layout: () => ({ children: [] }), run: (...args) => commands.push(args) });
   new View().render();
   assert.ok(ui.texts.includes('feature/login'));
+  assert.ok(!ui.nodes.has('settings'));
   target = { view: 'status' }; ui.texts.length = 0;
   new View().render();
+  ui.nodes.get('settings').click();
+  assert.deepEqual(commands, [['app.settings']]);
   assert.ok(!ui.texts.includes('Local project') && !ui.texts.includes('feature/login'));
   machine = 'vps'; new View().render();
   assert.ok(ui.texts.includes('vps'));
