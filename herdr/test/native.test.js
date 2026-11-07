@@ -1162,14 +1162,37 @@ test('Codex account sessions start immediately with existing plugins and no sync
   const view = new View();
   const pending = view.startThread({ key: 'devkits-codex-work', name: 'Work',
     run: ['env', 'CODEX_HOME=/account', 'codex'] }, { space: 'one', folder: '/project', overlay: 'launcher' });
-  assert.deepEqual(closed, ['launcher']);
+  assert.deepEqual(closed, []);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', {
     space: 'one', folder: '/project', name: 'Work', argv: ['env', 'CODEX_HOME=/account', 'codex'],
   }]);
   await pending;
+  assert.deepEqual(closed, ['launcher']);
   view.statusBar({});
   assert.equal(ui.nodes.has('plugin-sync-progress'), false);
+});
+
+test('the launcher stays alive until rules are read and suppresses duplicate starts', async () => {
+  for (const key of ['codex', 'claude']) {
+    const commands = [], closed = [];
+    let finishRead;
+    const View = await viewFor({ spaces: () => [], run: (...args) => commands.push(args),
+      closeOverlay: id => closed.push(id),
+      readTextFile: () => new Promise(resolve => { finishRead = resolve; }) });
+    const view = new View(), agent = { key, name: key, run: [key] };
+    const target = { space: 'one', folder: '/project', overlay: 'launcher' };
+    const pending = view.startThread(agent, target);
+    await view.startThread(agent, target);
+    assert.deepEqual(closed, []);
+    assert.deepEqual(commands, []);
+    finishRead('Use hc run.');
+    await pending;
+    assert.deepEqual(closed, ['launcher']);
+    const starts = commands.filter(([name]) => name === 'tab.new');
+    assert.equal(starts.length, 1);
+    assert.ok(starts[0][1].argv.includes(key === 'codex' ? 'developer_instructions="Use hc run."' : '--append-system-prompt-file'));
+  }
 });
 
 test('each project gets its open panel back when selected again, until a thread is chosen there', async () => {
