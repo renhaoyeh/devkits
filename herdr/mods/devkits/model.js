@@ -204,6 +204,45 @@ export function threadProfile(tab, launchers = [], profiles = {}) {
     || (tab.named ? launchers.find(agent => agent.name === tab.name) : null))?.name || null;
 }
 
+// Claude and Codex threads on this machine can be archived and resumed later; remote ids carry a machine/ prefix.
+export const archivable = thread => (thread.agents || []).some(agent => ['claude-code', 'codex'].includes(agent.app))
+  && !String(thread.space || '').includes('/');
+
+// The agent command inside a terminal's argv, without the login shell Herdr wraps it in.
+export function agentCommand(argv = []) {
+  const start = argv.findIndex(arg => arg === 'env' || commandKind([arg]));
+  return start < 0 ? null : argv.slice(start);
+}
+
+export function commandKind(command = []) {
+  const executable = command.find(arg => !arg.includes('=') && /(?:^|[/\\])(?:claude|codex)(?:\.exe|\.cmd)?$/i.test(arg));
+  return executable ? (/codex(?:\.exe|\.cmd)?$/i.test(executable) ? 'codex' : 'claude') : null;
+}
+
+// The same command, account and flags, reopening `id` instead of starting over; a task prompt is not sent again.
+export function resumeArgv(command, id, prompt = false) {
+  const kind = commandKind(command);
+  const executable = command.findIndex(arg => !arg.includes('=') && commandKind([arg]));
+  const rest = command.slice(executable + 1, prompt ? -1 : undefined);
+  return kind === 'codex' ? [...command.slice(0, executable + 1), 'resume', ...rest, id]
+    : [...command.slice(0, executable + 1), ...rest, '--resume', id];
+}
+
+// Codex keeps each open conversation in sessions/…/rollout-<time>-<id>.jsonl; its sub-agents run in the same
+// process with their own, later rollouts, so the thread's own conversation is the earliest one.
+export function codexSessionId(lsof) {
+  const rollouts = [...(lsof || '').matchAll(/rollout-([^/\n]*)-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/gim)];
+  return rollouts.sort((a, b) => a[1].localeCompare(b[1]))[0]?.[2] || null;
+}
+
+export function archivedAge(at, now = Date.now()) {
+  const minutes = Math.floor((now - at) / 60000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / 1440)}d`;
+}
+
 // shortcut: compare path spellings; resolve aliases if symlinked project roots need deduplication.
 export const folderKey = folder => (folder || '').replace(/\\/g, '/').replace(/\/+$/, '');
 

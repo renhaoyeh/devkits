@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 
@@ -73,7 +73,7 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'session-menu', 'account-actions', 'usage', 'run-app']
+  const features = await Promise.all(['shell-command', 'session-menu', 'account-actions', 'usage', 'run-app', 'thread-archive']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
@@ -82,7 +82,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -1489,4 +1489,98 @@ test('status bar toggles the simulator panel, with a selected background while i
 
 test('mods that use devkits components carry copies equal to the source', async () => {
   assert.deepEqual((await syncShared({ check: true })).bad, []);
+});
+
+const claudeTerminal = { argv: ['/bin/zsh', '-lic', '"$@"; exec "$0" -li', '/bin/zsh', 'env', 'CLAUDE_CONFIG_DIR=/acct', 'claude', '--permission-mode', 'bypassPermissions'],
+  cwd: '/Code/api', foreground: { pid: 42 } };
+const claudeAgent = { address: 't1', app: 'claude-code', program: { icon: 'icons/claude.svg', tint: false } };
+const claudeThread = { space: 'api', tab: { id: 'tab-0' }, title: 'Fix login', agent: claudeAgent,
+  agents: [{ address: 'child', app: 'claude-code' }, claudeAgent] };
+
+test('archived sessions resume with the same account and flags, without resending a task prompt', () => {
+  const command = agentCommand(claudeTerminal.argv);
+  assert.deepEqual(command, claudeTerminal.argv.slice(4));
+  assert.equal(commandKind(command), 'claude');
+  assert.deepEqual(resumeArgv(command, 'abc'), [...command, '--resume', 'abc']);
+  assert.deepEqual(resumeArgv([...command, 'Task prompt'], 'abc', true), [...command, '--resume', 'abc']);
+  const codex = ['env', 'CODEX_HOME=/c', 'codex', '-m', 'gpt', '--sandbox', 'read-only'];
+  assert.equal(commandKind(codex), 'codex');
+  assert.deepEqual(resumeArgv(codex, 'id'), ['env', 'CODEX_HOME=/c', 'codex', 'resume', '-m', 'gpt', '--sandbox', 'read-only', 'id']);
+  assert.equal(agentCommand(['/bin/zsh', '-li']), null);
+  assert.equal(codexSessionId('p1\nn/c/sessions/2026/11/07/rollout-2026-11-07T02-20-27-01a1b217-3369-7e92-bee6-1a5e5a262e73.jsonl\n'),
+    '01a1b217-3369-7e92-bee6-1a5e5a262e73');
+  assert.equal(codexSessionId('n/dev/null'), null);
+  assert.ok(archivable(claudeThread));
+  assert.ok(!archivable({ ...claudeThread, space: 'remote/api' }));
+  assert.ok(!archivable({ ...claudeThread, agents: [] }));
+  // Codex sub-agents keep later rollouts open in the same process; the thread's own is the earliest.
+  assert.equal(codexSessionId('n/s/rollout-2026-11-07T05-00-00-22222222-2222-2222-2222-222222222222.jsonl\nn/s/rollout-2026-11-07T02-20-27-11111111-1111-1111-1111-111111111111.jsonl'),
+    '11111111-1111-1111-1111-111111111111');
+  assert.equal(archivedAge(0, 90 * 60000), '1h');
+});
+
+test('archiving a Claude thread keeps its conversation, then ends the tab', async () => {
+  const commands = [], memory = { 'devkits.thread-profiles': { 'tab-0': 'devkits-claude-work' } }, reads = [];
+  const View = await viewFor({ spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), hc: async ([, address]) => ({ code: 0, stdout: JSON.stringify(address === 'child'
+      ? { argv: ['sh', '-c', 'bun run ios'], parent: 't1', foreground: { pid: 7 } } : claudeTerminal) }),
+    readTextFile: async path => { reads.push(path); return JSON.stringify({ sessionId: 'abc' }); }, exec: async () => ({ code: 0 }) });
+  await new View().archiveThread(claudeThread);
+  assert.deepEqual(reads, ['/acct/sessions/42.json']);
+  const [entry] = memory['devkits.archived-threads'];
+  assert.equal(entry.id, 'claude:abc');
+  assert.equal(entry.title, 'Fix login');
+  assert.equal(entry.folder, '/Code/api');
+  assert.equal(entry.profile, 'devkits-claude-work');
+  assert.deepEqual(entry.argv, [...claudeTerminal.argv.slice(4), '--resume', 'abc']);
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+});
+
+test('a session without a conversation closes without an archive entry; an unreadable one stays open', async () => {
+  const commands = [], memory = {}, notes = [];
+  const host = { spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), notify: note => notes.push(note), readTextFile: async () => JSON.stringify({ sessionId: 'new' }),
+    hc: async () => ({ code: 0, stdout: JSON.stringify(claudeTerminal) }), exec: async () => ({ code: 1, stdout: '' }) };
+  await new (await viewFor(host))().archiveThread(claudeThread);
+  assert.equal(memory['devkits.archived-threads'], undefined);
+  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+  commands.length = 0;
+  await new (await viewFor({ ...host, hc: async () => ({ code: 1, stderr: 'gone' }) }))().archiveThread(claudeThread);
+  assert.deepEqual(commands, []);
+  assert.equal(notes[0].body, 'gone');
+  await new (await viewFor({ ...host, hc: async () => ({ code: 0, stdout: JSON.stringify({ argv: ['sh'], parent: 't1' }) }) }))()
+    .archiveThread(claudeThread);
+  assert.deepEqual(commands, []);
+  assert.match(notes[1].body, /Could not find/);
+});
+
+test('restoring an archived thread resumes it in its project and leaves the archive', async () => {
+  const commands = [], entry = { id: 'claude:abc', title: 'Fix login', folder: '/Code/api', projectName: 'API',
+    profile: 'devkits-claude-work', argv: ['claude', '--resume', 'abc'], task: null, at: 0 };
+  const memory = { 'devkits.archived-threads': [entry, { ...entry, id: 'other' }] };
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args) });
+  const view = new View();
+  view.archiveOpen = true;
+  view.archiveList({});
+  view.hoveredArchived = 'other';
+  view.archiveList({});
+  ui.nodes.get('remove-archived-other').click({}, { stop_propagation() {} });
+  assert.deepEqual(memory['devkits.archived-threads'].map(item => item.id), ['claude:abc']);
+  ui.nodes.get('archived-claude:abc').click();
+  assert.deepEqual(memory['devkits.archived-threads'], []);
+  assert.equal(view.archiveOpen, false);
+  assert.deepEqual(commands.at(-1), ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--resume', 'abc'] }]);
+  assert.equal(memory['devkits.pending-profiles'][0].key, 'devkits-claude-work');
+});
+
+test('Claude and Codex threads show an archive button; terminals keep a close button', async () => {
+  const ui = fakeElements();
+  const View = await viewFor(ui);
+  const view = new View();
+  view.threadRow(claudeThread, {});
+  view.threadRow({ space: 'api', tab: { id: 'run' }, agents: [], title: 'Run app' }, {});
+  assert.ok(ui.nodes.has('archive-thread-tab-0') && !ui.nodes.has('close-thread-tab-0'));
+  assert.ok(ui.nodes.has('close-thread-run') && !ui.nodes.has('archive-thread-run'));
 });
