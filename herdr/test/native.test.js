@@ -1451,7 +1451,8 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(stack.id, 'workspace-view');
   assert.ok(!stack.children.some(child => ['files', 'diff'].includes(child.id)));
   assert.equal(editor.id, 'editor');
-  assert.equal(editor.hidden, true);
+  assert.equal(editor.hidden, false);
+  assert.equal(stack.hidden, true);
   assert.deepEqual(editor.children.map(child => child.content.props.view), ['files', 'diff']);
   assert.equal(simulator.id, 'simulator');
   assert.equal(simulator.hidden, true);
@@ -1908,4 +1909,32 @@ test('close-file closes only the shown file in the visible Files editor', async 
   editor = null; view.closeFileTab(renderContext);
   assert.deepEqual(closed, ['one.md']);
   assert.deepEqual(commands, []);
+});
+
+test('conversation controls hide without closing sessions and retain visibility per project', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  let selected = projects[0], target = { view: 'status' };
+  const conversation = { id: 'workspace-view', hidden: true };
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({ background: 'bg', selected: 'sel' }),
+    spaces: () => [{ ...selected, active: true }], agents: () => agents,
+    panes: () => [{ pane: 'pane-1', tab: 'tab-0' }], layout: () => ({ children: [conversation] }),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (name, args) => { commands.push([name, args]); if (name === 'layout.show' || name === 'layout.hide') conversation.hidden = name === 'layout.hide'; } });
+  const view = new View();
+  view.render(); assert.equal(ui.nodes.get('open-conversation').background, 'bg');
+  ui.nodes.get('open-conversation').click();
+  assert.equal(conversation.hidden, false);
+  view.render(); assert.equal(ui.nodes.get('open-conversation').background, 'sel');
+  const reload = new View(); reload.render(); assert.equal(ui.nodes.get('open-conversation').background, 'sel');
+  selected = projects[1]; view.render(); assert.equal(ui.nodes.get('open-conversation').background, 'bg');
+  selected = projects[0]; target = { pane: 'pane-1' }; view.paneHeader({});
+  assert.ok(!ui.nodes.has('hide-conversation-pane-1'));
+  target = { view: 'status' }; view.render();
+  ui.nodes.get('open-conversation').click();
+  assert.equal(conversation.hidden, true);
+  target = { view: 'status' }; view.render(); assert.equal(ui.nodes.get('open-conversation').background, 'bg');
+  assert.ok(!commands.some(([name]) => ['tab.close', 'pane.close', 'terminal.kill'].includes(name)));
+  view.threadRow(projectGroups([{ ...selected, active: true }], agents)[0].threads[0], {});
+  ui.nodes.get('thread-tab-0').click();
+  assert.equal(conversation.hidden, false);
 });
