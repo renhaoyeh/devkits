@@ -2368,7 +2368,7 @@ async function taskBoardFor(records = {}) {
       background: '#121213', muted: '#959597', border: '#232426', selected: '#29292b', hover: '#232424',
       popover: '#1c1c1d', control: '#1c1c1d', controlBorder: '#303032', menuHover: '#29292b',
       card: '#1a1a1b', cardHover: '#212223', cardBorder: '#ffffff0c', cardSelected: '#242426', cardSelectedBorder: '#454548' }),
-    readTaskOutput: async () => runtime.output || '', readAsanaToken: async () => null,
+    readTaskOutput: async () => runtime.output || '', readAsanaToken: async () => { runtime.tokenReads = (runtime.tokenReads || 0) + 1; return runtime.token || null; },
     taskIdentifier: task => task.gid, outputMarkdown: text => text,
     openTaskComposer: (...args) => dialogs.push(args),
   };
@@ -2730,4 +2730,44 @@ test('imported local Todo descriptions remain editable and their source links op
   assert.deepEqual(board.memory['devkits.agent-board'][board.key]['local:import'].asana, asana);
   const urls = []; board.ui.nodes.get('board-asana-source').click({}, { open_url: url => urls.push(url) });
   assert.deepEqual(urls, [asana.url]);
+});
+
+test('reselecting the current Tasks card keeps its preview and output; another task or explicit refresh still loads', async () => {
+  const board = await taskBoardFor({
+    a: { gid: 'a', source: 'local', name: 'A', status: 'todo', notes: 'Description', lastOutput: 'Saved output' },
+    b: { gid: 'b', source: 'local', name: 'B', status: 'todo' },
+  });
+  const reads = []; board.view.loadOutput = task => reads.push(task.gid);
+  board.ui.nodes.get('board-card-a').click({}, board.cx); board.render();
+  const retained = { notes: 'Retain preview' }; board.view.detail.detail = retained;
+  board.view.description.edit('Description\nMy instructions');
+  board.ui.nodes.get('board-card-a').click({}, board.cx); board.render();
+  assert.deepEqual(reads, ['a']); assert.equal(board.view.detail.detail, retained);
+  assert.equal(board.view.description.value(), 'Description\nMy instructions');
+  board.ui.nodes.get('board-refresh-output').click({}, board.cx);
+  assert.deepEqual(reads, ['a', 'a']);
+  board.ui.nodes.get('board-card-b').click({}, board.cx); board.render();
+  board.ui.nodes.get('board-card-a').click({}, board.cx); board.render();
+  assert.deepEqual(reads, ['a', 'a', 'b', 'a']);
+  // Closing and reopening the same card is a new selection.
+  board.ui.nodes.get('board-close-detail').click({}, board.cx); board.render();
+  board.ui.nodes.get('board-card-a').click({}, board.cx);
+  assert.deepEqual(reads, ['a', 'a', 'b', 'a', 'a']);
+});
+
+test('Tasks deduplicates pending and loaded external detail reads while allowing failed reads to retry', async () => {
+  const board = await taskBoardFor({ a: { gid: 'a', source: 'asana', name: 'External task', status: 'todo' } });
+  board.runtime.token = 'secret'; let detailReads = 0;
+  board.view.detail.show = function(task) { detailReads++; this.detail = { ...task, notes: 'Source description' }; };
+  board.ui.nodes.get('board-card-a').click({}, board.cx);
+  board.ui.nodes.get('board-card-a').click({}, board.cx);
+  assert.equal(board.runtime.tokenReads, 1);
+  await settle();
+  const detail = board.view.detail.detail;
+  assert.equal(detailReads, 1); assert.equal(detail.notes, 'Source description');
+  board.ui.nodes.get('board-card-a').click({}, board.cx); await settle();
+  assert.equal(detailReads, 1); assert.equal(board.view.detail.detail, detail);
+  board.view.detail.detailError = 'Offline';
+  board.ui.nodes.get('board-card-a').click({}, board.cx); await settle();
+  assert.equal(detailReads, 2); assert.equal(board.view.detail.detailError, null);
 });

@@ -271,6 +271,7 @@ export default class AsanaPanel {
     this.mine = null; this.all = { tasks: [], next: null, loaded: false }; this.loadingMore = false; this.page = (this.page || 0) + 1;
     this.subtasks = new Map(); this.expanded = new Set(); this.loadedGid = null; this.loading = false;
     this.selected = null; this.cursor = null; this.detail = null; this.detailError = null; this.error = null;
+    this.detailRequest = null;
   }
 
   fail(error) {
@@ -410,22 +411,25 @@ export default class AsanaPanel {
     });
   }
 
-  // The preview always reads the source task fresh.
+  // Keep the selected preview and its pending read; changing sources reads fresh.
   show(task, cx) {
     const gid = task.gid;
+    if (this.selected === gid && (this.detail || this.detailRequest)) return;
+    const request = { folder: this.folder, gid };
+    this.detailRequest = request;
     this.selected = gid; this.cursor = gid; this.detail = null; this.detailError = null;
     cx.spawn(async cx => {
       try {
         const detail = await taskDetails(this.token, gid, binding(this.folder)?.gid);
-        if (this.selected !== gid) return;
+        if (this.detailRequest !== request || this.selected !== gid || this.folder !== request.folder) return;
         if (!detail || detail.completed) this.detailError = 'This task was completed or deleted in Asana.';
         else {
           this.detail = detail;
           if (detail.subtasks && !this.subtasks.has(gid)) this.loadSubtasks(detail, cx);
           this.loadComments(detail, cx);
         }
-      } catch (error) { if (this.selected === gid) { this.detailError = error.message; if (error.unauthorized) this.fail(error); } }
-      cx.notify();
+      } catch (error) { if (this.detailRequest === request) { this.detailError = error.message; if (error.unauthorized) this.fail(error); } }
+      finally { if (this.detailRequest === request) { this.detailRequest = null; cx.notify(); } }
     });
     cx.notify();
   }
