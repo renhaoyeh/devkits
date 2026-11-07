@@ -44,13 +44,13 @@ test('Run runs the shown project\'s chosen command in a Run tab, replacing the p
   assert.deepEqual(calls, []);
   runs = { '/p': 'bun run dev' };
   await runApp();
-  assert.deepEqual(calls, [['tab.close', { id: 't1' }], tabNew('bun run dev')]);
+  assert.deepEqual(calls, [['tab.close', { id: 't1' }], ['devkits.reveal-conversation', undefined], tabNew('bun run dev')]);
   runs = { '/p': 'bun expo run:ios --device {udid}' }; calls.length = 0;
   await runApp();
   assert.deepEqual(calls, []);
   booted = [{ udid: 'ABC' }];
   await runApp();
-  assert.deepEqual(calls, [['tab.close', { id: 't1' }], tabNew('bun expo run:ios --device ABC')]);
+  assert.deepEqual(calls, [['tab.close', { id: 't1' }], ['devkits.reveal-conversation', undefined], tabNew('bun expo run:ios --device ABC')]);
   space.machine = 'server'; calls.length = 0;
   await runApp();
   assert.deepEqual(calls, []);

@@ -52,6 +52,7 @@ export async function runApp() {
     command = template.replaceAll('{udid}', udid);
   }
   for (const tab of space.tabs.filter(tab => tab.name === RUN_TAB)) run('tab.close', { id: tab.id });
+  run('devkits.reveal-conversation');
   run('tab.new', { space: space.id, folder: space.folder, name: RUN_TAB, argv: ['sh', '-c', RUN_SHELL, 'sh', command] });
 }
 

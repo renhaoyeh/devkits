@@ -13,7 +13,7 @@
   "children": [
     {
       "id": "sidebar", "type": "column", "size": { "px": 280 }, "min": 250, "max": 440, "hidden": false,
-      "background": "chrome", "resizable": false,
+      "background": "chrome", "resizable": true,
       "children": [
         { "id": "brand", "type": "block", "size": { "px": 32 }, "window_drag": true,
           "content": { "mod": "devkits", "props": { "view": "brand" } } },
@@ -35,10 +35,8 @@
             "header": { "content": { "mod": "devkits", "props": { "view": "pane" } }, "height": 32, "position": "top", "reveal": "always" }
           } } }
         ] },
-        { "id": "editor", "type": "stack", "active": "files", "hidden": false, "size": { "weight": 1.6 }, "min": 420, "children": [
-        { "id": "files", "type": "block", "content": { "mod": "devkits", "props": { "view": "files" } } },
-        { "id": "diff", "type": "block", "content": { "mod": "devkits", "props": { "view": "diff" } } }
-        ] },
+        { "id": "editor", "type": "block", "hidden": false, "size": { "weight": 1.6 }, "min": 420,
+          "content": { "mod": "devkits", "props": { "view": "editor" } } },
         { "id": "simulator", "type": "block", "hidden": true, "size": { "px": 380 }, "min": 300, "max": 900,
           "content": { "mod": "devkits-simulator", "props": { "view": "simulator" } } }
         ] },

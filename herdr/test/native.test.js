@@ -83,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -874,7 +874,10 @@ test('status bar Files shows the editor and tree beside the thread without creat
   const status = new View(); status.render();
   assert.ok(!ui.nodes.has('commands'));
   ui.nodes.get('open-files').click();
-  assert.deepEqual(commands.slice(-2), [['layout.select', { stack: 'editor', child: 'files' }], ['layout.show', { id: 'editor' }]]);
+  assert.equal(memory['devkits.right-panel'], null);
+  ui.nodes.get('open-files').click();
+  assert.equal(memory['devkits.right-panel'], 'files');
+  assert.ok(!commands.some(([name, args]) => name === 'layout.hide' && args.id === 'editor'));
   target = {}; sidebar.render();
   assert.ok(!commands.some(([name, args]) => name === 'layout.select' && args.stack === 'workspace-view' && args.child !== 'project-empty'));
   assert.ok(!commands.some(([name]) => name === 'space.new' || name === 'tab.new' || name === 'terminal.kill'));
@@ -1387,7 +1390,8 @@ test('native sidebar renders project/thread nesting and a shell row can be selec
   nodes.get('project-api').click({ modifiers: { platform: true } }, cx);
   assert.ok(commands.some(([name, args]) => name === 'space.select' && args.id === 'api'));
   nodes.get('thread-shell').click();
-  assert.deepEqual(commands.pop(), ['tab.select', { id: 'shell' }]);
+  assert.ok(commands.some(([name, args]) => name === 'tab.select' && args.id === 'shell'));
+  assert.deepEqual(commands.at(-1), ['layout.show', { id: 'workspace-view' }]);
   assert.equal(memory['devkits.project-roots'].api, '/Code/api');
 });
 test('sidebar thread names omit redundant agent labels while preserving tasks and account names', () => {
@@ -1453,7 +1457,8 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(editor.id, 'editor');
   assert.equal(editor.hidden, false);
   assert.equal(stack.hidden, true);
-  assert.deepEqual(editor.children.map(child => child.content.props.view), ['files', 'diff']);
+  assert.equal(editor.type, 'block');
+  assert.equal(editor.content.props.view, 'editor');
   assert.equal(simulator.id, 'simulator');
   assert.equal(simulator.hidden, true);
   assert.equal(simulator.content.mod, 'devkits-simulator');
@@ -1720,25 +1725,25 @@ test('terminals an agent started sit under its thread, peek when clicked and end
   assert.deepEqual(commands, [['terminal.kill', { terminal: 't9' }]]);
   commands.length = 0;
   ui.nodes.get('child-t8').click();
-  assert.deepEqual(commands.slice(-2), [['tab.select', { id: 'tab-0' }], ['terminal.peek', { terminal: 't8' }]]);
+  assert.ok(commands.some(([name, args]) => name === 'tab.select' && args.id === 'tab-0'));
+  assert.deepEqual(commands.at(-1), ['terminal.peek', { terminal: 't8' }]);
 });
 
-test('Files and Changes share the editor beside the thread; the shown one hides it again', async () => {
-  const ui = fakeElements(), commands = [];
-  let editor = { id: 'editor', hidden: true, active: 'files' };
+test('dock buttons preserve the central editor and change only the right panel', async () => {
+  const ui = fakeElements(), commands = [], memory = { 'devkits.editor-kind': 'files' };
+  const editor = { id: 'editor', hidden: false };
   const View = await viewFor({ ...ui, props: () => ({ view: 'status' }), theme: () => ({ selected: 'sel', background: 'bg' }), spaces: () => projects,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     layout: () => ({ children: [editor] }), run: (...args) => commands.push(args) });
   const status = new View();
   status.render(); ui.nodes.get('open-diff').click();
-  assert.deepEqual(commands, [['layout.select', { stack: 'editor', child: 'diff' }], ['layout.show', { id: 'editor' }]]);
-  editor = { ...editor, hidden: false, active: 'diff' };
-  status.render();
-  assert.equal(ui.nodes.get('open-diff').background, 'sel');
-  assert.equal(ui.nodes.get('open-files').background, 'bg');
-  commands.length = 0; ui.nodes.get('open-files').click();
-  assert.deepEqual(commands, [['layout.select', { stack: 'editor', child: 'files' }], ['layout.show', { id: 'editor' }]]);
-  commands.length = 0; ui.nodes.get('open-diff').click();
-  assert.deepEqual(commands, [['layout.hide', { id: 'editor' }]]);
+  assert.equal(memory['devkits.right-panel'], 'diff');
+  assert.equal(memory['devkits.editor-kind'], 'files');
+  status.render(); assert.equal(ui.nodes.get('open-diff').background, 'sel');
+  ui.nodes.get('open-diff').click(); assert.equal(memory['devkits.right-panel'], null);
+  status.render(); ui.nodes.get('open-files').click(); assert.equal(memory['devkits.right-panel'], 'files');
+  assert.equal(editor.hidden, false);
+  assert.deepEqual(commands, []);
 });
 
 test('the header shows the branch beside the project; the status bar names only a remote machine', async () => {
@@ -1937,4 +1942,49 @@ test('conversation controls hide without closing sessions and retain visibility 
   view.threadRow(projectGroups([{ ...selected, active: true }], agents)[0].threads[0], {});
   ui.nodes.get('thread-tab-0').click();
   assert.equal(conversation.hidden, false);
+});
+
+
+test('running and waiting agent threads stop generation without being archived or closed', async () => {
+  for (const status of ['working', 'blocked']) {
+    const ui = fakeElements(), commands = [], calls = [], memory = {};
+    const View = await viewFor({ ...ui, run: (...args) => commands.push(args),
+      hc: async args => { calls.push(args); return { code: 0 }; },
+      shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+    const view = new View();
+    const thread = { ...claudeThread, status, agents: [{ ...claudeAgent, status }] };
+    await view.archiveThread(thread);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(commands, []);
+    view.threadRow(thread, {});
+    assert.ok(ui.nodes.has('stop-thread-tab-0'));
+    assert.ok(!ui.nodes.has('archive-thread-tab-0'));
+    await view.stopThread(thread);
+    assert.deepEqual(calls, [['interrupt', 't1']]);
+    assert.deepEqual(commands, []);
+    assert.equal(memory['devkits.archived-threads'], undefined);
+  }
+});
+
+test('showing the conversation focuses its selected pane and hiding it returns to the editor', async () => {
+  const commands = [];
+  const View = await viewFor({ spaces: () => projects,
+    panes: () => [{ pane: 'p0', tab: 'tab-0' }], run: (...args) => commands.push(args) });
+  const view = new View(); view.showConversation(true);
+  assert.deepEqual(commands.slice(-2), [['layout.show', { id: 'workspace-view' }], ['pane.focus', { pane: 'p0' }]]);
+  view.showConversation(false);
+  assert.deepEqual(commands.slice(-2), [['layout.hide', { id: 'workspace-view' }], ['devkits.focus-editor']]);
+});
+
+
+test('archive rechecks live status after asynchronous session discovery', async () => {
+  let status = 'idle'; const commands = [], memory = {};
+  const View = await viewFor({ terminals: () => [{ address: 't1', status, argv: ['claude'] }],
+    run: (...args) => commands.push(args), shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    hc: async () => ({ code: 0, stdout: JSON.stringify(claudeTerminal) }),
+    readTextFile: async () => { status = 'working'; return JSON.stringify({ sessionId: 'new-work' }); },
+    exec: async () => ({ code: 0 }) });
+  const view = new View(); await view.archiveThread({ ...claudeThread, agents: [claudeAgent] });
+  assert.deepEqual(commands, []);
+  assert.equal(memory['devkits.archived-threads'], undefined);
 });
