@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, settingsKey, rootSettings } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 
@@ -83,7 +83,7 @@ async function loadView(host) {
 }
 async function viewFor(host) {
   const memory = {};
-  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { projectCatalog, projectGroups, folderKey, launcherChoices, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, settingsKey, rootSettings, terminals: () => [], writeTextFile: async () => null, notify() {}, accountLabel: name => name.replace(/^(?:Codex|Claude) · /, ''), readTextFile: async () => null, window: () => ({}), layout: () => null, appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const factory = await loadView(host);
   return factory(class {}, ...Object.values(host));
@@ -307,13 +307,13 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
     setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args),
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   const cx = { notify() {}, stop_propagation() {}, focus_handle: () => ({ focus() {} }),
-    spawn(task) { pending = task(cx); } };
+    spawn(task) { pending ??= task(cx); }, timer: { every() {} } };
   const view = new View(); view.launchers = choices; view.render(renderContext);
   assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
   ui.nodes.get('manage-launchers-open').click({}, cx);
   assert.deepEqual(closed, ['menu']);
   assert.equal(overlays[0].kind, 'dialog');
-  assert.equal(overlays[0].width, 680);
+  assert.equal(overlays[0].width, 820);
   assert.equal(overlays[0].height, 0.8);
   assert.equal(overlays[0].modal, false);
   assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
@@ -378,7 +378,7 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     run: (...args) => commands.push(args), closeOverlay() {} });
   const cx = { notify() {}, stop_propagation() {} };
-  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
   assert.ok(ui.assets.includes('icons/codex.svg')); assert.ok(ui.assets.includes('icons/claude.svg'));
   assert.ok(ui.assets.includes('mods/devkits/assets/icons/terminal.svg'));
   for (const group of [0, 1, 2]) assert.ok(ui.nodes.has(`manage-section-${group}`));
@@ -461,7 +461,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
     removeAccountProfile: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
   const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
-  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
   assert.ok(!ui.nodes.has('account-menu-codex'));
   ui.nodes.get('account-actions-devkits-codex-work-remove').click({}, renderContext);
   assert.deepEqual(removed, []);
@@ -483,66 +483,45 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   assert.deepEqual(memory['devkits.profile-sessions'], { 'devkits-codex-personal': { model: 'b' } });
   assert.equal(overlays.at(-1).props.view, 'manage-launchers');
 });
-test('Manage saves Codex permissions per launcher and applies them to new tabs and projects only', async () => {
-  const ui = fakeElements(), memory = {}, overlays = [], commands = [];
-  let target = { view: 'manage-launchers', overlay: 'manage', space: 'api' };
+test('Claude and Codex permissions are set once per provider in Settings and apply to every account', async () => {
+  const ui = fakeElements(), memory = {}, overlays = [], commands = [], closed = [];
   const codex = { key: 'codex', name: 'Codex', run: ['codex'] };
   const work = { key: 'devkits-codex-work', name: 'Codex · Work', run: ['env', 'CODEX_HOME=/accounts/work', 'codex', '--no-daemon'] };
-  const View = await viewFor({ ...ui, props: () => target, theme: () => ({ muted: '#888888', done: '#0000ff', working: '#008000', ansi1: '#ff0000' }), spaces: () => [],
+  const launchers = [codex, work, { key: 'claude', name: 'Claude' }];
+  memory['devkits.agent-cache'] = { null: launchers };
+  let target = {};
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
-    openOverlay: value => overlays.push(value), closeOverlay() {}, run: (...args) => commands.push(args) });
-  const view = new View(); view.launchers = [codex, work, { key: 'claude', name: 'Claude' }];
-  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
-  assert.ok(ui.nodes.has('permissions-codex')); assert.ok(ui.nodes.has('permissions-devkits-codex-work'));
-  assert.ok(ui.nodes.has('permissions-claude')); assert.ok(!ui.nodes.has('permissions-terminal'));
-  const cx = renderContext;
-  ui.nodes.get('permissions-codex').mouseDown({}, cx);
-  ui.nodes.get('permissions-codex').click({}, cx); view.render(cx);
-  assert.equal(view.permissionSelects.get('codex').open, true);
-  ui.nodes.get('permissions-codex-options').mouseDownOut({}, cx); view.render(cx);
-  assert.equal(view.permissionSelects.get('codex').open, false);
-  assert.deepEqual(memory['devkits.codex-permissions'], undefined);
-  ui.nodes.get('permissions-codex').click({}, cx); view.render(cx);
-  ui.nodes.get('permissions-codex-option-read-only').click({}, cx); view.render(cx);
-  assert.equal(view.permissionSelects.get('codex').open, false);
+    openOverlay: value => overlays.push(value), closeOverlay: id => closed.push(id), run: (...args) => commands.push(args) });
+  const view = new View(), cx = renderContext;
+  const settings = page => { target = { view: 'manage-launchers', overlay: 'settings', space: 'api', page };
+    view.initSessionMenu({ ...cx, spawn() {}, timer: { every() {} } }); view.launchers = launchers; ui.nodes.clear(); view.render(cx); };
+  const pick = (section, key) => { ui.nodes.get(`defaults-${section}-select`).openChange(true, cx); view.render(cx);
+    ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
+  settings('agents');
+  assert.ok(['agents', 'claude', 'codex', 'rules'].every(page => ui.nodes.has(`settings-page-${page}`)));
+  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('defaults-') || id.startsWith('permissions-')));
+  settings('codex');
+  assert.ok(ui.texts.includes('Every new Codex session uses these, whichever Codex account starts it.'));
+  pick('permissions', 'read-only');
   assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only' });
-  assert.ok(ui.textOf('permissions-codex').includes('Read only'));
-  assert.equal(ui.nodes.get('permissions-codex').textColor, '#0000ff');
-  assert.ok(ui.textOf('permissions-devkits-codex-work').includes('Default'));
-  ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
-  assert.equal(view.permissionSelects.get('devkits-codex-work').open, true);
-  ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
-  assert.equal(view.permissionSelects.get('devkits-codex-work').open, false);
-  ui.nodes.get('permissions-devkits-codex-work').click({}, cx); view.render(cx);
-  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'escape' }, cx); view.render(cx);
-  assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only' });
-  ui.nodes.get('permissions-devkits-codex-work-select').openChange(true, cx); view.render(cx);
-  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'down' }, cx); view.render(cx);
-  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'down' }, cx); view.render(cx);
-  ui.nodes.get('permissions-devkits-codex-work-options').keyDown({ key: 'enter' }, cx); view.render(cx);
-  assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only', 'devkits-codex-work': 'workspace-write' });
-  assert.equal(ui.nodes.get('permissions-devkits-codex-work').textColor, '#008000');
-  assert.deepEqual(overlays, []);
-  assert.ok(!ui.texts.includes('Applies to new sessions only. Existing sessions keep their permissions.'));
-  assert.deepEqual(commands, []);
+  assert.ok(ui.textOf('defaults-permissions').includes('Read only'));
+  commands.length = 0;
   target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
     ['codex', '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+  // An account uses its provider's permissions.
   target = { ...target, space: null, projectName: 'New project' }; await view.startThread(work);
   assert.deepEqual(commands.find(([name]) => name === 'space.new')[1].argv,
-    ['env', 'CODEX_HOME=/accounts/work', 'codex', '--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--no-daemon']);
-  commands.length = 0;
-  target = { view: 'manage-launchers', overlay: 'manage', space: 'api' }; view.render(cx);
-  ui.nodes.get('permissions-codex-select').openChange(true, cx); view.render(cx);
-  ui.nodes.get('permissions-codex-option-danger-full-access').click({}, cx); view.render(cx);
-  assert.equal(ui.nodes.get('permissions-codex').textColor, '#ff0000');
-  assert.ok(codexPermissionModes.every(mode => !ui.texts.includes(mode.description)));
-  ui.nodes.get('permissions-codex-select').openChange(true, cx); view.render(cx);
-  ui.nodes.get('permissions-codex-option-default').click({}, cx); view.render(cx);
-  assert.equal(ui.nodes.get('permissions-codex').textColor, '#888888');
-  assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-work': 'workspace-write' });
-  assert.deepEqual(commands, []);
+    ['env', 'CODEX_HOME=/accounts/work', 'codex', '--sandbox', 'read-only', '--ask-for-approval', 'on-request', '--no-daemon']);
+  settings('codex');
+  pick('permissions', 'default');
+  assert.deepEqual(memory['devkits.codex-permissions'], {});
+  ui.nodes.get('settings-page-claude').click({}, cx); view.render(cx);
+  assert.ok(ui.texts.includes('Every new Claude session uses these, whichever Claude account starts it.'));
+  ui.nodes.get('manage-launchers-done').click();
+  assert.equal(closed.at(-1), 'settings');
 });
 test('Codex sharing is manual, scoped to a local saved account, reports results and ignores duplicate clicks', async () => {
   const ui = fakeElements(), calls = [], notices = [], overlays = [];
@@ -556,7 +535,7 @@ test('Codex sharing is manual, scoped to a local saved account, reports results 
     { key: 'devkits-claude-work', name: 'Claude · Work', run: ['claude'] }];
   view.manageIndex = 0;
   const cx = { ...renderContext, spawn: task => { pending = task(cx); } };
-  view.preparePermissionSelects(cx); view.render(cx);
+  view.prepareAccountMenus(cx); view.render(cx);
   assert.deepEqual(calls, []);
   assert.ok(!ui.nodes.has('account-actions-codex-sync'));
   assert.ok(!ui.nodes.has('account-actions-devkits-claude-work-sync'));
@@ -616,7 +595,7 @@ test('failed account removal stays in the confirmation dialog and preserves pref
   assert.equal(ui.nodes.get('confirm-remove-account').disabled, false);
   assert.ok(ui.nodes.has('remove-account-error'));
 });
-test('hiding every agent keeps Manage available so the menu can be restored', async () => {
+test('hiding every agent keeps Settings available so the menu can be restored', async () => {
   const ui = fakeElements();
   const View = await viewFor({ ...ui, props: () => ({ view: 'launcher' }), spaces: () => [], theme: () => ({}),
     shared: () => ['terminal', 'agent:codex'] });
@@ -624,7 +603,7 @@ test('hiding every agent keeps Manage available so the menu can be restored', as
   assert.ok(!ui.nodes.has('new-terminal'));
   assert.ok(!ui.nodes.has('start-codex'));
   assert.ok(ui.nodes.has('manage-launchers-open'));
-  assert.ok(ui.texts.includes('All agents are hidden. Use Manage to show them.'));
+  assert.ok(ui.texts.includes('All agents are hidden. Use Settings to show them.'));
 });
 test('usage follows Add session visibility and order, shows actual quota windows, always has meters, and opens details', async () => {
   const ui = fakeElements(), overlays = [];
@@ -686,10 +665,8 @@ test('usage follows Add session visibility and order, shows actual quota windows
   assert.ok(!ui.nodes.has('usage-terminal'));
   assert.ok(!ui.nodes.has('usage-agent:codex'));
   assert.ok(ui.texts.includes('USAGE'));
-  ui.nodes.get('manage-agent-profiles').click();
-  assert.deepEqual(overlays.at(-1).props, { view: 'manage-launchers', space: 'api' });
-  assert.equal(overlays.at(-1).width, 680);
-  assert.equal(overlays.at(-1).height, 0.8);
+  // Settings opens only from Add session.
+  assert.ok(!ui.nodes.has('manage-agent-profiles'));
   ui.nodes.get('open-token-statistics').click();
   assert.equal(overlays.at(-1).props.view, 'token-statistics');
   assert.equal(overlays.at(-1).modal, false);
@@ -925,7 +902,7 @@ test('only the base Codex row offers Add account, including when Codex is hidden
     theme: () => ({}), shared: key => key === 'devkits.hidden-launchers' ? ['agent:codex'] : undefined,
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
-  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
   assert.ok(ui.textOf('manage-agent:codex').includes('Add account'));
   assert.ok(!ui.textOf('manage-agent:devkits-codex-work').includes('Add account'));
   ui.nodes.get('add-codex-account').click();
@@ -937,97 +914,106 @@ test('only the base Codex row offers Add account, including when Codex is hidden
   ui.nodes.clear(); view.launcher({});
   assert.ok(!ui.nodes.has('add-codex-account'));
 });
-test('the base Claude row offers Add account and Claude accounts join Your accounts with Claude permissions', async () => {
+test('the base Claude row offers Add account and Claude accounts join Your accounts', async () => {
   const ui = fakeElements(), overlays = [], memory = {};
   const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
   const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     closeOverlay() {}, openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
-  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
+  view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
   assert.ok(ui.textOf('manage-agent:claude').includes('Add account'));
   assert.ok(ui.nodes.has('manage-section-2'));
   assert.ok(ui.nodes.has('account-actions-devkits-claude-work-rename')); assert.ok(ui.nodes.has('account-actions-devkits-claude-work-remove'));
-  assert.ok(ui.nodes.has('permissions-devkits-claude-work')); assert.ok(ui.nodes.has('permissions-claude'));
-  ui.nodes.get('permissions-claude-select').openChange(true, renderContext); view.render(renderContext);
-  ui.nodes.get('permissions-claude-option-acceptEdits').click({}, renderContext);
-  assert.deepEqual(memory['devkits.codex-permissions'], { claude: 'acceptEdits' });
+  assert.ok(!ui.nodes.has('permissions-devkits-claude-work') && !ui.nodes.has('permissions-claude'));
   ui.nodes.get('add-claude-account').click();
   assert.equal(overlays[0].props.view, 'account-login');
   assert.equal(overlays[0].props.provider, 'claude');
 });
-test('Manage chooses which Claude and Codex models and efforts the Asana composer offers', async () => {
+test('each provider page of Settings chooses which of its models and efforts are offered', async () => {
   const ui = fakeElements(), memory = {};
-  const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
+  const launchers = [{ key: 'claude', name: 'Claude', run: ['claude'] }, { key: 'codex', name: 'Codex', run: ['codex'] }, { key: 'aider', name: 'Aider', run: ['aider'] }];
+  let target = {};
   const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, closeOverlay() {}, openOverlay() {} });
-  const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude', run: ['claude'] }, { key: 'codex', name: 'Codex', run: ['codex'] }];
-  view.codexModelList = [{ key: 'gpt-6-luna', label: 'GPT-6 Luna', efforts: ['low', 'high'] }];
-  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
-  assert.ok(ui.nodes.has('manage-section-session'));
+  const view = new View(), cx = renderContext;
+  const settings = page => { target = { view: 'manage-launchers', overlay: 'settings', space: 'api', page };
+    view.initSessionMenu({ ...cx, spawn() {}, timer: { every() {} } }); view.launchers = launchers; ui.nodes.clear(); view.render(cx); };
+  const pick = (section, key) => { ui.nodes.get(`defaults-${section}-select`).openChange(true, cx); view.render(cx);
+    ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
+  settings('agents');
+  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('session-')));
+  settings('claude');
+  assert.ok(ui.texts.includes('MODELS AND EFFORT'));
   assert.ok(ui.nodes.has('session-claude-models-haiku') && ui.nodes.has('session-claude-efforts-max'));
-  assert.ok(ui.nodes.has('session-codex-models-gpt-6-luna') && ui.nodes.has('session-codex-efforts-high'));
-  ui.nodes.get('session-claude-models-haiku').change(false, renderContext);
-  ui.nodes.get('session-codex-efforts-low').change(false, renderContext);
-  assert.deepEqual(memory['devkits.session-options'], { claude: { models: ['haiku'] }, codex: { efforts: ['low'] } });
-  ui.nodes.get('session-claude-models-haiku').change(true, renderContext);
+  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('session-codex-')));
+  ui.nodes.get('session-claude-models-haiku').change(false, cx);
+  assert.deepEqual(memory['devkits.session-options'], { claude: { models: ['haiku'] } });
+  ui.nodes.get('session-claude-models-haiku').change(true, cx);
   assert.deepEqual(memory['devkits.session-options'].claude.models, []);
-  ui.nodes.get('drag-session-claude-sonnet').mouseDown({}, renderContext); view.render(renderContext);
-  ui.nodes.get('session-claude-model-fable').mouseMove({}, renderContext);
-  ui.nodes.get('session-claude-model-fable').mouseUp({}, renderContext);
+  ui.nodes.get('drag-session-claude-sonnet').mouseDown({}, cx); view.render(cx);
+  ui.nodes.get('session-claude-model-fable').mouseMove({}, cx);
+  ui.nodes.get('session-claude-model-fable').mouseUp({}, cx);
   assert.deepEqual(memory['devkits.session-options'].claude.order, ['sonnet', 'fable', 'opus', 'haiku']);
   assert.equal(view.modelDrag, null);
-  ui.nodes.clear(); view.launchers = [{ key: 'aider', name: 'Aider', run: ['aider'] }]; view.render(renderContext);
-  assert.ok(!ui.nodes.has('manage-section-session'));
+  settings('codex');
+  view.codexModelList = [{ key: 'gpt-6-luna', label: 'GPT-6 Luna', efforts: ['low', 'high'] }]; view.render(cx);
+  assert.ok(ui.nodes.has('session-codex-models-gpt-6-luna') && !ui.nodes.has('session-claude-models-haiku'));
+  ui.nodes.get('session-codex-efforts-low').change(false, cx);
+  assert.deepEqual(memory['devkits.session-options'].codex, { efforts: ['low'] });
 });
-test('each Claude or Codex profile sets its default model and effort, which new sessions use unless one is chosen', async () => {
+test('a provider default model and effort apply to every account of it unless a session chooses its own', async () => {
   const ui = fakeElements(), memory = {}, commands = [];
-  let target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
+  const claude = { key: 'claude', name: 'Claude', run: ['claude'] };
+  const work = { key: 'devkits-claude-work', name: 'Claude · work', run: ['env', 'CLAUDE_CONFIG_DIR=/work', 'claude'] };
+  const codex = { key: 'devkits-codex-work', name: 'Codex · work', run: ['env', 'CODEX_HOME=/work', 'codex'] };
+  const launchers = [claude, work, codex];
+  let target = {};
   const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, closeOverlay() {}, openOverlay() {},
     run: (...args) => commands.push(args), notify: error => assert.fail(error.body) });
-  const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude', run: ['claude'] }, { key: 'aider', name: 'Aider', run: ['aider'] }];
-  view.manageIndex = 0; view.preparePermissionSelects(renderContext); view.render(renderContext);
-  assert.ok(ui.nodes.has('profile-settings-claude'));
-  assert.ok(!ui.nodes.has('profile-settings-aider'));
-  ui.nodes.get('profile-model-claude-select').openChange(true, renderContext); view.render(renderContext);
-  ui.nodes.get('profile-model-claude-option-opus').click({}, renderContext);
-  ui.nodes.get('profile-effort-claude-select').openChange(true, renderContext); view.render(renderContext);
-  ui.nodes.get('profile-effort-claude-option-high').click({}, renderContext);
+  const view = new View(), cx = renderContext;
+  const settings = page => { target = { view: 'manage-launchers', overlay: 'settings', space: 'api', page };
+    view.initSessionMenu({ ...cx, spawn() {}, timer: { every() {} } }); view.launchers = launchers; ui.nodes.clear(); view.render(cx); };
+  const pick = (section, key) => { ui.nodes.get(`defaults-${section}-select`).openChange(true, cx); view.render(cx);
+    ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
+  settings('claude');
+  pick('model', 'opus');
+  pick('effort', 'high');
   assert.deepEqual(memory['devkits.profile-sessions'], { claude: { model: 'opus', effort: 'high' } });
-  const claude = view.launchers[0], space = { space: 'api', folder: '/Code/api' };
-  await view.startThread(claude, space);
-  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'opus', '--effort', 'high']);
+  const space = { space: 'api', folder: '/Code/api' };
+  await view.startThread(work, space);
+  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CLAUDE_CONFIG_DIR=/work', 'claude', '--model', 'opus', '--effort', 'high']);
   await view.startThread(claude, space, { model: 'sonnet' });
   assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', '--effort', 'high']);
   await view.startThread(claude, space, { model: 'sonnet', effort: null });
   assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet']);
-  const codex = { key: 'devkits-codex-work', name: 'Codex · work', run: ['env', 'CODEX_HOME=/work', 'codex'] };
-  view.launchers = [codex]; view.preparePermissionSelects(renderContext);
-  view.codexModelsByHome = new Map([['/work', [{ key: 'a', label: 'A', efforts: ['high'] }, { key: 'b', label: 'B', efforts: ['low'] }]]]);
-  view.codexModelList = view.codexModelsByHome.get('/work');
-  memory['devkits.profile-sessions'][codex.key] = { model: 'a', effort: 'high' };
+  memory['devkits.profile-sessions'].codex = { model: 'a', effort: 'high' };
   memory['devkits.session-options'] = { codex: { models: ['a'] } };
-  view.render(renderContext);
-  assert.ok(ui.textOf(`profile-model-${codex.key}`).includes('Default'));
-  assert.ok(!ui.nodes.has(`profile-model-${codex.key}-option-a`));
-  ui.nodes.get(`profile-model-${codex.key}-select`).openChange(true, renderContext); view.render(renderContext);
-  ui.nodes.get(`profile-model-${codex.key}-option-b`).click({}, renderContext);
-  assert.deepEqual(memory['devkits.profile-sessions'][codex.key], { model: 'b', effort: null });
+  settings('codex');
+  view.codexModelList = [{ key: 'a', label: 'A', efforts: ['high'] }, { key: 'b', label: 'B', efforts: ['low'] }]; view.render(cx);
+  // A model hidden below is no longer offered, and the default falls back to Default.
+  assert.ok(ui.textOf('defaults-model').includes('Default'));
+  ui.nodes.get('defaults-model-select').openChange(true, cx); view.render(cx);
+  assert.ok(!ui.nodes.has('defaults-model-option-a'));
+  ui.nodes.get('defaults-model-option-b').click({}, cx);
+  assert.deepEqual(memory['devkits.profile-sessions'].codex, { model: 'b', effort: null });
   await view.startThread(codex, space);
   assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CODEX_HOME=/work', 'codex', '-m', 'b']);
-  view.render(renderContext);
-  ui.nodes.get('session-codex-models-b').change(false, renderContext);
-  assert.equal(memory['devkits.profile-sessions'][codex.key].model, null);
+  view.render(cx); pick('model', 'default');
   await view.startThread(codex, space);
   assert.deepEqual(commands.at(-1)[1].argv, codex.run);
-  memory['devkits.profile-sessions'].claude = { model: 'opus', effort: 'high' };
-  view.launchers.push(claude); view.preparePermissionSelects(renderContext); view.render(renderContext);
-  ui.nodes.get('session-claude-efforts-high').change(false, renderContext);
-  assert.deepEqual(memory['devkits.profile-sessions'].claude, { model: 'opus', effort: null });
-  view.startThread(claude, space);
-  await settle();
-  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'opus']);
+});
+
+test('settings saved per account move once to their provider, keeping the provider and the first set value', () => {
+  assert.deepEqual(rootSettings({ 'devkits-codex-a': 'danger-full-access', 'devkits-codex-b': 'read-only', 'devkits-claude-c': 'bypassPermissions', pi: 'x' }),
+    { codex: 'danger-full-access', claude: 'bypassPermissions', pi: 'x' });
+  assert.deepEqual(rootSettings({ codex: 'read-only', 'devkits-codex-a': 'danger-full-access' }), { codex: 'read-only' });
+  const merge = (kept = {}, value = {}) => ({ model: kept.model ?? value.model ?? null, effort: kept.effort ?? value.effort ?? null });
+  assert.deepEqual(rootSettings({ 'devkits-codex-a': { model: null, effort: 'low' }, 'devkits-codex-b': { model: 'gpt', effort: 'high' } }, merge),
+    { codex: { model: 'gpt', effort: 'low' } });
+  const untouched = { codex: 'read-only' };
+  assert.equal(rootSettings(untouched), untouched);
 });
 test('local account profiles and their login action stay out of remote project menus', async () => {
   const ui = fakeElements(); let pending;
@@ -1035,9 +1021,11 @@ test('local account profiles and their login action stay out of remote project m
     spaces: () => [{ id: 'remote', machine: 'server' }], theme: () => ({}), knownAgents: async () => [
       { key: 'devkits-codex-work', installed: true }, { key: 'codex', name: 'Codex', installed: true },
     ] });
-  const cx = { notify() {}, focus_handle: () => ({ focus() {} }), spawn(task) { pending = task(cx); } };
+  const cx = { notify() {}, focus_handle: () => ({ focus() {} }), spawn(task) { pending ??= task(cx); }, timer: { every() {} } };
   const view = new View(); view.init({}, cx); await pending; view.render(renderContext);
   assert.deepEqual(view.launchers.map(agent => agent.key), ['codex']);
+  // A remote project's Settings has no Claude or Codex page; their defaults and models are local.
+  assert.ok(!ui.nodes.has('settings-page-codex') && ui.nodes.has('settings-page-agents') && ui.nodes.has('settings-page-rules'));
   assert.ok(!ui.nodes.has('add-codex-account'));
 });
 test('project dropdown switches projects and creates a default terminal for a new folder', async () => {
@@ -1694,35 +1682,24 @@ test('the header branch opens a read-only list of local and remote branches, new
   assert.equal(ui.nodes.get('branch-local-main').click, undefined);
 });
 
-test('a Claude or Codex thread ⋯ menu opens the global rules read only in a dialog', async () => {
-  const ui = fakeElements(), overlays = [], closed = [];
+test('Settings is the one place for the rules: a Rules page with icons beside each page, and no thread menu', async () => {
+  const ui = fakeElements();
   let target = { view: 'pane', pane: 'p1' }, pending;
-  const View = await viewFor({ ...ui, props: () => target, theme: () => ({ hover: 'hover' }), settings: () => ({ zoom: 1 }),
-    spaces: () => [{ id: 'api', active: true, tabs: [{ id: 'tab-0', active: true }, { id: 'shell' }] }],
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}),
+    spaces: () => [{ id: 'api', active: true, tabs: [{ id: 'tab-0', active: true }] }],
     agents: () => [{ address: 't1', space: 'api', tab: 'tab-0', app: 'claude-code', program: {} }],
-    panes: () => [{ pane: 'p1', tab: 'tab-0', program: {}, title: 'T' }, { pane: 'p2', tab: 'shell', program: { shell: true }, title: 'zsh' }],
-    layout: () => ({ children: [] }), run() {}, openOverlay: spec => overlays.push(spec), closeOverlay: id => closed.push(id),
+    panes: () => [{ pane: 'p1', tab: 'tab-0', program: {}, title: 'T' }], layout: () => ({ children: [] }), run() {},
     readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? '# Global rules\n\nUse hc run.' : null,
     TextView: { markdown: (_id, text) => { ui.texts.push(text); return ui.element(); } } });
   new View().render();
-  const trigger = ui.nodes.get('thread-menu-tab-0');
-  trigger.mouseDown({ bounds: { x: 900, y: 32, width: 32, height: 32 } }, { stop_propagation() {} });
-  trigger.click({}, { stop_propagation() {} });
-  assert.deepEqual(overlays[0].props, { view: 'thread-menu' });
-  target = { view: 'thread-menu', overlay: 'menu' };
-  const menu = new View(); menu.init({}, renderContext); menu.render();
-  ui.nodes.get('menu-global-rules').click();
-  assert.deepEqual(closed, ['menu']);
-  assert.equal(overlays[1].kind, 'dialog');
-  assert.deepEqual(overlays[1].props, { view: 'rules' });
-  target = { view: 'pane', pane: 'p2' }; ui.nodes.clear(); new View().render();
   assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('thread-menu-')));
-  target = { view: 'rules', overlay: 'rules' };
-  const preview = new View(), cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { pending = task(cx); }, timer: { every() {} } };
-  preview.init({}, cx); preview.render();
-  assert.ok(ui.texts.includes('Loading rules…'));
-  await pending; preview.render();
+  target = { view: 'manage-launchers', overlay: 'settings', space: 'api', page: 'rules' };
+  const view = new View(), cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { if (task.length) pending = task(cx); }, timer: { every() {} } };
+  view.initSessionMenu(cx); view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
+  await pending; view.render(cx);
   assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
-  ui.nodes.get('global-rules-done').click();
-  assert.deepEqual(closed, ['menu', 'rules']);
+  assert.ok(['agents', 'claude', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
+  const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
+  assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-claude']);
+  assert.ok(['assets/icons/terminal.svg', 'assets/icons/book-open.svg', 'icons/claude.svg'].every(icon => ui.assets.some(asset => asset.endsWith(icon))));
 });

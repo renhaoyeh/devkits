@@ -84,6 +84,20 @@ export function codexModels(source) {
 
 export const sessionKind = agent => isClaudeLauncher(agent) ? 'claude' : isCodexLauncher(agent) ? 'codex' : null;
 
+// Claude and Codex settings belong to the provider, whichever account starts a session: every account shares
+// the root launcher's (claude, codex). Other launchers keep their own.
+export const settingsKey = agent => sessionKind(agent) || agent?.key;
+
+// Moves settings saved per account to their provider, keeping the provider's own first, then each account's
+// in order; `merge(kept, account)` combines two values. Returns the same object when nothing moves.
+export function rootSettings(saved = {}, merge = (kept, value) => kept ?? value) {
+  const entries = Object.entries(saved), account = ([key]) => sessionKind({ key }) && sessionKind({ key }) !== key;
+  if (!entries.some(account)) return saved;
+  const next = Object.fromEntries(entries.filter(entry => !account(entry)));
+  for (const [key, value] of entries.filter(account)) next[sessionKind({ key })] = merge(next[sessionKind({ key })], value);
+  return next;
+}
+
 // Every Codex profile shares one choice of models, so their caches are merged by model.
 export function mergeModels(lists) {
   const models = new Map();

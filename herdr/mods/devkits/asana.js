@@ -1,7 +1,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex, InputState, Input, TextView, TextareaState, Textarea } from 'gpui-base';
 import { appHome, home, readTextFile, writeTextFile, shared, setShared, theme, settings, openOverlay, closeOverlay } from 'herdr';
-import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions } from './model.js';
+import { effortLabel, folderKey, claudeModels, claudeEfforts, codexHome, codexModels, isClaudeLauncher, isCodexLauncher, sessionKind, shownOptions, orderedOptions, settingsKey } from './model.js';
 import { Select, SelectState } from './components/select.js';
 import { Button } from './components/button.js';
 import { DialogTitle, DialogDescription } from './components/dialog.js';
@@ -679,7 +679,7 @@ export default class AsanaPanel {
 
   // Only the models and efforts Manage leaves checked are offered.
   profileFor(agent) {
-    const stored = shared('devkits.profile-sessions')?.[agent?.key] || {};
+    const stored = shared('devkits.profile-sessions')?.[settingsKey(agent)] || {};
     const hidden = shared('devkits.session-options')?.[sessionKind(agent)] || {};
     return { model: hidden.models?.includes(stored.model) ? null : stored.model,
       effort: hidden.efforts?.includes(stored.effort) ? null : stored.effort };
