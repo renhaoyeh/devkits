@@ -1612,20 +1612,6 @@ test('global rules join Claude and Codex system prompts in local sessions only',
   }
 });
 
-test('Edit creates the starting rules once and opens them in the default editor', async () => {
-  const writes = [], runs = [];
-  let file = null;
-  const View = await viewFor({ window: () => ({ platform: 'macos' }), readTextFile: async () => file,
-    writeTextFile: async (path, text, expected) => { writes.push([path, expected]); file = text; },
-    exec: async (...args) => { runs.push(args); return { code: 0, stderr: '' }; } });
-  const view = new View();
-  await view.editGlobalRules();
-  await view.editGlobalRules();
-  assert.deepEqual(writes, [['/herdr/data/devkits/AGENTS.md', null]]);
-  assert.match(file, /hc run --bg --name/);
-  assert.deepEqual(runs, [['open', ['-t', '/herdr/data/devkits/AGENTS.md']], ['open', ['-t', '/herdr/data/devkits/AGENTS.md']]]);
-});
-
 test('terminals an agent started sit under its thread, peek when clicked and end from their close button', async () => {
   const live = [
     { address: 't9', parent: 't1', state: 'live', argv: ['sh', '-c', 'emulator -avd Pixel'] },
@@ -1706,4 +1692,37 @@ test('the header branch opens a read-only list of local and remote branches, new
   assert.ok(ui.nodes.has('branch-local-feature/login') && ui.nodes.has('branch-local-main') && ui.nodes.has('branch-remote-origin/main'));
   assert.ok(!ui.nodes.has('branch-remote-origin/HEAD'));
   assert.equal(ui.nodes.get('branch-local-main').click, undefined);
+});
+
+test('a Claude or Codex thread ⋯ menu opens the global rules read only in a dialog', async () => {
+  const ui = fakeElements(), overlays = [], closed = [];
+  let target = { view: 'pane', pane: 'p1' }, pending;
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({ hover: 'hover' }), settings: () => ({ zoom: 1 }),
+    spaces: () => [{ id: 'api', active: true, tabs: [{ id: 'tab-0', active: true }, { id: 'shell' }] }],
+    agents: () => [{ address: 't1', space: 'api', tab: 'tab-0', app: 'claude-code', program: {} }],
+    panes: () => [{ pane: 'p1', tab: 'tab-0', program: {}, title: 'T' }, { pane: 'p2', tab: 'shell', program: { shell: true }, title: 'zsh' }],
+    layout: () => ({ children: [] }), run() {}, openOverlay: spec => overlays.push(spec), closeOverlay: id => closed.push(id),
+    readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? '# Global rules\n\nUse hc run.' : null,
+    TextView: { markdown: (_id, text) => { ui.texts.push(text); return ui.element(); } } });
+  new View().render();
+  const trigger = ui.nodes.get('thread-menu-tab-0');
+  trigger.mouseDown({ bounds: { x: 900, y: 32, width: 32, height: 32 } }, { stop_propagation() {} });
+  trigger.click({}, { stop_propagation() {} });
+  assert.deepEqual(overlays[0].props, { view: 'thread-menu' });
+  target = { view: 'thread-menu', overlay: 'menu' };
+  const menu = new View(); menu.init({}, renderContext); menu.render();
+  ui.nodes.get('menu-global-rules').click();
+  assert.deepEqual(closed, ['menu']);
+  assert.equal(overlays[1].kind, 'dialog');
+  assert.deepEqual(overlays[1].props, { view: 'rules' });
+  target = { view: 'pane', pane: 'p2' }; ui.nodes.clear(); new View().render();
+  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('thread-menu-')));
+  target = { view: 'rules', overlay: 'rules' };
+  const preview = new View(), cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { pending = task(cx); }, timer: { every() {} } };
+  preview.init({}, cx); preview.render();
+  assert.ok(ui.texts.includes('Loading rules…'));
+  await pending; preview.render();
+  assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
+  ui.nodes.get('global-rules-done').click();
+  assert.deepEqual(closed, ['menu', 'rules']);
 });
