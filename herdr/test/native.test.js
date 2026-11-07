@@ -534,7 +534,12 @@ test('Codex sharing is manual, scoped to a local saved account, reports results 
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] }, work,
     { key: 'devkits-claude-work', name: 'Claude · Work', run: ['claude'] }];
   view.manageIndex = 0;
-  const cx = { ...renderContext, spawn: task => { pending = task(cx); } };
+  const cx = { ...renderContext, spawn: task => {
+    const before = calls.length, running = task(cx);
+    // Background folder watches do not replace the helper request this test awaits.
+    if (calls.length !== before) pending = running;
+    return running;
+  } };
   view.prepareAccountMenus(cx); view.render(cx);
   assert.deepEqual(calls, []);
   assert.ok(!ui.nodes.has('account-actions-codex-sync'));
