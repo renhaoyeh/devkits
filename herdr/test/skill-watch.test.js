@@ -31,7 +31,7 @@ test('snapshots detect skill additions, edits, removals and linked content, excl
 
 async function actions(host) {
   const source = await readFile(new URL('../mods/devkits/account-actions.js', import.meta.url), 'utf8');
-  return new Function(...Object.keys(host), source.replace(/^import .*;\n/gm, '').replace('export const', 'const') + '\nreturn accountActions;')(...Object.values(host));
+  return new Function(...Object.keys(host), source.replace(/^import .*;\r?\n/gm, '').replace('export const', 'const') + '\nreturn accountActions;')(...Object.values(host));
 }
 
 function clock() {

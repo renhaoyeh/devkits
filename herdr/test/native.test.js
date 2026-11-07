@@ -2793,7 +2793,7 @@ test('status and priority selects show semantic icons in the trigger and every o
   const { boardStatusOptions, boardPriorityOptions } = await import('../mods/devkits/agent-board-model.js');
   const ui = fakeElements(), source = await readFile(new URL('../mods/devkits/components/select.js', import.meta.url), 'utf8');
   const host = { ...ui, DropdownMenuContent: () => ui.element(), DropdownMenuItem: id => ui.element().id(id) };
-  const Select = new Function(...Object.keys(host), source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn Select;')(...Object.values(host));
+  const Select = new Function(...Object.keys(host), source.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\nreturn Select;')(...Object.values(host));
   const state = { trigger: { focus() {} }, list: { focus() {} }, open: true, index: 0 };
   const t = { foreground: '#eee', muted: '#888' };
   let chosen;
