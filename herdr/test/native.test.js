@@ -75,7 +75,7 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'agent-board-model', 'agent-task-evidence', 'agent-board-state']
+  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'hardware-topology', 'hardware-model', 'hardware', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'agent-board-model', 'agent-task-evidence', 'agent-board-state']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
@@ -101,6 +101,216 @@ async function viewFor(host) {
   };
   return View;
 }
+
+test('hardware refresh avoids overlap, clears failed readings and recovers with a new sample', async () => {
+  const ui = fakeElements(), calls = [], tasks = [];
+  let finish;
+  const View = await viewFor({ ...ui, exec: (...args) => {
+    calls.push(args); return new Promise(resolve => { finish = resolve; });
+  } });
+  const view = new View(), cx = { notify() {}, spawn(task) { tasks.push(task(cx)); } };
+  view.refreshHardware(cx); view.refreshHardware(cx);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][2], undefined, 'Always read this computer, including with a remote project selected');
+  const sample = { count: 2, total: 100, idle: 20 };
+  finish({ code: 0, stdout: JSON.stringify({ sample, cpu: 42, memory: { used: 8 * 1024 ** 3, total: 16 * 1024 ** 3, percent: 50 } }) });
+  await Promise.all(tasks.splice(0));
+  view.systemUsage({});
+  assert.ok(ui.textOf('system-cpu').includes('42%'));
+  assert.ok(ui.textOf('system-ram-value').includes('16 GB'));
+  assert.ok(ui.textOf('system-ram-subtitle').includes('8.0 GB used · 50%'));
+  view.refreshHardware(cx);
+  assert.deepEqual(JSON.parse(calls[1][1][1]), sample);
+  finish({ code: 1 }); await Promise.all(tasks.splice(0));
+  view.systemUsage({});
+  assert.ok(ui.textOf('system-cpu').includes('Unavailable'));
+  assert.ok(ui.textOf('system-ram').includes('Unavailable'));
+  assert.equal(view.hardwareSample, null);
+  view.refreshHardware(cx);
+  assert.equal(calls[2][1][1], 'null');
+  finish({ code: 0, stdout: JSON.stringify({ sample, cpu: null, memory: null }) });
+  await Promise.all(tasks.splice(0));
+  view.systemUsage({});
+  assert.ok(ui.textOf('system-cpu').includes('Sampling…'));
+  assert.ok(ui.textOf('system-ram').includes('Unavailable'));
+});
+
+test('system monitor opens from each summary and refreshes hardware details while open', async t => {
+  const ui = fakeElements(), opened = [], closed = [], ticks = [], tasks = [];
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  let request = 0;
+  const View = await viewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', overlay: 'system-overlay' }),
+    openOverlay: spec => opened.push(spec), closeOverlay: id => closed.push(id),
+    exec: async () => ({ code: 0, stdout: JSON.stringify({ sample: { count: 10, total: 100, idle: 50 },
+      cpu: ++request * 10, cores: 10, cpuName: 'Apple M4', load: [1, 2, 3],
+      gpus: [{ name: 'Apple M4', percent: 12, renderer: 10, tiler: 2 }],
+      memory: { used: 8 * 1024 ** 3, total: 16 * 1024 ** 3, percent: 50, pressure: 'Normal', swap: { used: 0, total: 1024 ** 3 } },
+      disk: { used: 200 * 1024 ** 3, total: 500 * 1024 ** 3, free: 300 * 1024 ** 3, percent: 40, rates: { read: 1024, write: 2048 } },
+      network: { name: 'en0', received: 10000, sent: 5000, rates: { received: 4096, sent: 2048 } },
+      battery: { percent: 80, plugged: true, charging: false, health: 93, cycles: 23, temperature: 30.5 }, updatedAt: Date.now() }) }) });
+  const view = new View(), cx = { ...renderContext, timer: { every(ms, tick) { ticks.push([ms, tick]); } },
+    spawn(task) { tasks.push(task(cx)); } };
+  view.init({}, cx); await Promise.all(tasks.splice(0)); view.render(cx);
+  assert.deepEqual(ticks.map(([ms]) => ms), [1000]);
+  assert.ok(ui.textOf('hardware-detail-cpu').includes('10%'));
+  assert.ok(ui.textOf('hardware-detail-gpu').includes('12%'));
+  assert.ok(ui.textOf('hardware-detail-ram').includes('Normal'));
+  assert.ok(ui.textOf('hardware-detail-disk').includes('1.0 KB/s'));
+  assert.ok(ui.textOf('hardware-detail-disk').includes('2.0 KB/s'));
+  assert.ok(ui.textOf('hardware-detail-network').includes('en0 · download / upload'));
+  ui.nodes.get('hardware-page-battery').click({}, cx); view.render(cx);
+  assert.ok(ui.textOf('hardware-module-battery').includes('30.5 °C'));
+  ui.nodes.get('hardware-page-overview').click({}, cx);
+  now += 3001;
+  ticks[0][1](cx); await Promise.all(tasks.splice(0)); view.render(cx);
+  assert.ok(ui.textOf('hardware-detail-cpu').includes('20%'));
+  view.systemUsage({});
+  assert.ok(ui.textOf('system-disk-value').includes('500 GB'));
+  assert.ok(ui.textOf('system-disk-subtitle').includes('R 1.0 KB/s   W 2.0 KB/s'));
+  for (const id of ['system-cpu', 'system-gpu', 'system-ram', 'system-disk', 'system-network', 'open-hardware-details']) ui.nodes.get(id).click();
+  assert.ok(opened.every(spec => spec.props.view === 'hardware-details'));
+  assert.ok(opened.every(spec => spec.width === 0.9), 'The monitor uses the window width rather than a fixed narrow dialog');
+  assert.ok(ui.textOf('system-cpu-subtitle').includes('Apple M4 · 10 cores'));
+  ui.nodes.get('hardware-details').keyDown({ key: 'escape' }, cx);
+  ui.nodes.get('hardware-details-done').click();
+  assert.deepEqual(closed, ['system-overlay', 'system-overlay']);
+});
+
+test('monitor settings persist module choices, order, interval, style and selected CPU cores', async () => {
+  const ui = fakeElements(), memory = {};
+  const View = await viewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(), cx = renderContext;
+  view.hardware = { cores: 4, coreUsage: [10, 20, 30, 40], cpu: 25, cpuName: 'Fixture',
+    gpus: [{ name: 'Apple M4', percent: 30, memory: { type: 'unified', total: 24 * 1024 ** 3, used: 1024 ** 3 } }],
+    memory: { total: 24 * 1024 ** 3, used: 12 * 1024 ** 3, percent: 50, type: 'LPDDR5', manufacturer: 'Micron' },
+    battery: { percent: 75, plugged: false, charging: false }, disk: { model: 'APPLE SSD AP0512Z', percent: 50, rates: { read: 1024, write: 2048 } } };
+  view.hardwareSettings({});
+  ui.nodes.get('hardware-visible-network').change(false, cx);
+  ui.nodes.get('hardware-visible-storage').change(true, cx);
+  ui.nodes.get('hardware-drag-battery').mouseDown({}, cx);
+  ui.nodes.get('hardware-setting-row-storage').mouseMove({}, cx);
+  assert.equal(memory['devkits.system-monitor'].order[6], 'battery', 'Hovering a drop target does not save an order');
+  ui.nodes.get('hardware-setting-row-storage').mouseUp({}, cx);
+  ui.nodes.get('hardware-interval-10').change(true, cx);
+  ui.nodes.get('hardware-style-compact').change(true, cx);
+  ui.nodes.get('hardware-cpu-mode-cores').change(true, cx);
+  view.hardwareSettings({});
+  ui.nodes.get('hardware-core-1').change(false, cx);
+  ui.nodes.get('hardware-core-3').change(false, cx);
+  const reloaded = new View(); reloaded.hardware = view.hardware;
+  ui.nodes.clear(); reloaded.systemUsage({});
+  assert.ok(!ui.nodes.has('system-network'));
+  assert.ok(ui.nodes.has('system-storage') && ui.nodes.has('system-disk') && ui.nodes.has('system-battery'));
+  assert.ok(ui.nodes.has('system-core-bars-0') && ui.nodes.has('system-core-bars-2'));
+  assert.ok(!ui.nodes.has('system-core-bars-1') && !ui.nodes.has('system-core-bars-3'));
+  assert.equal(reloaded.hardware.cores, 4, 'Choosing displayed cores must not fabricate the detected core count');
+  assert.deepEqual(memory['devkits.system-monitor'].cores, [0, 2]);
+  assert.equal(memory['devkits.system-monitor'].interval, 10);
+  assert.equal(memory['devkits.system-monitor'].style, 'compact');
+  assert.equal(memory['devkits.system-monitor'].order[5], 'battery');
+  assert.ok(ui.textOf('system-disk').some(text => text.includes('R 1.0 KB/s') && text.includes('W 2.0 KB/s')));
+  assert.ok(ui.textOf('system-disk').includes('Disk I/O · APPLE SSD AP0512Z'));
+  reloaded.hardwareModuleDetails('disk', {});
+  assert.ok(ui.textOf('hardware-module-disk').includes('APPLE SSD AP0512Z'));
+  assert.ok(ui.textOf('system-gpu-value').includes('24 GB unified'));
+  assert.ok(ui.textOf('system-gpu-subtitle').includes('Apple M4 · 30%'));
+  assert.ok(ui.textOf('system-ram').includes('RAM · LPDDR5'));
+  assert.ok(ui.textOf('system-ram-subtitle').includes('12.0 GB used · 50%'));
+  reloaded.hardwareModuleDetails('ram', {});
+  assert.ok(ui.textOf('hardware-module-ram').includes('LPDDR5'));
+  assert.ok(ui.textOf('hardware-module-ram').includes('Micron'));
+  reloaded.hardwareModuleDetails('gpu', {});
+  assert.ok(ui.textOf('hardware-module-gpu').includes('Unified · shared with CPU'));
+  reloaded.hardwareSettings({});
+  for (const id of Object.keys(memory['devkits.system-monitor'].visible)) ui.nodes.get(`hardware-visible-${id}`).change(false, cx);
+  ui.nodes.clear(); reloaded.systemUsage({});
+  assert.ok(ui.nodes.has('open-hardware-settings') && ui.nodes.has('open-hardware-details'));
+  assert.ok(!ui.nodes.has('system-cpu') && !ui.nodes.has('system-battery'));
+  reloaded.hardwareSettings({}); ui.nodes.get('hardware-visible-battery').change(true, cx);
+  reloaded.hardware = { ...reloaded.hardware, battery: null };
+  ui.nodes.clear(); reloaded.systemUsage({});
+  assert.ok(!ui.nodes.has('system-battery'));
+  reloaded.hardwareSettings({});
+  assert.ok(ui.textOf('hardware-setting-row-battery').includes('No battery detected · appears when available'));
+});
+
+test('hardware ordering reuses drag handles, supports keyboard movement and cancels without changing preferences', async () => {
+  const ui = fakeElements(), memory = {}, closed = [];
+  const View = await viewFor({ ...ui, theme: () => ({}), shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    props: () => ({ view: 'hardware-details', page: 'settings', overlay: 'monitor' }), closeOverlay: id => closed.push(id) });
+  const view = new View(); view.handle = { focus() {} }; view.render(renderContext);
+  assert.ok(ui.textOf('hardware-setting-row-ram').includes('RAM'));
+  assert.ok(ui.textOf('hardware-page-ram').includes('RAM'));
+  assert.ok(!ui.nodes.has('hardware-order-cpu--1'));
+  ui.nodes.get('hardware-drag-gpu').keyDown({ key: 'up', modifiers: { alt: true } }, renderContext);
+  assert.equal(memory['devkits.system-monitor'].order[0], 'gpu');
+  const order = [...memory['devkits.system-monitor'].order];
+  ui.nodes.get('hardware-drag-battery').mouseDown({}, renderContext);
+  ui.nodes.get('hardware-setting-row-cpu').mouseMove({}, renderContext);
+  view.render(renderContext);
+  assert.equal(ui.nodes.get('hardware-setting-row-battery').opacity, 0.5);
+  ui.nodes.get('hardware-details').keyDown({ key: 'escape' }, renderContext);
+  assert.equal(view.hardwareDrag, null);
+  assert.deepEqual(memory['devkits.system-monitor'].order, order);
+  assert.deepEqual(closed, [], 'Escape cancels dragging before closing the monitor');
+  ui.nodes.get('hardware-drag-battery').mouseDown({}, renderContext);
+  ui.nodes.get('hardware-settings').hover(false, renderContext);
+  assert.equal(view.hardwareDrag, null);
+  assert.deepEqual(memory['devkits.system-monitor'].order, order);
+  ui.nodes.get('hardware-visible-cpu').change(false, renderContext);
+  assert.equal(view.hardwareDrag, null, 'Toggling visibility never starts a reorder');
+  assert.deepEqual(memory['devkits.system-monitor'].order, order);
+});
+
+test('CPU detail renders Task Manager style processor histories, P/E groups and optional real sensor readings', async () => {
+  const ui = fakeElements(), memory = {};
+  const View = await viewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', page: 'cpu' }),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(); view.handle = { focus() {} };
+  view.hardware = { cpu: 40, cpuName: 'Fixture', cores: 4, coreUsage: [10, 20, 50, 80],
+    topology: { physical: 3, logical: 4, sockets: 1, processors: [
+      { index: 0, id: '0,0', logical: 0, group: 0, physical: 0, type: 'P' },
+      { index: 1, id: '0,1', logical: 1, group: 0, physical: 0, type: 'P' },
+      { index: 2, id: '0,2', logical: 2, group: 0, physical: 1, type: 'E' },
+      { index: 3, id: '0,3', logical: 3, group: 0, physical: 2, type: 'E' },
+    ] }, sensors: [{ id: 'cpu-temperature', name: 'CPU package', type: 'Temperature', value: 65, unit: '°C', source: 'Fixture provider' }] };
+  view.render(renderContext);
+  assert.ok([0,1,2,3].every(index => ui.nodes.has(`hardware-cpu-processor-${index}`) && ui.nodes.has(`hardware-cpu-history-${index}`)));
+  assert.ok(ui.textOf('hardware-cpu-processor-0').includes('CPU 0 · P'));
+  assert.ok(ui.textOf('hardware-cpu-processor-3').includes('CPU 3 · E'));
+  assert.equal(ui.nodes.get('hardware-cpu-view-groups').click, undefined, 'Native toggles emit change rather than click');
+  ui.nodes.get('hardware-cpu-view-groups').change(true, renderContext); view.render(renderContext);
+  assert.ok(ui.nodes.has('hardware-cpu-group-P') && ui.nodes.has('hardware-cpu-group-E'));
+  ui.nodes.get('hardware-cpu-view-groups').change(false, renderContext); view.render(renderContext);
+  assert.equal(memory['devkits.system-monitor'].cpuGraph, 'groups', 'The selected radio-style option cannot turn itself off');
+  ui.nodes.get('hardware-cpu-view-total').change(true, renderContext); view.render(renderContext);
+  assert.ok(ui.nodes.has('hardware-detail-cpu'));
+  view.hardwarePage = 'sensors'; view.render(renderContext);
+  assert.ok(ui.textOf('hardware-module-sensors').includes('65.0 °C'));
+  assert.ok(ui.textOf('hardware-module-sensors').includes('Fixture provider'));
+  assert.ok(ui.textOf('hardware-module-sensors').includes('Temperature points measure thermal zones. They do not correspond one-to-one with CPU cores.'));
+});
+
+test('opening a monitor reuses warm data without requesting a repaint during initialization', async t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const cache = { checkedAt: Date.now(), sensorCollection: false, error: false, history: [], sample: {},
+    data: { cpu: 10, cores: 2, cpuName: 'Fixture', updatedAt: Date.now() } };
+  Object.defineProperty(globalThis, 'window', { configurable: true, writable: true,
+    value: { sessionStorage: { getItem: () => JSON.stringify(cache) } } });
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'window', previous); else delete globalThis.window; });
+  const View = await viewFor({ props: () => ({ view: 'hardware-details' }) });
+  let notifications = 0;
+  const cx = { focus_handle: () => ({ focus() {} }), timer: { every() {} }, notify() { notifications++; },
+    spawn() { assert.fail('A warm cache must not start another hardware reader'); } };
+  const view = new View(); view.init({}, cx);
+  assert.equal(view.hardware.cpu, 10);
+  assert.equal(notifications, 0, 'Initialization already renders; notification here breaks live reload');
+  cache.checkedAt++; cache.data.cpu = 20;
+  view.pollHardware(cx);
+  assert.equal(view.hardware.cpu, 20);
+  assert.equal(notifications, 1);
+});
 
 test('Windows starts legacy account launchers locally and preserves commands on remote machines', async () => {
   const agent = { key: 'devkits-codex-work', name: 'Work', run: ['env', 'CODEX_HOME=C:/Account', 'codex'] };
@@ -1844,6 +2054,11 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(layout.children[0].id, 'sidebar');
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
+  const hardwarePackage = JSON.parse(await readFile(join(mod, 'vendor', 'systeminformation', 'package.json'), 'utf8'));
+  assert.equal(hardwarePackage.version, '5.33.19');
+  assert.equal(hardwarePackage.license, 'MIT');
+  assert.match(await readFile(join(mod, 'vendor', 'systeminformation', 'LICENSE'), 'utf8'), /MIT License/);
+  assert.match(await readFile(join(mod, 'hardware-package.js'), 'utf8'), /vendor\/systeminformation\/lib\/index\.js/);
   for (const name of (await readdir(new URL('../mods/devkits/components/', import.meta.url))).filter(name => name.endsWith('.js'))) {
     assert.equal(await readFile(join(mod, 'components', name), 'utf8'),
       await readFile(new URL(`../mods/devkits/components/${name}`, import.meta.url), 'utf8'));
@@ -2383,7 +2598,7 @@ test('Settings is the one place for the rules: a Rules page with icons beside ea
   assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
   assert.ok(['agents', 'claude', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-usage', 'settings-page-claude', 'settings-page-agent-profiles']);
+  assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-usage', 'settings-page-system', 'settings-page-claude', 'settings-page-agent-profiles']);
   assert.ok(['assets/icons/terminal.svg', 'assets/icons/book-open.svg', 'icons/claude.svg'].every(icon => ui.assets.some(asset => asset.endsWith(icon))));
 });
 
