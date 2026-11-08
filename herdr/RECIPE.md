@@ -44,7 +44,7 @@ For a first install, run from the repository root:
 npm run install:herdr
 ```
 
-No `npm install` is needed. The installer uses Node built-ins and honors `HERDR_APP_HOME`. It adds only the bundle listed above and refuses existing destinations. If those paths already exist, inspect the differences rather than deleting them or bypassing that refusal. For a requested update, follow [DEVELOPMENT.md](DEVELOPMENT.md) to compare, back up, and selectively update custom files.
+No `npm install` is needed. The installer uses Node built-ins and honors `HERDR_APP_HOME`. It adds only the bundle listed above and refuses existing destinations. For a requested full reinstall or update, run `npm run reinstall:herdr`: it stages the bundle, backs up replaced files under Herdr's `backups/devkits-*`, and rolls back failed replacements. User data and existing shortcuts are preserved. For selective development updates, follow [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Watch out
 

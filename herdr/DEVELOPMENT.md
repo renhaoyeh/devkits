@@ -80,6 +80,7 @@ The native mod check is required after mod edits. It checks initial rendering, n
 The default destination is `~/.config/herdr-app/`; use the configured `HERDR_APP_HOME` when applicable. Layout, mod, and theme paths mirror the corresponding source directories.
 
 - For a first install, use `npm run install:herdr`. The installer intentionally refuses existing destinations; it is not an update command.
+- For a requested full reinstall or update, use `npm run reinstall:herdr`. It stages the complete bundle, backs up replaced files under `backups/devkits-*`, and rolls back failed replacements. It preserves user data and existing shortcuts. Use the selective workflow below for ordinary development changes.
 - Before editing, compare installed files with the source baseline and save a temporary copy of the affected installed files outside the repository. Inspect any divergence rather than overwriting it.
 - After source checks pass, verify the installed files still match the saved baseline, then copy only the intended changed files. Remove obsolete assets only when the change removes their use.
 - Herdr watches these files and reloads them. Do not restart the app or switch layouts just to force an update during normal validation.

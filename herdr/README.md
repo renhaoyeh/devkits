@@ -57,6 +57,14 @@ herdr-app do layout.switch --name devkits
 If `herdr-app` is not on PATH, use `~/.local/bin/herdr-app`.
 The installer adds the custom layout, mods, and themes to `~/.config/herdr-app/` and refuses to overwrite existing files. For updates or a custom `HERDR_APP_HOME`, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
+To reinstall or update an existing installation, run:
+
+```sh
+npm run reinstall:herdr
+```
+
+This prepares the complete bundle, replaces the Devkits layout, mods and themes, and keeps the previous files in `backups/devkits-*` under Herdr's home. Failed replacements roll back automatically. Settings, accounts, sessions, other layouts and existing key bindings are preserved; missing Devkits shortcuts are added. Herdr reloads the files automatically. Both commands honor `HERDR_APP_HOME`.
+
 ## Use
 
 Use **Interface settings → USAGE → Show Usage** to show or hide the entire USAGE section. It starts enabled. Turning it off pauses further quota refreshes and retains account selections, ordering and cached readings; turn it back on from the same settings page. **Add session → Settings → Usage → Interface settings…** also opens this switch. This does not change which accounts are available for Agent profiles.

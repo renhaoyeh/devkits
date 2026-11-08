@@ -1,5 +1,5 @@
-import { access, cp, mkdir, readFile, rename, rm, writeFile, mkdtemp } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile, mkdtemp } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -54,6 +54,51 @@ export async function install(home) {
   return layout;
 }
 
+// Prepare the entire bundle before touching the running installation. Keep the
+// replaced files outside watched mod/layout folders and restore them on failure.
+export async function reinstall(home) {
+  await mkdir(home, { recursive: true });
+  const stage = await mkdtemp(join(home, '.devkits-reinstall-'));
+  const changes = [];
+  let backup;
+  try {
+    const keys = await readFile(join(home, 'keys.json')).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (keys !== null) await writeFile(join(stage, 'keys.json'), keys);
+    await install(stage);
+    const paths = [];
+    for (const folder of ['mods', 'themes', 'layouts'])
+      for (const name of await readdir(join(stage, folder))) paths.push(join(folder, name));
+    if (keys === null || !keys.equals(await readFile(join(stage, 'keys.json')))) paths.push('keys.json');
+    await mkdir(join(home, 'backups'), { recursive: true });
+    backup = await mkdtemp(join(home, 'backups', 'devkits-'));
+    for (const path of paths) {
+      const target = join(home, path), saved = join(backup, path);
+      await mkdir(dirname(saved), { recursive: true });
+      await mkdir(dirname(target), { recursive: true });
+      const change = { target, saved, replaced: false, written: false };
+      changes.push(change);
+      try { await rename(target, saved); change.replaced = true; }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      await rename(join(stage, path), target);
+      change.written = true;
+    }
+  } catch (error) {
+    const failures = [];
+    for (const change of changes.reverse()) {
+      try {
+        if (change.written) await rm(change.target, { recursive: true, force: true });
+        if (change.replaced) await rename(change.saved, change.target);
+      } catch (failure) { failures.push(failure); }
+    }
+    if (failures.length) throw new AggregateError([error, ...failures], `Reinstall failed; recovery files: ${backup}`);
+    throw error;
+  } finally { await rm(stage, { recursive: true, force: true }); }
+  return { layout: join(home, 'layouts', 'devkits.json'), backup };
+}
+
 // F5 runs the project command; Cmd+N repeats its last agent. Preserve existing layout overrides and other keys.
 export const KEYS = { 'layout:devkits': { f5: 'devkits.run', 'cmd-n': 'devkits.new-thread', 'cmd-w': 'devkits.close-file' } };
 async function bindKeys(path) {
@@ -68,6 +113,13 @@ async function bindKeys(path) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const home = process.env.HERDR_APP_HOME || join(homedir(), '.config', 'herdr-app');
-  try { console.log(`Installed ${await install(home)}\nSelect the Devkits layout in Herdr, or run: herdr-app do layout.switch --name devkits`); }
+  try {
+    const args = process.argv.slice(2);
+    if (args.some(arg => arg !== '--reinstall')) throw new Error('Usage: node herdr/install.js [--reinstall]');
+    if (args.includes('--reinstall')) {
+      const result = await reinstall(home);
+      console.log(`Reinstalled ${result.layout}\nBackup: ${result.backup}\nHerdr reloads the updated files automatically.`);
+    } else console.log(`Installed ${await install(home)}\nSelect the Devkits layout in Herdr, or run: herdr-app do layout.switch --name devkits`);
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
