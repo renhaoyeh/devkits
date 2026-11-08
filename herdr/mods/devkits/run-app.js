@@ -10,11 +10,24 @@ import { glyph } from './components/icon.js';
 // panel, else the first booted one. The command names its project tab and runs in a login shell
 // as in the user's terminals, which stays open afterwards for the output.
 const RUNS = 'devkits.run-commands';
+const RECENT_RUNS = 'devkits.run-history';
+const RECENT_LIMIT = 10;
 const RUN_SHELL = '"${SHELL:-/bin/zsh}" -lic "$1"; exec "${SHELL:-/bin/zsh}" -l';
 const MENU_WIDTH = 320;
 
 export const savedRun = folder => (folder && shared(RUNS)?.[folder]) || null;
 const shownProject = () => spaces().find(s => s.active);
+
+function recentRuns(folder) {
+  const history = shared(RECENT_RUNS)?.[folder];
+  const commands = Array.isArray(history) ? history : [savedRun(folder)];
+  return [...new Set(commands.filter(command => typeof command === 'string' && command.trim()))].slice(0, RECENT_LIMIT);
+}
+
+function rememberRun(folder, command) {
+  setShared(RECENT_RUNS, { ...(shared(RECENT_RUNS) || {}),
+    [folder]: [command, ...recentRuns(folder).filter(recent => recent !== command)].slice(0, RECENT_LIMIT) });
+}
 
 // Match our launch wrapper, including when Herdr prepends its own login shell.
 const isRunTerminal = terminal => {
@@ -61,6 +74,7 @@ export async function runApp() {
   for (const tab of space.tabs.filter(tab => previous.has(tab.id))) run('tab.close', { id: tab.id });
   run('devkits.reveal-conversation');
   run('tab.new', { space: space.id, folder: space.folder, name: command, argv: ['sh', '-c', RUN_SHELL, 'sh', command] });
+  rememberRun(space.folder, template);
 }
 
 // The header's run button, showing the command it runs, and the arrow that opens the run menu.
@@ -84,7 +98,7 @@ function openMenu(_cx, at, space) {
     props: { view: 'run-menu', folder: space.folder, name: space.name } });
 }
 
-// What one project runs: its default, the package.json scripts, and a typed command.
+// Recent commands, package.json scripts, and a typed command for one project.
 export class RunMenu {
   init(cx) {
     this.handle = cx.focus_handle(); this.handle.focus();
@@ -99,26 +113,41 @@ export class RunMenu {
   }
 
   choose(command) {
+    if (this.folder) {
+      rememberRun(this.folder, command);
+      setShared(RUNS, { ...(shared(RUNS) || {}), [this.folder]: command });
+    }
     closeOverlay(props().overlay);
-    if (this.folder) setShared(RUNS, { ...(shared(RUNS) || {}), [this.folder]: command });
+  }
+
+  removeRecent(command) {
+    setShared(RECENT_RUNS, { ...(shared(RECENT_RUNS) || {}),
+      [this.folder]: recentRuns(this.folder).filter(recent => recent !== command) });
   }
 
   render(t) {
-    const saved = savedRun(this.folder), scripts = this.scripts ?? [];
+    const saved = savedRun(this.folder), recent = recentRuns(this.folder), scripts = this.scripts ?? [];
+    const recentHeight = Math.min(160, recent.length * 32);
     const listHeight = Math.min(240, scripts.length * 32);
     const message = this.scripts == null ? 'Loading…' : !scripts.length ? 'No package.json scripts' : null;
-    const height = 10 + (saved ? 28 + 32 + 9 : 0) + 28 + (message ? 30 : 0) + listHeight + 9 + 28 + 36;
+    const height = 10 + 28 + (recent.length ? recentHeight : 30) + 9 + 28 + (message ? 30 : 0) + listHeight + 9 + 28 + 36;
     const row = (id, command) => DropdownMenuItem(id, t).on_click(() => this.choose(command))
       .child(div().flex_1().min_w(0).truncate().child(command))
       .when(saved === command, el => el.child(glyph('check')));
     return DropdownMenuContent('run-commands', height, t)
       .track_focus(this.handle)
       .on_key_down(event => { if (event.key === 'escape') closeOverlay(props().overlay); })
-      // The default stands apart above the scripts, which keep package.json's order.
-      .when(Boolean(saved), el => el
-        .child(DropdownMenuLabel(t).child('DEFAULT'))
-        .child(row('run-default', saved))
-        .child(DropdownMenuSeparator(t)))
+      .child(DropdownMenuLabel(t).child('RECENT'))
+      .when(!recent.length, el => el.child(div().px(8).py(6).text_size(12).text_color(t.muted).child('No recent commands')))
+      .when(recent.length > 0, el => el
+        .child(v_flex().id('run-recent-list').h(recentHeight).flex_none().overflow_y_scrollbar()
+          .when(recent.length * 32 > recentHeight, el => el.pr(12))
+          .children(recent.map((command, i) => row(`run-recent-${i}`, command)
+            .child(Button(`remove-run-recent-${i}`, t, { variant: 'row', size: 'icon-sm' }).size(24)
+              .accessibility_label(`Remove ${command} from recent commands`)
+              .on_click((_event, cx) => { cx.stop_propagation(); this.removeRecent(command); cx.notify(); })
+              .child(glyph('close', 12)))))))
+      .child(DropdownMenuSeparator(t))
       .child(DropdownMenuLabel(t).child('SCRIPTS'))
       .when(Boolean(message), el => el.child(div().px(8).py(6).text_size(12).text_color(t.muted).child(message)))
       .when(scripts.length > 0, el => el
