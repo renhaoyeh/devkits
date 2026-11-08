@@ -1169,6 +1169,48 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
   assert.equal(discovered, found + 1);
   assert.deepEqual(calls.at(-1), ['codex', 'work', 'claude', 'devkits-claude-me']);
 });
+test('the Usage master switch hides the section and pauses reads while preserving account choices', async () => {
+  const ui = fakeElements(), reads = [], tasks = [];
+  const memory = { 'devkits.hidden-usage-profiles': ['work'], 'devkits.launcher-order': ['agent:work', 'agent:codex'],
+    'devkits.usage-cache': { codex: { key: 'codex', checkedAt: Date.now(), windows: [] } } };
+  const View = await viewFor({ ...ui, spaces: () => projects,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    exec: async (...args) => { reads.push(args); return { code: 0, stdout: '[]' }; } });
+  const cx = { ...renderContext, spawn(task) { tasks.push(task(cx)); } }, view = new View();
+  let discoveries = 0;
+  view.cachedAgents = async () => { discoveries++; return [{ key: 'codex', name: 'Codex', run: ['codex'], installed: true }]; };
+  view.usageProfilesPage([], {});
+  assert.equal(ui.nodes.get('usage-visible').checked, true);
+  ui.nodes.get('usage-visible').change(false, cx);
+  ui.nodes.clear(); view.accountUsage({}); view.refreshUsage(cx, true, true);
+  assert.ok(!ui.nodes.has('account-usage'));
+  assert.equal(discoveries, 0); assert.equal(reads.length, 0);
+  const reloaded = new View(); reloaded.usageProfilesPage([], {});
+  assert.equal(ui.nodes.get('usage-visible').checked, false);
+  ui.nodes.get('usage-visible').change(true, cx);
+  view.refreshUsage(cx, false); await Promise.all(tasks.splice(0));
+  view.accountUsage({});
+  assert.ok(ui.nodes.has('account-usage') && ui.nodes.has('usage-agent:codex'));
+  assert.equal(discoveries, 1); assert.equal(reads.length, 0, 'Enabling reuses the fresh quota cache');
+  assert.deepEqual(memory['devkits.hidden-usage-profiles'], ['work']);
+  assert.deepEqual(memory['devkits.launcher-order'], ['agent:work', 'agent:codex']);
+  assert.ok(memory['devkits.usage-cache'].codex);
+});
+
+test('disabling Usage during account discovery prevents a subsequent provider query', async () => {
+  const ui = fakeElements(), tasks = [], memory = {}, reads = [];
+  const View = await viewFor({ ...ui, shared: key => memory[key],
+    exec: async (...args) => { reads.push(args); return { code: 0, stdout: '[]' }; } });
+  const view = new View(), cx = { ...renderContext, spawn(task) { tasks.push(task(cx)); } };
+  let finish;
+  view.cachedAgents = () => new Promise(resolve => { finish = resolve; });
+  view.refreshUsage(cx);
+  memory['devkits.usage-visible'] = false;
+  finish([{ key: 'codex', name: 'Codex', run: ['codex'] }]);
+  await Promise.all(tasks);
+  assert.equal(reads.length, 0); assert.equal(view.usageLoading, false);
+});
+
 test('remote usage never queries local credentials or shows local account entries', async () => {
   let pending;
   const View = await viewFor({ spaces: () => [{ ...projects[0], machine: 'remote' }],
@@ -3007,7 +3049,7 @@ test('Tasks opens from the visible bottom status bar without creating a terminal
   const view = new View(); view.statusBar({});
   assert.ok(ui.nodes.has('open-tasks'));
   const order = [...ui.nodes.keys()];
-  assert.ok(order.indexOf('open-tasks') > order.indexOf('open-files'));
+  assert.ok(order.indexOf('open-tasks') < order.indexOf('open-files'));
   assert.ok(order.indexOf('open-tasks') > order.indexOf('settings'));
   assert.ok(ui.textOf('open-tasks').includes('Tasks'));
   ui.nodes.get('open-tasks').click();
