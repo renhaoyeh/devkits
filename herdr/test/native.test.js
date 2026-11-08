@@ -635,7 +635,7 @@ test('Storage details groups partitions by physical disk and keeps shared or unk
   assert.ok(ui.textOf('hardware-storage-System').includes('APFS · Shares pool capacity'));
 });
 
-test('Overview controls persist independent storage, I/O and temperature selections and measure every expanded card', async () => {
+test('Settings controls persist independent storage, I/O and temperature selections and measure every expanded card', async () => {
   const ui = fakeElements(), memory = { 'devkits.system-monitor': { visible: { cpu: false, ram: false, gpu: false, storage: true, disk: false, sensors: false } } };
   const View = await systemViewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(), monitor = view.systemMonitor;
@@ -645,8 +645,15 @@ test('Overview controls persist independent storage, I/O and temperature selecti
       volumes: [volume('volume:c', 'C:', true), volume('volume:d', 'D:', false)] },
     diskIO: [{ id: 'drive:a', model: 'Drive A', device: 'disk0', total: 10000, supported: true, rates: { read: 2048, write: 1024 } }],
     sensors: [{ name: 'CPU temperature', type: 'Temperature', value: 70 }, { name: 'GPU temperature', type: 'Temperature', value: 45 }] };
+  monitor.hardwarePage = 'settings';
   monitor.renderDetails({});
-  assert.ok(ui.nodes.has('hardware-overview-display'));
+  assert.ok(ui.nodes.has('hardware-display-settings'));
+  assert.ok(ui.nodes.get('hardware-monitoring-settings').children.includes(ui.nodes.get('hardware-display-settings').element),
+    'Display controls appear directly in the Settings right column');
+  assert.ok(ui.textOf('hardware-display-settings').includes('Storage volumes'));
+  assert.ok(ui.textOf('hardware-display-settings').includes('Disk activity'));
+  assert.ok(ui.textOf('hardware-display-settings').includes('Temperatures'));
+  assert.ok(!ui.nodes.has('hardware-choose-overview'));
   assert.ok(ui.nodes.has('hardware-disk-combined'));
   assert.ok(ui.nodes.has('hardware-display-temperature-gpu'));
   assert.equal(ui.nodes.get('hardware-display-volume:c').checked, true);
@@ -683,7 +690,7 @@ test('Overview controls persist independent storage, I/O and temperature selecti
   ui.nodes.get('hardware-storage-system-default').click({}, renderContext);
   assert.equal(memory['devkits.system-monitor'].storageVolumes, null);
   assert.equal(memory['devkits.system-monitor'].visible.storage, true);
-  for (const page of ['storage', 'disk', 'sensors']) {
+  for (const page of ['overview', 'storage', 'disk', 'sensors']) {
     monitor.hardwarePage = page;
     ui.nodes.clear(); monitor.renderDetails({});
     assert.ok(!ui.nodes.has('hardware-display-volume:c'));
@@ -691,13 +698,11 @@ test('Overview controls persist independent storage, I/O and temperature selecti
     assert.ok(!ui.nodes.has('hardware-display-temperature-cpu'));
   }
   monitor.hardwarePage = 'settings';
-  ui.nodes.clear(); monitor.renderDetails({});
-  ui.nodes.get('hardware-choose-overview').click({}, renderContext);
   monitor.hardware = null;
   memory['devkits.system-monitor'].visible = Object.fromEntries(['cpu', 'ram', 'gpu', 'storage', 'network', 'disk', 'battery', 'sensors'].map(id => [id, false]));
   ui.nodes.clear(); monitor.renderDetails({});
-  assert.equal(monitor.hardwarePage, 'overview');
-  assert.ok(ui.nodes.has('hardware-overview-display'), 'Choices remain reachable with no readings and every widget hidden');
+  assert.equal(monitor.hardwarePage, 'settings');
+  assert.ok(ui.nodes.has('hardware-display-settings'), 'Choices remain reachable with no readings and every widget hidden');
   assert.ok(ui.nodes.has('hardware-disk-combined'));
   assert.ok(ui.nodes.has('hardware-display-temperature-cpu'));
 });
