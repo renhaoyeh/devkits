@@ -3247,6 +3247,53 @@ async function taskBoardFor(records = {}) {
   return { ui, view, project, projects, runtime, memory, key, cx, render, dialogs, launches, Board };
 }
 
+test('task details create subtasks in a separate composer and navigate between parent and child tasks', async () => {
+  const parent = { gid: 'local:parent', source: 'local', name: 'Ship release', status: 'todo' };
+  const child = { gid: 'local:child', source: 'local', name: 'Add tests', status: 'todo', parentId: parent.gid };
+  const done = { gid: 'local:done', source: 'local', name: 'Review changes', status: 'done', parentId: parent.gid };
+  const board = await taskBoardFor({ [parent.gid]: parent, [child.gid]: child, [done.gid]: done });
+  board.view.selected = parent.gid; board.render();
+  assert.ok(board.ui.textOf('board-subtasks').includes('1/2'));
+  assert.ok(board.ui.textOf(`board-card-${parent.gid}`).includes('1/2'));
+  const before = structuredClone(board.memory['devkits.agent-board']);
+  board.ui.nodes.get('board-add-subtask').click({}, board.cx);
+  assert.equal(board.dialogs.length, 1); assert.equal(board.dialogs[0][4].gid, parent.gid);
+  assert.equal(board.view.selected, parent.gid); assert.deepEqual(board.memory['devkits.agent-board'], before);
+  board.ui.nodes.get(`board-subtask-${child.gid}`).click({}, board.cx); board.render();
+  assert.equal(board.view.selected, child.gid); assert.ok(board.ui.textOf('board-parent-task').includes(parent.name));
+  assert.ok(board.ui.nodes.has('board-task-title'), 'the child has its own ordinary editable detail');
+  board.ui.nodes.get('board-add-subtask').click({}, board.cx);
+  assert.equal(board.dialogs[1][4].gid, child.gid, 'children may have their own subtasks');
+  board.ui.nodes.get('board-parent-task').click({}, board.cx); board.render();
+  assert.equal(board.view.selected, parent.gid);
+});
+
+test('subtask navigation includes archived children and rechecks stale Add subtask actions', async () => {
+  const parent = { gid: 'p', source: 'local', name: 'Parent', status: 'doing' };
+  const child = { gid: 'c', source: 'local', name: 'Archived child', status: 'done', parentId: 'p', archived: true };
+  const board = await taskBoardFor({ p: parent, c: child });
+  board.view.selected = parent.gid; board.render();
+  const add = board.ui.nodes.get('board-add-subtask').click;
+  board.ui.nodes.get('board-subtask-c').click({}, board.cx); board.render();
+  assert.equal(board.view.archived, true); assert.equal(board.view.selected, 'c');
+  assert.equal(board.ui.nodes.has('board-add-subtask'), false);
+  board.ui.nodes.get('board-parent-task').click({}, board.cx); board.render();
+  assert.equal(board.view.archived, false); assert.equal(board.view.selected, 'p');
+  board.memory['devkits.agent-board'][board.key].p.archived = true;
+  add({}, board.cx); board.render();
+  assert.equal(board.dialogs.length, 0); assert.ok(board.ui.nodes.has('board-related-error'));
+});
+
+test('deleting a parent from Tasks retains its children as independent cards', async () => {
+  const board = await taskBoardFor({ p: { gid: 'p', source: 'local', name: 'Parent', status: 'todo' },
+    c: { gid: 'c', source: 'local', name: 'Child', notes: 'Keep me', status: 'todo', parentId: 'p' } });
+  board.view.selected = 'p'; board.render();
+  board.ui.nodes.get('board-delete-task').click({}, board.cx); board.render();
+  assert.equal(board.ui.nodes.has('board-card-p'), false); assert.ok(board.ui.nodes.has('board-card-c'));
+  assert.equal(board.memory['devkits.agent-board'][board.key].c.parentId, null);
+  assert.equal(board.memory['devkits.agent-board'][board.key].c.notes, 'Keep me');
+});
+
 test('Todo details edit title, empty descriptions and assignment in place with automatic persistence', async () => {
   const task = { gid: 'local:edit', source: 'local', name: 'Original', notes: 'Old description', status: 'todo' };
   const board = await taskBoardFor({ [task.gid]: task });

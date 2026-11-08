@@ -147,6 +147,7 @@ export function taskPrompt(task) {
     return `- ${comment.author}${comment.at ? ` (${comment.at.slice(0, 10)})` : ''}: ${text.replace(/\s*\n\s*/g, ' ')}`;
   });
   return [`Work on this ${name}task: ${task.name}`, source.url,
+    task.parentTask?.name && `Parent task: ${task.parentTask.name}`,
     source.parent && [`It is a subtask of: ${source.parent.name}`, source.parent.url].filter(Boolean).join('\n'),
     notes && `Description:\n${task.source === 'local' ? notes : clip(notes)}`,
     comments.length && `Latest comments${stories.length > comments.length ? ` (${comments.length} of ${stories.length})` : ''}:\n${comments.join('\n')}`,
