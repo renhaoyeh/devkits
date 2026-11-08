@@ -3429,6 +3429,35 @@ test('card dragging changes manual task progress, suppresses the click and never
   assert.deepEqual(board.dialogs, []); assert.deepEqual(board.launches, []);
 });
 
+test('opening a task finishes its pending drag before stopping the click release', async () => {
+  const board = await taskBoardFor({ a: { gid: 'a', source: 'local', name: 'A', status: 'todo' } });
+  const { ui, view, cx } = board;
+  ui.nodes.get('board-card-a').mouseDown({ position: { x: 0, y: 0 } }, cx);
+  assert.equal(view.drag.active, false);
+  // A stopped card click must clean up without relying on ancestor release handlers.
+  ui.nodes.get('board-card-a').click({}, cx); board.render();
+  assert.equal(view.selected, 'a'); assert.equal(view.drag, null);
+  ui.nodes.get('board-lane-doing').mouseMove({ position: { x: 20, y: 0 } }, cx);
+  assert.equal(view.drag, null); assert.equal(view.dropStatus, null);
+  ui.nodes.get('agent-board-columns').click({}, cx); board.render();
+  assert.equal(view.selected, null); assert.ok(!ui.nodes.has('board-detail'));
+});
+
+test('a drag released on another card finishes before its click without changing selection', async () => {
+  const board = await taskBoardFor({
+    a: { gid: 'a', source: 'local', name: 'A', status: 'todo' },
+    b: { gid: 'b', source: 'local', name: 'B', status: 'done' },
+  });
+  const { ui, view, cx } = board;
+  ui.nodes.get('board-card-a').click({}, cx); board.render();
+  ui.nodes.get('board-card-a').mouseDown({ position: { x: 0, y: 0 } }, cx);
+  ui.nodes.get('board-lane-done').mouseMove({ position: { x: 20, y: 0 } }, cx);
+  ui.nodes.get('board-card-b').click({}, cx); board.render();
+  assert.equal(board.memory['devkits.agent-board'][board.key].a.status, 'done');
+  assert.equal(view.drag, null); assert.equal(view.dropStatus, null);
+  assert.equal(view.suppressClick, null); assert.equal(view.selected, 'a');
+});
+
 test('dragging respects movement thresholds, cancellation and live state at release', async () => {
   const task = { gid: 'local:drag', source: 'local', name: 'Drag me', status: 'todo' };
   const board = await taskBoardFor({ [task.gid]: task });
@@ -3746,6 +3775,49 @@ test('reselecting the current Tasks card keeps its preview and output; another t
   board.ui.nodes.get('board-close-detail').click({}, board.cx); board.render();
   board.ui.nodes.get('board-card-a').click({}, board.cx);
   assert.deepEqual(reads, ['a', 'a', 'b', 'a', 'a']);
+});
+
+test('clicking empty Tasks board space closes details in active and archived views and preserves saved edits', async () => {
+  for (const archived of [false, true]) {
+    const board = await taskBoardFor({ a: { gid: 'a', source: 'local', name: 'A', status: 'todo', notes: 'Description', archived } });
+    board.view.archived = archived; board.render();
+    const reads = []; board.view.loadOutput = task => reads.push(task.gid);
+    board.ui.nodes.get('board-card-a').click({}, board.cx); board.render();
+    if (!archived) board.view.description.edit('Saved changes');
+    board.ui.nodes.get('agent-board-columns').click({}, board.cx); board.render();
+    assert.equal(board.view.selected, null); assert.equal(board.view.currentTask, null);
+    assert.equal(board.view.selection, null);
+    assert.ok(!board.ui.nodes.has('board-detail') && !board.ui.nodes.has('board-detail-split'));
+    assert.equal(board.memory['devkits.agent-board'][board.key].a.notes, archived ? 'Description' : 'Saved changes');
+    board.ui.nodes.get('board-card-a').click({}, board.cx); board.render();
+    assert.equal(board.view.selected, 'a'); assert.ok(board.ui.nodes.has('board-detail'));
+    assert.deepEqual(reads, ['a', 'a']);
+  }
+});
+
+test('Tasks card and creation clicks stay inside their controls and drag releases do not dismiss details', async () => {
+  const board = await taskBoardFor({ a: { gid: 'a', source: 'local', name: 'A', status: 'todo' } });
+  let stopped = false;
+  const cx = { ...board.cx, stop_propagation() { stopped = true; } };
+  const click = id => {
+    stopped = false;
+    board.ui.nodes.get(id).click({}, cx);
+    if (!stopped) board.ui.nodes.get('agent-board-columns').click({}, cx);
+  };
+  click('board-card-a'); board.render();
+  assert.equal(board.view.selected, 'a'); assert.ok(board.ui.nodes.has('board-detail'));
+  click('board-card-a');
+  assert.equal(board.view.selected, 'a');
+  click('board-add-todo');
+  assert.equal(board.view.selected, 'a'); assert.equal(board.dialogs.length, 1);
+  board.ui.nodes.get('board-card-a').mouseDown({ position: { x: 10, y: 10 } }, cx);
+  board.view.dragOver('done', { position: { x: 350, y: 10 } }, cx);
+  board.view.drop(board.project, 'done', cx);
+  board.ui.nodes.get('agent-board-columns').click({}, cx); board.render();
+  assert.equal(board.view.selected, 'a'); assert.ok(board.ui.nodes.has('board-detail'));
+  assert.equal(board.memory['devkits.agent-board'][board.key].a.status, 'done');
+  board.ui.nodes.get('agent-board-columns').click({}, cx); board.render();
+  assert.equal(board.view.selected, null); assert.ok(!board.ui.nodes.has('board-detail'));
 });
 
 test('Tasks deduplicates pending and loaded external detail reads while allowing failed reads to retry', async () => {
