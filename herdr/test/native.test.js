@@ -262,7 +262,12 @@ test('system monitor opens from each summary and refreshes hardware details whil
   assert.ok(ui.textOf('hardware-detail-cpu').includes('20%'));
   view.systemDisplay.renderSidebar({});
   assert.ok(ui.textOf('system-disk-value').includes('500 GB'));
-  assert.ok(ui.textOf('system-disk-subtitle').includes('R 1.0 KB/s   W 2.0 KB/s'));
+  assert.ok(ui.textOf('system-disk-subtitle').join(' ').includes('R1K/s W2K/s'));
+  for (const id of ['network', 'disk']) {
+    assert.equal(ui.nodes.get(`system-${id}-sparkline`).width, 116);
+    assert.equal(ui.nodes.get(`system-${id}-sparkline`).height, 12);
+    assert.ok(ui.nodes.has(`system-chart-${id}`));
+  }
   for (const id of ['system-cpu', 'system-gpu', 'system-ram', 'system-disk', 'system-network', 'open-hardware-details']) ui.nodes.get(id).click();
   assert.ok(opened.every(spec => spec.props.view === 'details'));
   assert.ok(opened.every(spec => spec.width === 0.9), 'The monitor uses the window width rather than a fixed narrow dialog');
@@ -306,13 +311,14 @@ test('monitor settings persist module choices, order, interval, style and select
   assert.equal(memory['devkits.system-monitor'].interval, 10);
   assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
   assert.equal(memory['devkits.system-monitor'].order[3], 'battery');
-  assert.ok(ui.textOf('system-disk').some(text => text.includes('R 1.0 KB/s') && text.includes('W 2.0 KB/s')));
-  assert.ok(ui.textOf('system-disk').includes('Disk I/O · APPLE SSD AP0512Z'));
+  assert.ok(ui.textOf('system-disk-subtitle').join(' ').includes('R1K/s W2K/s'));
+  assert.ok(ui.textOf('system-disk').includes('Disk I/O'));
+  assert.ok(ui.textOf('system-disk-model').includes('APPLE SSD AP0512Z'));
   reloaded.systemMonitor.hardwareModuleDetails('disk', {});
   assert.ok(ui.textOf('hardware-module-disk').includes('APPLE SSD AP0512Z'));
   assert.ok(ui.textOf('system-gpu-value').includes('24 GB unified'));
   assert.ok(ui.textOf('system-gpu-model').includes('Apple M4'));
-  assert.ok(ui.textOf('system-gpu-subtitle').includes('Usage'));
+  assert.ok(ui.textOf('system-gpu-subtitle').includes('1.0 GB used'));
   assert.ok(ui.textOf('system-ram').includes('RAM · LPDDR5'));
   assert.ok(ui.textOf('system-ram-subtitle').includes('12.0 GB used'));
   assert.ok(ui.textOf('system-ram-model').includes('Micron · MT-24G · 5600 MHz'));
@@ -594,6 +600,12 @@ test('CPU detail renders Task Manager style processor histories, P/E groups and 
   assert.ok(ui.textOf('hardware-module-sensors').includes('65.0 °C'));
   assert.ok(ui.textOf('hardware-module-sensors').includes('Fixture provider'));
   assert.ok(ui.textOf('hardware-module-sensors').includes('Temperature points measure thermal zones. They do not correspond one-to-one with CPU cores.'));
+  view.systemMonitor.hardware.platform = 'win32';
+  view.systemMonitor.hardware.sensors = [{ id: 'nvidia:gpu', name: 'GPU temperature', type: 'Temperature', value: 47, unit: '°C', source: 'NVIDIA driver' }];
+  ui.nodes.clear(); view.render(renderContext);
+  assert.ok(ui.textOf('hardware-sensor-availability-cpu').includes('Unavailable'));
+  assert.ok(ui.textOf('hardware-sensor-availability-gpu').includes('47.0 °C'));
+  assert.ok(ui.textOf('hardware-module-sensors').some(text => text.includes('LibreHardwareMonitor WMI provider')));
 });
 
 test('opening a monitor reuses warm data without requesting a repaint during initialization', async t => {
