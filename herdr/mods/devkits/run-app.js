@@ -66,8 +66,8 @@ export async function runApp() {
 // The header's run button, showing the command it runs, and the arrow that opens the run menu.
 export function RunControls(t) {
   const space = shownProject(), saved = savedRun(space?.folder), local = Boolean(space?.folder) && !space?.machine;
-  return h_flex().h_full().flex_none().items_center()
-    .child(Button('run-project', t, { variant: 'ghost' }).h_full().px(10).gap(6).rounded(0).max_w(280)
+  return h_flex().h_full().min_w(0).max_w('100%').items_center()
+    .child(Button('run-project', t, { variant: 'ghost' }).flex_shrink(1).min_w(0).h_full().px(10).gap(6).rounded(0).max_w(280)
       .accessibility_label('Run').tooltip(saved ? `Run ${saved} (F5)` : 'Choose what this project runs')
       .when(!local, el => el.opacity(0.5))
       .on_click((_event, cx) => { if (saved) runApp(); else openMenu(cx, undefined, space); })

@@ -402,7 +402,7 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   menu.render(cx); ui.nodes.get('system-display-sidebar').click({}, cx);
   target = {}; ui.nodes.clear(); view.render(cx); view.statusBar({});
   assert.ok(!ui.nodes.has('system-usage'));
-  for (const id of ['devkits-status', 'status-actions', 'status-workspace-actions', 'open-calendar', 'settings'])
+  for (const id of ['devkits-status', 'status-actions', 'status-workspace-actions', 'open-calendar'])
     assert.equal(ui.nodes.get(id).mouseDownByButton?.right, undefined, `${id} must not open SYSTEM's menu`);
   ui.nodes.get('status-system').mouseDownByButton.right({ position: { x: 400, y: 700 } }, cx);
   assert.equal(opened.at(-1).props.view, 'system-display-menu');
@@ -2838,11 +2838,12 @@ test('the header shows the branch beside the project; the status bar names only 
     settings: () => ({ zoom: 1 }), layout: () => ({ children: [] }), run: (...args) => commands.push(args) });
   new View().render();
   assert.ok(ui.texts.includes('feature/login'));
-  assert.ok(!ui.nodes.has('settings'));
-  target = { view: 'status' }; ui.texts.length = 0;
-  new View().render();
   ui.nodes.get('settings').click();
   assert.deepEqual(commands, [['app.settings']]);
+  assert.equal(ui.nodes.get('settings').mouseDownByButton?.right, undefined);
+  target = { view: 'status' }; ui.texts.length = 0; ui.nodes.clear();
+  new View().render();
+  assert.ok(!ui.nodes.has('settings'));
   assert.ok(!ui.texts.includes('Local project') && !ui.texts.includes('feature/login'));
   machine = 'vps'; new View().render();
   assert.ok(ui.texts.includes('vps'));
@@ -3233,7 +3234,7 @@ test('Tasks opens from the visible bottom status bar without creating a terminal
   assert.ok(ui.nodes.has('open-tasks'));
   const order = [...ui.nodes.keys()];
   assert.ok(order.indexOf('open-tasks') < order.indexOf('open-files'));
-  assert.ok(order.indexOf('open-tasks') > order.indexOf('settings'));
+  assert.ok(order.indexOf('open-tasks') > order.indexOf('open-calendar'));
   assert.ok(ui.textOf('open-tasks').includes('Tasks'));
   ui.nodes.get('open-tasks').click();
   assert.equal(memory['devkits.board-project'], 'api');
