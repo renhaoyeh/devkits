@@ -224,8 +224,8 @@ test('monitor settings persist module choices, order, interval, style and select
   assert.ok(ui.textOf('hardware-module-gpu').includes('Unified · shared with CPU'));
   reloaded.hardwareSettings({});
   for (const id of Object.keys(memory['devkits.system-monitor'].visible)) ui.nodes.get(`hardware-visible-${id}`).change(false, cx);
-  ui.nodes.clear(); reloaded.systemUsage({});
-  assert.ok(ui.nodes.has('open-hardware-settings') && ui.nodes.has('open-hardware-details'));
+  ui.nodes.clear(); reloaded.systemUsage({}); reloaded.statusBar({});
+  assert.ok(ui.nodes.has('system-monitor-settings') && ui.nodes.has('open-hardware-details'));
   assert.ok(!ui.nodes.has('system-cpu') && !ui.nodes.has('system-battery'));
   reloaded.hardwareSettings({}); ui.nodes.get('hardware-visible-battery').change(true, cx);
   reloaded.hardware = { ...reloaded.hardware, battery: null };
@@ -233,6 +233,75 @@ test('monitor settings persist module choices, order, interval, style and select
   assert.ok(!ui.nodes.has('system-battery'));
   reloaded.hardwareSettings({});
   assert.ok(ui.textOf('hardware-setting-row-battery').includes('No battery detected · appears when available'));
+});
+
+test('status monitor refreshes compact selected metrics and keeps its own settings reachable', async () => {
+  const ui = fakeElements(), opened = [], ticks = [], tasks = [];
+  const memory = { 'devkits.system-monitor': { placement: 'sidebar', order: ['ram', 'cpu', 'disk', 'network'], visible: { gpu: false } } };
+  const View = await viewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'status' }),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    openOverlay: spec => opened.push(spec), exec: async () => ({ code: 0, stdout: JSON.stringify({ cpu: 25,
+      memory: { total: 32 * 1024 ** 3, used: 8 * 1024 ** 3, percent: 25 },
+      disk: { rates: { read: 1024 ** 2, write: 2048 } }, network: { rates: { received: 4096, sent: 0 } } }) }) });
+  const view = new View(), cx = { ...renderContext, timer: { every: (ms, tick) => ticks.push([ms, tick]) },
+    spawn: task => tasks.push(task(cx)) };
+  view.init({}, cx);
+  assert.equal(tasks.length, 0, 'The status view does not start an extra hardware reader while monitoring is in the sidebar');
+  view.hardwareSettings({}); ui.nodes.get('hardware-placement-status').change(true, cx);
+  ui.nodes.clear(); ticks[0][1](cx); await Promise.all(tasks.splice(0)); view.render(cx); view.systemUsage({});
+  assert.deepEqual(ticks.map(([ms]) => ms), [1000]);
+  assert.ok(!ui.nodes.has('system-usage') && !ui.nodes.has('status-system-gpu'));
+  assert.deepEqual(ui.textOf('status-system-ram'), ['RAM', '25%']);
+  assert.deepEqual(ui.textOf('status-system-disk'), ['I/O', 'R1M/s W2K/s']);
+  assert.deepEqual(ui.textOf('status-system-network'), ['↓4K/s ↑0B/s']);
+  const ids = [...ui.nodes.keys()].filter(id => id.startsWith('status-system-'));
+  assert.deepEqual(ids, ['status-system-ram', 'status-system-cpu', 'status-system-disk', 'status-system-network']);
+  ui.nodes.get('status-system-ram').click(); ui.nodes.get('system-monitor-settings').click();
+  assert.deepEqual(opened.map(spec => spec.props.page), ['ram', 'settings']);
+  view.hardwareSettings({});
+  for (const id of ['ram', 'cpu', 'disk', 'network', 'battery']) ui.nodes.get(`hardware-visible-${id}`).change(false, cx);
+  ui.nodes.clear(); view.render(cx);
+  assert.ok(ui.nodes.has('system-monitor-settings'));
+  assert.equal([...ui.nodes.keys()].filter(id => id.startsWith('status-system-')).length, 0);
+  view.hardwareSettings({}); ui.nodes.get('hardware-placement-sidebar').change(true, cx);
+  const reloaded = new View(); ui.nodes.clear(); reloaded.systemUsage({}); reloaded.statusBar({});
+  assert.ok(ui.nodes.has('system-usage') && ui.nodes.has('system-monitor-settings'));
+  assert.ok(!ui.nodes.has('status-system-cpu'));
+  ticks[0][1](cx);
+  assert.equal(tasks.length, 0, 'Returning to the sidebar stops status-view polling');
+});
+
+test('sidebar monitor resize follows zoom, saves on release or leave and reserves project space', async () => {
+  const ui = fakeElements(), memory = {}, saved = [];
+  const View = await viewFor({ ...ui, theme: () => ({}), setAgentOrder() {}, run() {},
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; saved.push(key); } });
+  const view = new View(); view.folded = new Set();
+  const cx = { ...renderContext, spawn() {} }, render = () => { ui.nodes.clear(); view.render(cx); };
+  render();
+  ui.nodes.get('devkits-sidebar').sizeChange({ height: 800 }, cx);
+  ui.nodes.get('account-usage').sizeChange({ height: 200 }, cx);
+  render();
+  ui.nodes.get('system-usage-resize').mouseDown({ position: { y: 1000 } }, cx);
+  ui.nodes.get('devkits-sidebar').mouseMove({ position: { y: 800 }, bounds: { height: 1600 } }, cx);
+  assert.equal(memory['devkits.system-monitor'], undefined, 'Moving the divider does not persist every frame');
+  render(); assert.equal(ui.nodes.get('system-usage').height, 340);
+  ui.nodes.get('devkits-sidebar').mouseUp({}, cx);
+  assert.equal(memory['devkits.system-monitor'].sidebarHeight, 340);
+  const reloaded = new View(); reloaded.folded = new Set(); reloaded.render(cx);
+  assert.equal(ui.nodes.get('system-usage').height, 340);
+  render(); ui.nodes.get('system-usage-resize').mouseDown({ position: { y: 800 } }, cx);
+  ui.nodes.get('devkits-sidebar').mouseMove({ position: { y: -1000 }, bounds: { height: 800 } }, cx);
+  render(); assert.equal(ui.nodes.get('system-usage').height, 472, 'Project list keeps 96px beside the quota area and footer');
+  ui.nodes.get('devkits-sidebar').hover(false, cx);
+  assert.equal(memory['devkits.system-monitor'].sidebarHeight, 472);
+  assert.equal(view.hardwareResize, null);
+  render(); ui.nodes.get('devkits-sidebar').sizeChange({ height: 450 }, cx);
+  render(); assert.equal(ui.nodes.get('system-usage').height, 122);
+  assert.equal(memory['devkits.system-monitor'].sidebarHeight, 472, 'A shorter window preserves the preferred height');
+  ui.nodes.get('system-usage-resize').click({ click_count: 2 }, cx);
+  assert.equal(memory['devkits.system-monitor'].sidebarHeight, 240);
+  assert.equal(saved.filter(key => key === 'devkits.system-monitor').length, 3);
+  assert.ok(ui.nodes.get('system-usage-widgets').scrollbar);
 });
 
 test('hardware ordering reuses drag handles, supports keyboard movement and cancels without changing preferences', async () => {
@@ -2598,7 +2667,8 @@ test('Settings is the one place for the rules: a Rules page with icons beside ea
   assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
   assert.ok(['agents', 'claude', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-usage', 'settings-page-system', 'settings-page-claude', 'settings-page-agent-profiles']);
+  assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-usage', 'settings-page-claude', 'settings-page-agent-profiles']);
+  assert.ok(!ui.nodes.has('hardware-settings'), 'System monitoring has its own settings outside agent configuration');
   assert.ok(['assets/icons/terminal.svg', 'assets/icons/book-open.svg', 'icons/claude.svg'].every(icon => ui.assets.some(asset => asset.endsWith(icon))));
 });
 

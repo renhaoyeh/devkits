@@ -6,7 +6,7 @@ import { Checkbox } from './components/checkbox.js';
 import { ToggleGroup, ToggleGroupItem } from './components/toggle-group.js';
 import { DialogContent, DialogTitle, DialogDescription, DialogFooter } from './components/dialog.js';
 import { glyph } from './components/icon.js';
-import { hardwareModules, hardwarePreferences, selectedHardwareCores, hardwareBytes, hardwarePercent, hardwareSpeed, hardwarePower, hardwarePoint, hardwareSensorSummary, appendHardwareHistory, hardwareChartPoints } from './hardware-model.js';
+import { hardwareModules, hardwarePreferences, hardwareSidebarHeight, selectedHardwareCores, hardwareBytes, hardwarePercent, hardwareSpeed, hardwarePower, hardwarePoint, hardwareSensorSummary, appendHardwareHistory, hardwareChartPoints } from './hardware-model.js';
 import { topologyGroups, topologyLabel, processorLabel } from './hardware-topology.js';
 import { moveOption } from './model.js';
 
@@ -26,6 +26,17 @@ const hardwareAvailable = (module, data) => module !== 'battery' || Boolean(data
 const hardwareTitle = id => hardwareModules.find(module => module.id === id)?.name || id;
 const primaryHardwareGPU = data => (data?.gpus || []).reduce((best, gpu) =>
   !best || (gpu.percent ?? -1) > (best.percent ?? -1) ? gpu : best, null);
+const hardwareShortSpeed = value => hardwareSpeed(value).replace(/\.0(?= )/, '').replace(/ ([KMGT])B/, '$1').replace(' B/', 'B/');
+const hardwareStatusValue = (id, data) => {
+  if (!data) return '—';
+  if (id === 'disk') return `R${hardwareShortSpeed(data.disk?.rates?.read)} W${hardwareShortSpeed(data.disk?.rates?.write)}`;
+  if (id === 'network') return `↓${hardwareShortSpeed(data.network?.rates?.received)} ↑${hardwareShortSpeed(data.network?.rates?.sent)}`;
+  if (id === 'sensors') {
+    const summary = hardwareSensorSummary(data), value = summary.cpu ?? summary.gpu ?? summary.ssd;
+    return Number.isFinite(value) ? `${Math.round(value)}°C` : '—';
+  }
+  return hardwarePercent(hardwarePoint(data)[id]);
+};
 const hardwareValue = (id, data) => {
   if (!data) return '—';
   if (id === 'sensors') {
@@ -100,8 +111,10 @@ function hardwareCoreBars(id, data, config, t, height = 24) {
 
 export const hardwareUsage = {
   pollHardware(cx, notify = true) {
+    const config = hardwareConfig(), view = props()?.view;
+    if ((view === 'status' && config.placement !== 'status') || (!view && config.placement !== 'sidebar')) return;
     const cached = hardwareCached();
-    if (cached && cached.sensorCollection === hardwareConfig().visible.sensors && Date.now() - cached.checkedAt < hardwareConfig().interval * 1000) {
+    if (cached && cached.sensorCollection === config.visible.sensors && Date.now() - cached.checkedAt < config.interval * 1000) {
       if (this.hardwareCheckedAt !== cached.checkedAt) {
         this.hardware = cached.data; this.hardwareSample = cached.sample; this.hardwareHistory = cached.history;
         this.hardwareError = cached.error; this.hardwareCheckedAt = cached.checkedAt;
@@ -156,19 +169,55 @@ export const hardwareUsage = {
       props: { view: 'hardware-details', page } });
   },
 
+  hardwareSidebarSize(value = this.hardwareResize?.now ?? hardwareConfig().sidebarHeight) {
+    // Leave room for the project list, account quotas and footer when the window is short.
+    const available = this.hardwareSidebarAvailable === undefined ? 600
+      : this.hardwareSidebarAvailable - (this.hardwareQuotaHeight || 0) - 32 - 96;
+    return hardwareSidebarHeight(value, available);
+  },
+
+  resizeHardwareSidebar(event, cx) {
+    if (!this.hardwareResize) return;
+    const scale = this.hardwareSidebarAvailable && event.bounds?.height ? event.bounds.height / this.hardwareSidebarAvailable : 1;
+    const height = this.hardwareSidebarSize(this.hardwareResize.height + (this.hardwareResize.y - event.position.y) / scale);
+    if (height !== this.hardwareResize.now) { this.hardwareResize.now = height; cx.notify(); }
+  },
+
+  endHardwareResize(cx) {
+    if (!this.hardwareResize) return;
+    const sidebarHeight = this.hardwareSidebarSize();
+    this.hardwareResize = null;
+    this.saveHardwarePreference({ sidebarHeight }, cx);
+  },
+
+  systemStatus(t) {
+    const root = h_flex().id('system-status').flex_1().min_w(0).h_full().items_center().gap(2);
+    const config = hardwareConfig();
+    if (config.placement !== 'status') return root;
+    const data = this.hardware, ids = config.order.filter(id => config.visible[id] && hardwareAvailable(id, data));
+    const labels = { cpu: 'CPU', gpu: 'GPU', ram: 'RAM', disk: 'I/O', network: '', storage: 'Disk', battery: 'BAT', sensors: 'TEMP' };
+    return root.accessibility_label('System monitor')
+      .child(h_flex().id('system-status-metrics').min_w(0).h_full().overflow_x_scroll().items_center()
+        .children(ids.map(id => Button(`status-system-${id}`, t, { variant: 'ghost' }).h_full().px(6).gap(4).text_size(11)
+          .accessibility_label(`${hardwareTitle(id)}: ${hardwareValue(id, data)}. Open details`)
+          .on_click(() => this.openHardware(id))
+          .when(Boolean(labels[id]), el => el.child(div().text_color(t.muted).child(labels[id])))
+          .child(div().font_family('Geist Mono').text_color(t.foreground).child(hardwareStatusValue(id, data))))))
+      .child(div().flex_1());
+  },
+
   systemUsage(t) {
     const data = this.hardware, config = hardwareConfig(), history = this.hardwareHistory || [];
+    if (config.placement !== 'sidebar') return div();
     const colors = hardwareColors(t);
     const ids = config.order.filter(id => config.visible[id] && hardwareAvailable(id, data));
-    return v_flex().id('system-usage').w_full().flex_none().border_t(1).border_color(t.border)
+    return v_flex().id('system-usage').relative().w_full().h(ids.length ? this.hardwareSidebarSize() : 32).min_h(0).flex_none().border_t(1).border_color(t.border)
       .accessibility_label('Current hardware usage of this computer')
       .child(h_flex().h(32).flex_none().pl(12).items_center()
         .child(div().flex_1().text_size(11).font_medium().text_color(t.muted).child('SYSTEM'))
         .child(Button('open-hardware-details', t, { variant: 'ghost', size: 'icon' }).h_full().w(28)
-          .accessibility_label('Open system monitor').on_click(() => this.openHardware()).child(glyph('chart-column')))
-        .child(Button('open-hardware-settings', t, { variant: 'ghost', size: 'icon' }).h_full().w(28)
-          .accessibility_label('Configure system monitor').on_click(() => this.openHardware('settings')).child(glyph('settings'))))
-      .child(v_flex().pb(6).children(ids.map(id => {
+          .accessibility_label('Open system monitor').on_click(() => this.openHardware()).child(glyph('chart-column'))))
+      .child(v_flex().id('system-usage-widgets').flex_1().min_h(0).overflow_y_scrollbar().pb(6).children(ids.map(id => {
         const rates = id === 'disk' || id === 'network';
         const capacityRow = id === 'ram' || id === 'disk' || id === 'gpu';
         const gpu = id === 'gpu' ? primaryHardwareGPU(data) : null;
@@ -194,7 +243,18 @@ export const hardwareUsage = {
             .when(config.style === 'graph', el => el.child(div().w(84).flex_none().child(coreMode ? hardwareCoreBars('system-core-bars', data, config, t, 16)
               : hardwareChart(`system-chart-${id}`, history, id, t, 16))))))
           .when(config.style === 'compact' && coreMode, el => el.child(hardwareCoreBars('system-core-bars', data, config, t, 16)));
-      })));
+      })))
+      .when(ids.length > 0, el => el.child(div().id('system-usage-resize').absolute().top(-3).left(0).right(0).h(6).cursor_row_resize()
+        .accessibility_label('Resize system monitor. Drag the top border; double-click to reset.')
+        .on_mouse_down('left', (event, cx) => {
+          cx.stop_propagation();
+          const height = this.hardwareSidebarSize();
+          this.hardwareResize = { y: event.position.y, height, now: height }; cx.notify();
+        })
+        .on_click((event, cx) => {
+          if (event.click_count < 2) return;
+          this.hardwareResize = null; this.saveHardwarePreference({ sidebarHeight: 240 }, cx);
+        })));
   },
 
   hardwareSettings(t) {
@@ -234,7 +294,7 @@ export const hardwareUsage = {
               } else if (event.key === 'enter' || event.key === 'space') cx.stop_propagation();
             }).child(glyph('grip-vertical')))
           .child(Checkbox(`hardware-visible-${id}`, config.visible[id], t).flex_1().min_w(0)
-            .accessibility_label(`Show ${module.name} in sidebar`).on_change((checked, cx) => this.saveHardwarePreference({ visible: { ...hardwareConfig().visible, [id]: checked } }, cx))
+            .accessibility_label(`Show ${module.name}`).on_change((checked, cx) => this.saveHardwarePreference({ visible: { ...hardwareConfig().visible, [id]: checked } }, cx))
             .child(v_flex().min_w(0).gap(3).py(8)
               .child(div().text_size(12).text_color(t.foreground).child(module.name))
               .child(div().text_size(10).text_color(t.muted).child(id === 'battery' && data && !data.battery ? 'No battery detected · appears when available' : module.description))));
@@ -242,12 +302,15 @@ export const hardwareUsage = {
     const display = v_flex().flex_1().min_w(0).gap(16)
       .child(div().text_size(11).font_medium().text_color(t.muted).child('PRESENTATION'))
       .child(v_flex().flex_none().px(12).border(1).border_color(t.border)
-        .child(choices('style', 'Sidebar style', [['graph', 'History'], ['compact', 'Compact']], config.style, 'style'))
+        .child(choices('placement', 'Show in', [['sidebar', 'Sidebar'], ['status', 'Status bar']], config.placement, 'placement'))
+        .when(config.placement === 'sidebar', el => el
+          .child(choices('style', 'Sidebar style', [['graph', 'History'], ['compact', 'Compact']], config.style, 'style'))
+          .child(choices('cpu-mode', 'Sidebar CPU', [['total', 'Total'], ['cores', 'Per core']], config.cpuMode, 'cpuMode')))
         .child(choices('interval', 'Update every', [[1, '1s'], [3, '3s'], [5, '5s'], [10, '10s']], config.interval, 'interval'))
-        .child(choices('cpu-mode', 'Sidebar CPU', [['total', 'Total'], ['cores', 'Per core']], config.cpuMode, 'cpuMode')))
+        .when(config.placement === 'sidebar', el => el.child(DialogDescription(t).text_size(11).pb(10).child('Drag the monitor’s top border to resize. Double-click to reset.'))))
       .child(v_flex().flex_none().px(12).border(1).border_color(t.border)
         .child(choices('cpu-graph', 'CPU graph', [['total', 'Total'], ['logical', 'Logical'], ['groups', 'P / E']], config.cpuGraph, 'cpuGraph')))
-      .when(config.cpuMode === 'cores' || config.cpuGraph !== 'total', el => el.child(v_flex().flex_none().p(12).gap(10).border(1).border_color(t.border)
+      .when((config.placement === 'sidebar' && config.cpuMode === 'cores') || config.cpuGraph !== 'total', el => el.child(v_flex().flex_none().p(12).gap(10).border(1).border_color(t.border)
         .child(h_flex().gap(8).items_center()
           .child(div().flex_1().text_size(12).child(`${topologyLabel(data?.topology, data?.cores)} · choose which to show`))
           .child(Button('hardware-cores-all', t, { variant: 'ghost' }).h(24).px(6).child('All')
@@ -271,10 +334,10 @@ export const hardwareUsage = {
       })
       .child(v_flex().flex_none().gap(4)
         .child(div().text_size(16).font_semibold().child('System monitor'))
-        .child(DialogDescription(t).child('Choose your sidebar widgets and drag the handles to reorder. Changes save automatically.')))
+        .child(DialogDescription(t).child('Choose what to show and drag the handles to reorder. Changes save automatically.')))
       .child(h_flex().w_full().gap(24).items_start()
         .child(v_flex().flex_1().min_w(0).gap(16)
-          .child(div().text_size(11).font_medium().text_color(t.muted).child('SIDEBAR WIDGETS')).child(widgets))
+          .child(div().text_size(11).font_medium().text_color(t.muted).child('WIDGETS')).child(widgets))
         .child(display));
   },
 
