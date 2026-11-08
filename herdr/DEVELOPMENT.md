@@ -18,6 +18,7 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | Asana and MantisBT source browsers | `mods/devkits-asana/`, `mods/devkits-mantisbt/`; Tasks adapter in `mods/devkits-tasks/task-sources.js` |
 | Tasks data, progress, board, composer and execution | `mods/devkits-tasks/`; public SDK in `mods/devkits/components/tasks.js` |
 | Calendar events, views and task references | `mods/devkits-calendar/` |
+| Quota usage, details and token statistics | `mods/devkits-usage/`; public client in `mods/devkits/components/usage.js` |
 | Shared native UI components | `mods/devkits/components/`; other mods carry copies (`COPIES`, `sync-shared.js`) |
 | iOS Simulator panel | `mods/devkits-simulator/` |
 | Project and thread data transformations | `mods/devkits/model.js` |
@@ -42,6 +43,10 @@ The shell mounts the Tasks board as the `tasks` child of its `editor` stack. `Ta
 
 Calendar runs in `devkits-calendar`, owns its event storage and UI, and uses only the public Tasks index for mentions. Opening a reference requests owner validation and waits for acknowledgement before closing; missing/deleted tasks leave Calendar open with an inline error. Creation dialogs, backdrop dismissal and range cleanup stay inside Calendar. Generic session/project transformations and the scoped Tasks/Calendar palette live in canonical shared components; the shell's old `model.js` and `shell-command.js` paths forward to these components for compatibility.
 
+Usage runs in `devkits-usage`, which owns quota readers, profile discovery, caching, quota details, token statistics and the Claude status-line recorder. Consumers bundle `components/usage.js` and its dependencies through `COPIES`, instantiate `UsageClient({ context: () => ({ machine }), active })`, and call `init(cx)`, `render(t)` and `close()` with their view lifecycle. `snapshot()` reads display-only data; `refresh()` requests a manual rediscovery/read. The SDK also exports `openUsageDetails(account)` and `openUsageAnalytics()`. It never executes readers or queries credentials. The host retains its placement, Usage visibility switch and account-selection controls.
+
+The layout mounts Usage's `service` view. Native command messages carry expiring client activity/machine leases and manual refreshes; each machine has one coalesced monitor. Remote contexts discover remote profiles without querying local quotas. The provider publishes sanitized per-machine snapshots in `devkits.usage.snapshot`, retaining the existing `devkits.usage-cache` five-minute Codex cache and local analytics cache. Account command lines and arbitrary reader fields are excluded from the public projection. The shared `claude-usage-hook.js` helper lets account sign-in configure the provider's recorder without importing provider UI. `mods/devkits/claude-statusline.js` remains only as a Node forwarding entry for commands already loaded by running Claude sessions; new settings point to `devkits-usage`, and migration recognizes both paths without chaining the old hook to itself. Existing chains/backups are preserved.
+
 Devkits' `system-display.js` is the consumer adapter. It scopes the right-click menu to SYSTEM mounts and the persistent System button, leaving the sidebar/status roots and unrelated controls untouched. It owns frames, resize interactions and independent sidebar/status visibility. `system-display-model.js` normalizes its separate `devkits.system-display` preferences and migrates old display fields before SYSTEM can save monitoring settings. The host calls `renderStatus(t)` and `renderSidebar(t)`, wraps its sidebar with `sidebarContainer(root)` and measures the content above the monitor with `reservedSidebarContent(root)`. SYSTEM Settings must not expose Devkits placement or widget style controls.
 
 ## 3. Check the source
@@ -56,6 +61,7 @@ herdr-app check ./herdr/mods/devkits-asana
 herdr-app check ./herdr/mods/devkits-mantisbt
 herdr-app check ./herdr/mods/devkits-tasks
 herdr-app check ./herdr/mods/devkits-calendar
+herdr-app check ./herdr/mods/devkits-usage
 herdr-app check ./herdr/mods/devkits-simulator
 herdr-app check ./herdr/mods/devkits-sim-frames
 ```
@@ -87,6 +93,7 @@ herdr-app check ~/.config/herdr-app/mods/devkits-asana
 herdr-app check ~/.config/herdr-app/mods/devkits-mantisbt
 herdr-app check ~/.config/herdr-app/mods/devkits-tasks
 herdr-app check ~/.config/herdr-app/mods/devkits-calendar
+herdr-app check ~/.config/herdr-app/mods/devkits-usage
 herdr-app check ~/.config/herdr-app/mods/devkits-simulator
 herdr-app check ~/.config/herdr-app/mods/devkits-sim-frames
 herdr-app status

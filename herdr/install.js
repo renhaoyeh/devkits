@@ -7,7 +7,7 @@ export async function install(home) {
   const layout = join(home, 'layouts', 'devkits.json');
   const mod = join(home, 'mods', 'devkits');
   const simulator = join(home, 'mods', 'devkits-simulator');
-  const companionNames = ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar'];
+  const companionNames = ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage'];
   const companions = companionNames.map(name => join(home, 'mods', name));
   const frames = join(home, 'mods', 'devkits-sim-frames');
   const themes = ['devkits', 'devkits-light'].map(name => join(home, 'themes', `${name}.json`));

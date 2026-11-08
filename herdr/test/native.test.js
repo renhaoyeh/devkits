@@ -75,9 +75,10 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
+  const usageOwner = await Promise.all(['monitor', 'details'].map(name => readFile(new URL(`../mods/devkits-usage/${name}.js`, import.meta.url), 'utf8')));
   const domain = await Promise.all(['agent-board-model', 'agent-task-evidence', 'agent-board-state', 'runtime']
     .map(name => readFile(new URL(`../mods/devkits-tasks/${name}.js`, import.meta.url), 'utf8')));
   const strip = text => text.replace(/^import .*;\r?\n/gm, '').replace(/^export \{.*\}(?: from .*)?;\r?\n/gm, '').replace(/^export /gm, '');
@@ -97,6 +98,13 @@ async function loadView(host) {
         return target.task ? Domain.TaskRuntime.prototype.launchThread.call(this, agent, target, options) : super.launchThread(agent, target, options);
       }
       navigate(event) { this.taskNavigation(event, { spawn: fn => fn({ notify() {} }) }); }
+      context() { return { machine: this.projects().find(project => project.active)?.machine || null }; }
+      active() { return shared('devkits.usage-visible') !== false; }
+      snapshot() { return UsageOwner.UsageMonitor.prototype.snapshot.call(this); }
+      publish() { return UsageOwner.UsageMonitor.prototype.publish.call(this); }
+      refreshUsage(cx, force, manual) { return UsageOwner.UsageMonitor.prototype.refreshUsage.call(this, cx, force, manual); }
+      accountUsage(t) { return UsageClient.prototype.render.call(this, t); }
+      usageDetails(t) { return UsageOwner.UsageDetails.prototype.usageDetails.call(this, t); }
       drainTasks() {
         const service = new Domain.TaskRuntime(); service.projects = () => this.projects(); service.navigate = event => this.navigate(event);
         service.poll({ spawn: fn => fn({ notify() {} }), notify() {} }); this.syncTaskSnapshot();
@@ -105,11 +113,12 @@ async function loadView(host) {
     IntegratedDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;
       ${strip(provider)}
       return SystemMonitorCore; })();
+    IntegratedDevkits.UsageDetails = UsageOwner.UsageDetails;
     return IntegratedDevkits;
   `;
   return new Function('View', ...Object.keys(host), strip([...components, ...features].join('\n')) + '\n' +
     strip(source).replace('default class', 'class') + '\nconst Domain = (() => {\n' + strip(domain.join('\n')) +
-    '\nreturn { TaskRuntime }; })();\n' + fixture);
+    '\nreturn { TaskRuntime }; })();\nconst UsageOwner = (() => {\n' + strip(usageOwner.join('\n')) + '\nreturn { UsageMonitor, UsageDetails }; })();\n' + fixture);
 }
 async function viewFor(host) {
   const memory = {};
@@ -117,7 +126,7 @@ async function viewFor(host) {
   const input = host.InputState || { new: () => ({ text: '', events: {}, value() { return this.text; },
     set_value(value) { assert.equal(rendering, false, 'retained input values must change outside render'); this.text = value; },
     on(name, action) { this.events[name] = action; } }) };
-  host = { TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: true, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { run() {}, ensureClaudeStatusLine: async () => {}, TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: true, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const originalShared = host.shared, originalSetShared = host.setShared;
   let taskSnapshot;
@@ -1249,7 +1258,7 @@ test('usage details refresh the reset countdown every minute while open', async 
   const View = await viewFor({ props: () => ({ view: 'usage-details' }) });
   const cx = { timer: { every(ms, callback) { assert.equal(ms, 60000); tick = callback; } },
     focus_handle: () => ({ focus() {} }), notify() { notified++; } };
-  new View().init({}, cx);
+  new View.UsageDetails().init(cx);
   assert.equal(typeof tick, 'function');
   tick(cx);
   assert.equal(notified, 1);
@@ -2321,13 +2330,13 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
   const system = join(home, 'mods', 'devkits-system');
-  for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar']) {
+  for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage']) {
     const path = join(home, 'mods', name);
     assert.equal(JSON.parse(await readFile(join(path, 'mod.json'), 'utf8')).place, 'none');
     assert.equal(await readFile(join(path, 'main.js'), 'utf8'), await readFile(new URL(`../mods/${name}/main.js`, import.meta.url), 'utf8'));
   }
   const hostFiles = await readdir(mod);
-  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor', 'agent-board.js', 'agent-board-state.js', 'calendar.js', 'task-composer.js']) assert.ok(!hostFiles.includes(obsolete));
+  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor', 'agent-board.js', 'agent-board-state.js', 'calendar.js', 'task-composer.js', 'usage.js', 'usage-reader.js', 'analytics.js', 'analytics-reader.js']) assert.ok(!hostFiles.includes(obsolete));
   const hardwarePackage = JSON.parse(await readFile(join(system, 'vendor', 'systeminformation', 'package.json'), 'utf8'));
   assert.equal(hardwarePackage.version, '5.33.19');
   assert.equal(hardwarePackage.license, 'MIT');
@@ -2378,7 +2387,7 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
 });
 
-for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar']) test(`installer preserves an existing ${name} mod`, async t => {
+for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage']) test(`installer preserves an existing ${name} mod`, async t => {
   const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const path = join(home, 'mods', name);

@@ -24,6 +24,7 @@ Install the complete bundle, keeping these paths relative to the Herdr home:
 | `mods/devkits-mantisbt/` | `mods/devkits-mantisbt/` |
 | `mods/devkits-tasks/` | `mods/devkits-tasks/` |
 | `mods/devkits-calendar/` | `mods/devkits-calendar/` |
+| `mods/devkits-usage/` | `mods/devkits-usage/` |
 | `mods/devkits-simulator/` | `mods/devkits-simulator/` |
 | `mods/devkits-sim-frames/` | `mods/devkits-sim-frames/` |
 | `themes/devkits.json` | `themes/devkits.json` |
@@ -64,6 +65,7 @@ herdr-app check ~/.config/herdr-app/mods/devkits-asana
 herdr-app check ~/.config/herdr-app/mods/devkits-mantisbt
 herdr-app check ~/.config/herdr-app/mods/devkits-tasks
 herdr-app check ~/.config/herdr-app/mods/devkits-calendar
+herdr-app check ~/.config/herdr-app/mods/devkits-usage
 herdr-app check ~/.config/herdr-app/mods/devkits-simulator
 herdr-app check ~/.config/herdr-app/mods/devkits-sim-frames
 herdr-app do layout.switch --name devkits
