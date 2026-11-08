@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, launcherLabel, launcherOption, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
+import { evaluateNative } from './source-harness.js';
 import { terminalArgv } from '../mods/devkits/shell-command.js';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -74,14 +75,41 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'agent-board-model', 'agent-task-evidence', 'agent-board-state', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
-  // Run native actions with a fake host; no real Herdr session is touched.
-  return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
-    .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\n' + source
-    .replace(/^import .*;\r?\n/gm, '').replace('export default class', 'class') + '\nDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;\n' + provider.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\nreturn SystemMonitorCore; })(); return Devkits;');
+  const domain = await Promise.all(['agent-board-model', 'agent-task-evidence', 'agent-board-state', 'runtime']
+    .map(name => readFile(new URL(`../mods/devkits-tasks/${name}.js`, import.meta.url), 'utf8')));
+  const strip = text => text.replace(/^import .*;\r?\n/gm, '').replace(/^export \{.*\}(?: from .*)?;\r?\n/gm, '').replace(/^export /gm, '');
+  // The fixture runs the actual Tasks provider to publish a read model before the host renders.
+  // Older task interaction cases invoke the moved runtime directly, with native host actions mocked.
+  const fixture = `
+    const Host = Devkits;
+    class IntegratedDevkits extends Host {
+      constructor() { super(); this.taskSources = new TaskSources(); this.syncTaskSnapshot(); }
+      syncTaskSnapshot() { Domain.TaskRuntime.prototype.resolveSessions.call(this); setShared('devkits.tasks.snapshot', Domain.TaskRuntime.prototype.snapshot.call(this)); }
+      taskAssignees(project) { return Domain.TaskRuntime.prototype.taskAssignees.call(this, project); }
+      boardPanel(project, cx) { return Domain.TaskRuntime.prototype.boardPanel.call(this, project, cx); }
+      startThread(agent, target = props(), options = {}) {
+        return target.task ? Domain.TaskRuntime.prototype.startThread.call(this, agent, target, options) : super.startThread(agent, target, options);
+      }
+      launchThread(agent, target, options) {
+        return target.task ? Domain.TaskRuntime.prototype.launchThread.call(this, agent, target, options) : super.launchThread(agent, target, options);
+      }
+      navigate(event) { this.taskNavigation(event, { spawn: fn => fn({ notify() {} }) }); }
+      drainTasks() {
+        const service = new Domain.TaskRuntime(); service.projects = () => this.projects(); service.navigate = event => this.navigate(event);
+        service.poll({ spawn: fn => fn({ notify() {} }), notify() {} }); this.syncTaskSnapshot();
+      }
+    }
+    IntegratedDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;
+      ${strip(provider)}
+      return SystemMonitorCore; })();
+    return IntegratedDevkits;
+  `;
+  return new Function('View', ...Object.keys(host), strip([...components, ...features].join('\n')) + '\n' +
+    strip(source).replace('default class', 'class') + '\nconst Domain = (() => {\n' + strip(domain.join('\n')) +
+    '\nreturn { TaskRuntime }; })();\n' + fixture);
 }
 async function viewFor(host) {
   const memory = {};
@@ -91,13 +119,17 @@ async function viewFor(host) {
     on(name, action) { this.events[name] = action; } }) };
   host = { TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: true, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
+  const originalShared = host.shared, originalSetShared = host.setShared;
+  let taskSnapshot;
+  host.shared = key => key === 'devkits.tasks.snapshot' && taskSnapshot ? taskSnapshot : originalShared(key);
+  host.setShared = (key, value) => { if (key === 'devkits.tasks.snapshot') { taskSnapshot = value; return; } originalSetShared(key, value); };
   host.InputState = { new: (...args) => { assert.equal(rendering, false, 'InputState.new cannot run during render'); return input.new(...args); } };
   const textarea = host.TextareaState || input;
   host.TextareaState = { new: (...args) => { assert.equal(rendering, false, 'TextareaState.new cannot run during render'); return textarea.new(...args); } };
   const factory = await loadView(host);
   const View = factory(class {}, ...Object.values(host)), render = View.prototype.render;
   View.prototype.render = function(...args) {
-    rendering = true;
+    this.syncTaskSnapshot(); rendering = true;
     try { return render.apply(this, args); } finally { rendering = false; }
   };
   return View;
@@ -1905,8 +1937,8 @@ test('a linked Asana thread returns to its task in Tasks rather than opening ano
   const View = await viewFor({ ...ui, props: () => ({ pane: 'pane-1' }), spaces: () => projects, agents: () => agents,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (...args) => commands.push(args),
     openOverlay: spec => overlays.push(spec), panes: () => [{ pane: 'pane-1', tab: 'tab-1', program: { name: 'Codex' } }, { pane: 'pane-2', tab: 'tab-3', program: { name: 'Codex' } }] });
-  new View().paneHeader({});
-  ui.nodes.get('asana-link-tab-1').click({}, { stop_propagation() {} });
+  const view = new View(); view.paneHeader({});
+  ui.nodes.get('asana-link-tab-1').click({}, { stop_propagation() {} }); view.drainTasks();
   assert.equal(memory['devkits.board-project'], 'app');
   assert.equal(memory['devkits.board-focus'], 't1');
   assert.deepEqual(overlays, []);
@@ -2289,13 +2321,13 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
   const system = join(home, 'mods', 'devkits-system');
-  for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt']) {
+  for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar']) {
     const path = join(home, 'mods', name);
     assert.equal(JSON.parse(await readFile(join(path, 'mod.json'), 'utf8')).place, 'none');
     assert.equal(await readFile(join(path, 'main.js'), 'utf8'), await readFile(new URL(`../mods/${name}/main.js`, import.meta.url), 'utf8'));
   }
   const hostFiles = await readdir(mod);
-  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor']) assert.ok(!hostFiles.includes(obsolete));
+  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor', 'agent-board.js', 'agent-board-state.js', 'calendar.js', 'task-composer.js']) assert.ok(!hostFiles.includes(obsolete));
   const hardwarePackage = JSON.parse(await readFile(join(system, 'vendor', 'systeminformation', 'package.json'), 'utf8'));
   assert.equal(hardwarePackage.version, '5.33.19');
   assert.equal(hardwarePackage.license, 'MIT');
@@ -2318,8 +2350,9 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(editor.id, 'editor');
   assert.equal(editor.hidden, false);
   assert.equal(stack.hidden, true);
-  assert.equal(editor.type, 'block');
-  assert.equal(editor.content.props.view, 'editor');
+  assert.equal(editor.type, 'stack');
+  assert.equal(editor.children.find(child => child.id === 'workspace-editor').content.props.view, 'editor');
+  assert.equal(editor.children.find(child => child.id === 'tasks').content.mod, 'devkits-tasks');
   assert.equal(simulator.id, 'simulator');
   assert.equal(simulator.hidden, true);
   assert.equal(simulator.content.mod, 'devkits-simulator');
@@ -2345,7 +2378,7 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
 });
 
-for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt']) test(`installer preserves an existing ${name} mod`, async t => {
+for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar']) test(`installer preserves an existing ${name} mod`, async t => {
   const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const path = join(home, 'mods', name);
@@ -3173,7 +3206,7 @@ test('Tasks groups created tasks and live threads, while Asana bookmarks stay ou
   assert.ok(ui.nodes.has('thread-shell'));
   assert.ok(!ui.nodes.has('board-task-api-saved'));
   assert.ok(ui.nodes.has('board-task-api-local:import'));
-  ui.nodes.get('board-task-api-local:import').click();
+  ui.nodes.get('board-task-api-local:import').click(); view.drainTasks();
   assert.equal(memory['devkits.board-project'], 'api');
   assert.equal(memory['devkits.board-focus'], 'local:import');
   assert.ok(!commands.some(([name]) => ['tab.new', 'space.new', 'tab.close', 'terminal.kill'].includes(name)));
@@ -3225,7 +3258,7 @@ test('restoring an unfinished archived task retains progress and reconnects the 
   const View = await viewFor({ spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(); let reopened;
   view.openThread = (...args) => { reopened = args; };
-  view.restoreThread(entry);
+  view.restoreThread(entry); view.drainTasks();
   assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
   assert.equal(memory['devkits.agent-board'][key][task.gid].archived, false);
   assert.equal(reopened[4].gid, 'thread:previous');
@@ -3258,7 +3291,7 @@ test('finishing a run keeps unarchived threads visible and navigable; only archi
 });
 
 test('status and priority selects show semantic icons in the trigger and every option', async () => {
-  const { boardStatusOptions, boardPriorityOptions } = await import('../mods/devkits/agent-board-model.js');
+  const { boardStatusOptions, boardPriorityOptions } = await import('../mods/devkits-tasks/agent-board-model.js');
   const ui = fakeElements(), source = await readFile(new URL('../mods/devkits/components/select.js', import.meta.url), 'utf8');
   const host = { ...ui, DropdownMenuContent: () => ui.element(), DropdownMenuItem: id => ui.element().id(id) };
   const Select = new Function(...Object.keys(host), source.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\nreturn Select;')(...Object.values(host));
@@ -3297,7 +3330,7 @@ test('Tasks assignment shares visible launcher profiles, account labels and save
   assert.equal(result[0].key, 'devkits-codex-ren');
   assert.equal(profiles[3].name, 'Codex · RenHaoYeh');
   view.taskComposer = { render: choices => choices };
-  assert.deepEqual(view.render(), result);
+  assert.deepEqual(view.taskComposer.render(view.taskAssignees(projects[0])), result);
   view.agentBoard = { render: (_project, _agents, choices) => choices };
   assert.deepEqual(view.boardPanel(projects[0], {}), result);
 });
@@ -3349,7 +3382,7 @@ test('task archive events recheck runtime activity instead of trusting an old en
 });
 
 async function taskBoardFor(records = {}) {
-  const ui = fakeElements(), model = await import('../mods/devkits/agent-board-model.js');
+  const ui = fakeElements(), model = await import('../mods/devkits-tasks/agent-board-model.js');
   const project = { id: 'p', name: 'Project', folder: '/project', tabs: [] };
   const projects = [project], runtime = { agents: [] }, dialogs = [], launches = [];
   const key = model.boardKey(project), memory = { 'devkits.agent-board': { [key]: structuredClone(records) } };
@@ -3377,7 +3410,7 @@ async function taskBoardFor(records = {}) {
     openTaskComposer: (...args) => dialogs.push(args),
   };
   const sources = await Promise.all(['components/button', 'components/dropdown-menu', 'components/select', 'components/icon', 'components/side-panel', 'agent-board-state', 'agent-board']
-    .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
+    .map(name => readFile(new URL(`../mods/${name.startsWith('components/') ? 'devkits' : 'devkits-tasks'}/${name}.js`, import.meta.url), 'utf8')));
   const Board = new Function(...Object.keys(host), sources.join('\n')
     .replace(/^import .*;\r?\n/gm, '').replace(/^export \{.*\} from .*;\r?\n/gm, '')
     .replace('export default class', 'class').replace(/^export /gm, '') + '\nreturn AgentBoard;')(...Object.values(host));
@@ -3434,7 +3467,7 @@ test('restoring a legacy archive reconnects the migrated task identity and keeps
     shared: key => board.memory[key], setShared: (key, value) => { board.memory[key] = value; } });
   const view = new View(); let reopened;
   view.openThread = (...args) => { reopened = args; };
-  view.restoreThread(entry);
+  view.restoreThread(entry); view.drainTasks();
   assert.equal(reopened[4].gid, gid);
   assert.equal(reopened[4].source, 'thread');
   assert.deepEqual(reopened[2], entry.argv);
@@ -3843,16 +3876,16 @@ test('empty property searches stay harmless and reopening clears the search draf
   board.render(); assert.ok(board.ui.nodes.has('board-task-status-option-todo'));
 });
 
-test('confirming an Asana selection closes the picker and opens a Tasks draft without launching a session', async () => {
+test('Tasks owns the Asana import callback and opens a draft without launching a session', async () => {
   const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] }, drafts = [], closed = [], commands = [];
   const source = { gid: 'a1', name: 'Selected source', notes: 'Source instructions', comments: [] };
-  const View = await viewFor({ props: () => ({ view: 'asana', project, overlay: 'asana' }),
-    spaces: () => [project], closeOverlay: id => closed.push(id), openTaskComposer: (...args) => drafts.push(args),
+  const { TaskRuntime } = await evaluateNative('../mods/devkits-tasks/runtime.js', {
+    openTaskComposer: (...args) => drafts.push(args),
     TaskSources: class { constructor(onImport) { this.onImport = onImport; } open(bound, key) { assert.equal(bound, project); assert.equal(key, 'asana'); this.onImport(bound, source); } },
-    run: (...args) => commands.push(args) });
-  const view = new View(); view.init({}, renderContext);
-  assert.deepEqual(closed, ['asana']); assert.deepEqual(drafts, [[project, null, 'todo', source]]);
-  assert.deepEqual(commands, []);
+    run: (...args) => commands.push(args),
+  }, 'TaskRuntime');
+  const runtime = new TaskRuntime(); runtime.taskSources.open(project, 'asana');
+  assert.deepEqual(drafts, [[project, null, 'todo', source]]); assert.deepEqual(commands, []);
 });
 
 test('imported local Todo descriptions remain editable and their source links open without changing Tasks', async () => {
@@ -3870,13 +3903,13 @@ test('imported local Todo descriptions remain editable and their source links op
 test('MantisBT import routes through the same Tasks draft without launching an agent', async () => {
   const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] }, drafts = [], closed = [], commands = [];
   const source = { source: 'mantisbt', gid: '1', server: 'https://mantis.test', name: 'Selected issue', notes: 'Instructions', comments: [] };
-  const View = await viewFor({ props: () => ({ view: 'mantisbt', project, overlay: 'mantisbt' }),
-    spaces: () => [project], closeOverlay: id => closed.push(id), openTaskComposer: (...args) => drafts.push(args),
+  const { TaskRuntime } = await evaluateNative('../mods/devkits-tasks/runtime.js', {
+    openTaskComposer: (...args) => drafts.push(args),
     TaskSources: class { constructor(onImport) { this.onImport = onImport; } open(bound, key) { assert.equal(bound, project); assert.equal(key, 'mantisbt'); this.onImport(bound, source); } },
-    run: (...args) => commands.push(args) });
-  const view = new View(); view.init({}, renderContext);
-  assert.deepEqual(closed, ['mantisbt']); assert.deepEqual(drafts, [[project, null, 'todo', source]]);
-  assert.deepEqual(commands, []);
+    run: (...args) => commands.push(args),
+  }, 'TaskRuntime');
+  const runtime = new TaskRuntime(); runtime.taskSources.open(project, 'mantisbt');
+  assert.deepEqual(drafts, [[project, null, 'todo', source]]); assert.deepEqual(commands, []);
 });
 
 test('imported MantisBT tasks stay editable offline and retain source links and comments in session context', async () => {

@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 
 async function load(exec) {
   const source = await readFile(new URL('../mods/devkits/shell.js', import.meta.url), 'utf8');
-  const command = await readFile(new URL('../mods/devkits/shell-command.js', import.meta.url), 'utf8');
+  const command = await readFile(new URL('../mods/devkits/components/session-shell.js', import.meta.url), 'utf8');
   return new Function('exec', (command + '\n' + source).replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '')
     + '\nreturn execShell;')(exec);
 }

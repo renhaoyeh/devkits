@@ -15,7 +15,9 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | Window structure and block sizes | `layouts/devkits.json` |
 | Native views and interactions | `mods/devkits/main.js` |
 | SYSTEM sampling, settings and details | `mods/devkits-system/`; consumer SDK in `mods/devkits/components/system-monitor.js` |
-| Asana and MantisBT source browsers | `mods/devkits-asana/`, `mods/devkits-mantisbt/`; Tasks adapter in `mods/devkits/task-sources.js` |
+| Asana and MantisBT source browsers | `mods/devkits-asana/`, `mods/devkits-mantisbt/`; Tasks adapter in `mods/devkits-tasks/task-sources.js` |
+| Tasks data, progress, board, composer and execution | `mods/devkits-tasks/`; public SDK in `mods/devkits/components/tasks.js` |
+| Calendar events, views and task references | `mods/devkits-calendar/` |
 | Shared native UI components | `mods/devkits/components/`; other mods carry copies (`COPIES`, `sync-shared.js`) |
 | iOS Simulator panel | `mods/devkits-simulator/` |
 | Project and thread data transformations | `mods/devkits/model.js` |
@@ -32,7 +34,13 @@ SYSTEM runs as the independent `devkits-system` mod. Its `service` view is mount
 
 The consumer interface is `snapshot()` (data, history, error, updatedAt and selected/available widget IDs), `renderInline(t, { id })`, `renderWidgets(t, { id, style, cpuMode })` and `open(page)`. A consumer chooses its own container and renderer, or draws directly from the snapshot. Give simultaneous mounts distinct IDs. The provider exposes `service`, `inline`, `widgets` and `details` native views. Rendered elements and callbacks belong to the current native view; never retain its context. Herdr's import boundary requires SDK copies within each mod, rather than runtime imports of another mod's source.
 
-Asana and MantisBT each have their own `main.js`, API, connection storage and UI, and can open independently. The shared `source-channel.js` SDK uses Herdr shared state for short-lived JSON requests and events, removing each request on import or close: a caller creates a request with its context/binding, opens the provider with the channel ID, then consumes binding/import/close events. Providers return task snapshots with explicit domain fields, without credentials or native callbacks. Devkits' `TaskSources` adapter owns project bindings and opens a Tasks draft on import. Only confirming that draft creates a local Todo; task/session controls remain in Devkits. Connection files and existing preference keys remain compatible. Historical source cards use the provider's finite, read-only `read-task.js` endpoint.
+Asana and MantisBT each have their own `main.js`, API, connection storage and UI, and can open independently. The shared `source-channel.js` SDK uses Herdr shared state for short-lived JSON requests and events, removing each request on import or close: a caller creates a request with its context/binding, opens the provider with the channel ID, then consumes binding/import/close events. Providers return task snapshots with explicit domain fields, without credentials or native callbacks. Tasks' `TaskSources` adapter owns project bindings and opens a Tasks draft on import. Only confirming that draft creates a local Todo; task/session controls remain in `devkits-tasks`. Connection files and existing preference keys remain compatible. Historical source cards use the provider's finite, read-only `read-task.js` endpoint.
+
+Tasks runs as the independent `devkits-tasks` mod, with its always-mounted `service` view tracking input evidence and reconciling progress even when the board is closed. It owns all task records, policies, source imports, drafts and execution preparation. It publishes a project-scoped read model in `devkits.tasks.snapshot` only when its contents change. Consumers bundle `components/tasks.js`, `tasks-model.js`, `session-model.js` and `session-shell.js` through `COPIES`. `projectBoardTasks`, `threadBoardStatus`, `threadBoardTask`, `taskLinkForTab`, `sessionThreadTitle` and `listTasks` read that public model without inferring progress or writing records. Short-lived serialized requests are revalidated by the owner; callers never import the provider's state/policy/UI implementation.
+
+The shell mounts the Tasks board as the `tasks` child of its `editor` stack. `TaskHost` consumes navigation events and owns project selection, layout, native pane focus and generic thread creation/archive/restore. Tasks supplies prepared execution arguments and task metadata after validation; it does not name shell layout blocks. Requests and navigation cross mods through Herdr shared state, not JavaScript callbacks or `sessionStorage`. Existing record, draft, archive, profile and calendar preference keys remain compatible.
+
+Calendar runs in `devkits-calendar`, owns its event storage and UI, and uses only the public Tasks index for mentions. Opening a reference requests owner validation and waits for acknowledgement before closing; missing/deleted tasks leave Calendar open with an inline error. Creation dialogs, backdrop dismissal and range cleanup stay inside Calendar. Generic session/project transformations and the scoped Tasks/Calendar palette live in canonical shared components; the shell's old `model.js` and `shell-command.js` paths forward to these components for compatibility.
 
 Devkits' `system-display.js` is the consumer adapter. It scopes the right-click menu to SYSTEM mounts and the persistent System button, leaving the sidebar/status roots and unrelated controls untouched. It owns frames, resize interactions and independent sidebar/status visibility. `system-display-model.js` normalizes its separate `devkits.system-display` preferences and migrates old display fields before SYSTEM can save monitoring settings. The host calls `renderStatus(t)` and `renderSidebar(t)`, wraps its sidebar with `sidebarContainer(root)` and measures the content above the monitor with `reservedSidebarContent(root)`. SYSTEM Settings must not expose Devkits placement or widget style controls.
 
@@ -46,6 +54,8 @@ herdr-app check ./herdr/mods/devkits
 herdr-app check ./herdr/mods/devkits-system
 herdr-app check ./herdr/mods/devkits-asana
 herdr-app check ./herdr/mods/devkits-mantisbt
+herdr-app check ./herdr/mods/devkits-tasks
+herdr-app check ./herdr/mods/devkits-calendar
 herdr-app check ./herdr/mods/devkits-simulator
 herdr-app check ./herdr/mods/devkits-sim-frames
 ```
@@ -75,6 +85,8 @@ herdr-app check ~/.config/herdr-app/mods/devkits
 herdr-app check ~/.config/herdr-app/mods/devkits-system
 herdr-app check ~/.config/herdr-app/mods/devkits-asana
 herdr-app check ~/.config/herdr-app/mods/devkits-mantisbt
+herdr-app check ~/.config/herdr-app/mods/devkits-tasks
+herdr-app check ~/.config/herdr-app/mods/devkits-calendar
 herdr-app check ~/.config/herdr-app/mods/devkits-simulator
 herdr-app check ~/.config/herdr-app/mods/devkits-sim-frames
 herdr-app status
