@@ -7,7 +7,7 @@ export function systemDisplayPreferences(saved, legacy = {}) {
     enabled: typeof saved?.enabled === 'boolean' ? saved.enabled : sidebar || status,
     sidebar: {
       visible: sidebar,
-      style: ['inline', 'compact', 'graph'].includes(saved?.sidebar?.style) ? saved.sidebar.style : legacy?.style === 'graph' ? 'graph' : 'compact',
+      style: 'compact',
       cpuMode: (saved?.sidebar?.cpuMode ?? legacy?.cpuMode) === 'total' ? 'total' : 'cores',
       heightMode: saved?.sidebar?.heightMode === 'auto' || (!saved?.sidebar?.heightMode && !legacy?.placement) ? 'auto' : 'rows',
       rows: [2, 4, 6].includes(saved?.sidebar?.rows) ? saved.sidebar.rows : 6,

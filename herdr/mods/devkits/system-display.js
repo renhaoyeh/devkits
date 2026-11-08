@@ -95,9 +95,9 @@ export class SystemDisplay {
   renderSidebar(t) {
     const display = systemDisplayConfig(), config = display.sidebar;
     if (!display.enabled || !config.visible) return div().h(0).flex_none();
-    const inline = config.style === 'inline', widgets = this.monitor.snapshot().widgets.length > 0;
+    const widgets = this.monitor.snapshot().widgets.length > 0;
     return this.contextMenu(v_flex().id('system-usage').relative().w_full().min_h(0).flex_none()
-      .h(inline ? widgets ? 64 : 32 : widgets ? this.sidebarSize() : 32)
+      .h(widgets ? this.sidebarSize() : 32)
       .on_size_change((size) => { this.renderedHeight = size.height; })
       .border_t(1).border_color(t.border)
       .accessibility_label('Current hardware usage of this computer')
@@ -105,9 +105,7 @@ export class SystemDisplay {
         .child(div().flex_1().text_size(11).font_medium().text_color(t.muted).child('SYSTEM'))
         .child(Button('open-hardware-details', t, { variant: 'ghost', size: 'icon' }).h_full().w(32)
           .accessibility_label('Open system monitor').on_click(() => this.monitor.open()).child(glyph('chart-column'))))
-      .when(widgets, el => el.child(inline
-        ? h_flex().h(32).min_w(0).child(this.monitor.renderInline(t, { id: 'sidebar-system' }))
-        : this.monitor.renderWidgets(t, { style: config.style, cpuMode: config.cpuMode,
+      .when(widgets, el => el.child(this.monitor.renderWidgets(t, { style: config.style, cpuMode: config.cpuMode,
           onWidgetSize: (id, size, cx) => {
             if (!Number.isFinite(size.height) || size.height <= 0) return;
             const key = `${config.style}:${config.cpuMode}:${id}`;
@@ -116,7 +114,7 @@ export class SystemDisplay {
             cx.notify();
           },
         }).flex_1().min_h(0).overflow_y_scrollbar()))
-      .when(widgets && !inline, el => el.child(div().id('system-usage-resize').absolute().top(-3).left(0).right(0).h(6).cursor_row_resize()
+      .when(widgets, el => el.child(div().id('system-usage-resize').absolute().top(-3).left(0).right(0).h(6).cursor_row_resize()
         .accessibility_label('Drag to choose 2, 4 or 6 monitor rows; double-click for 4 rows.')
         .on_mouse_down('left', (event, cx) => {
           cx.stop_propagation(); const height = this.renderedHeight ?? this.sidebarSize();
@@ -140,9 +138,6 @@ export class SystemDisplayMenu {
       { key: 'status', label: 'Show in status bar', checked: config.enabled && config.status.visible },
     ] : [
       { key: 'sidebar', label: 'Show in sidebar', checked: config.enabled && config.sidebar.visible },
-      { key: 'inline', label: 'Inline values', checked: config.sidebar.style === 'inline', section: 'SIDEBAR STYLE' },
-      { key: 'compact', label: 'Compact widgets', checked: config.sidebar.style === 'compact' },
-      { key: 'graph', label: 'History widgets', checked: config.sidebar.style === 'graph' },
       { key: 'total', label: 'Total', checked: config.sidebar.cpuMode === 'total', section: 'WIDGET CPU' },
       { key: 'cores', label: 'Per core', checked: config.sidebar.cpuMode === 'cores' },
     ]),
@@ -160,7 +155,6 @@ export class SystemDisplayMenu {
         else saveSystemDisplay({ [action.key]: { visible: !current[action.key].visible } }, cx);
       }
       else if (['total', 'cores'].includes(action.key)) saveSystemDisplay({ sidebar: { cpuMode: action.key } }, cx);
-      else saveSystemDisplay({ sidebar: { style: action.key } }, cx);
       closeOverlay(overlay);
     };
     return DropdownMenuContent('system-display-menu', undefined, t).role('menu').accessibility_label('System display')

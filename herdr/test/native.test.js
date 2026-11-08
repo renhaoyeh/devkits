@@ -211,7 +211,8 @@ test('hardware refresh avoids overlap, clears failed readings and recovers with 
   view.systemDisplay.renderSidebar({});
   assert.ok(ui.textOf('system-cpu').includes('42%'));
   assert.ok(ui.textOf('system-ram-value').includes('16 GB'));
-  assert.ok(ui.textOf('system-ram-subtitle').includes('8.0 GB used · 50%'));
+  assert.ok(ui.textOf('system-ram-subtitle').includes('8.0 GB used'));
+  assert.ok(ui.textOf('system-ram-bar').includes('50%'));
   view.systemMonitor.refresh(cx);
   assert.deepEqual(JSON.parse(calls[1][1][1]), sample);
   finish({ code: 1 }); await Promise.all(tasks.splice(0));
@@ -265,7 +266,7 @@ test('system monitor opens from each summary and refreshes hardware details whil
   for (const id of ['system-cpu', 'system-gpu', 'system-ram', 'system-disk', 'system-network', 'open-hardware-details']) ui.nodes.get(id).click();
   assert.ok(opened.every(spec => spec.props.view === 'details'));
   assert.ok(opened.every(spec => spec.width === 0.9), 'The monitor uses the window width rather than a fixed narrow dialog');
-  assert.ok(ui.textOf('system-cpu-subtitle').includes('Apple M4 · 10 cores'));
+  assert.ok(ui.textOf('system-cpu-model').includes('Apple M4'));
   ui.nodes.get('hardware-details').keyDown({ key: 'escape' }, cx);
   ui.nodes.get('hardware-details-done').click();
   assert.deepEqual(closed, ['system-overlay', 'system-overlay']);
@@ -277,7 +278,7 @@ test('monitor settings persist module choices, order, interval, style and select
   const view = new View(), cx = renderContext;
   view.systemMonitor.hardware = { cores: 4, coreUsage: [10, 20, 30, 40], cpu: 25, cpuName: 'Fixture',
     gpus: [{ name: 'Apple M4', percent: 30, memory: { type: 'unified', total: 24 * 1024 ** 3, used: 1024 ** 3 } }],
-    memory: { total: 24 * 1024 ** 3, used: 12 * 1024 ** 3, percent: 50, type: 'LPDDR5', manufacturer: 'Micron' },
+    memory: { total: 24 * 1024 ** 3, used: 12 * 1024 ** 3, percent: 50, type: 'LPDDR5', manufacturer: 'Micron', model: 'MT-24G', speed: '5600 MHz' },
     battery: { percent: 75, plugged: false, charging: false }, disk: { model: 'APPLE SSD AP0512Z', percent: 50, rates: { read: 1024, write: 2048 } } };
   view.systemMonitor.hardwareSettings({});
   ui.nodes.get('hardware-visible-network').change(false, cx);
@@ -307,9 +308,19 @@ test('monitor settings persist module choices, order, interval, style and select
   reloaded.systemMonitor.hardwareModuleDetails('disk', {});
   assert.ok(ui.textOf('hardware-module-disk').includes('APPLE SSD AP0512Z'));
   assert.ok(ui.textOf('system-gpu-value').includes('24 GB unified'));
-  assert.ok(ui.textOf('system-gpu-subtitle').includes('Apple M4 · 30%'));
+  assert.ok(ui.textOf('system-gpu-model').includes('Apple M4'));
+  assert.ok(ui.textOf('system-gpu-subtitle').includes('Usage'));
   assert.ok(ui.textOf('system-ram').includes('RAM · LPDDR5'));
-  assert.ok(ui.textOf('system-ram-subtitle').includes('12.0 GB used · 50%'));
+  assert.ok(ui.textOf('system-ram-subtitle').includes('12.0 GB used'));
+  assert.ok(ui.textOf('system-ram-model').includes('Micron · MT-24G · 5600 MHz'));
+  assert.ok(ui.textOf('system-cpu-model').includes('Fixture'));
+  assert.ok(ui.textOf('system-storage-model').includes('APPLE SSD AP0512Z'));
+  for (const [id, percent, filled] of [['ram', 50, 10], ['gpu', 30, 6], ['storage', 50, 10]]) {
+    assert.ok(!ui.nodes.has(`system-chart-${id}`));
+    assert.ok(ui.textOf(`system-${id}-bar`).includes(`${percent}%`));
+    assert.equal([...ui.nodes.keys()].filter(key => new RegExp(`^system-${id}-bar-\\d+$`).test(key)).length, 20);
+    assert.equal([...ui.nodes.keys()].filter(key => new RegExp(`^system-${id}-bar-\\d+-fill$`).test(key)).length, filled);
+  }
   reloaded.systemMonitor.hardwareModuleDetails('ram', {});
   assert.ok(ui.textOf('hardware-module-ram').includes('LPDDR5'));
   assert.ok(ui.textOf('hardware-module-ram').includes('Micron'));
@@ -388,16 +399,16 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   target = { ...opened.at(-1).props, overlay: 'display' };
   const menu = new View(); menu.init({}, cx); ui.nodes.clear(); menu.render(cx);
   assert.ok(!ui.nodes.has('system-display-status'));
-  // Keyboard chooses Inline values after the sidebar visibility control.
+  for (const style of ['inline', 'compact', 'graph']) assert.ok(!ui.nodes.has(`system-display-${style}`));
+  // Keyboard chooses Total after the sidebar visibility control.
   const element = ui.nodes.get('system-display-menu');
   element.keyDown({ key: 'down' }, cx); element.keyDown({ key: 'enter' }, cx);
-  assert.equal(memory['devkits.system-display'].sidebar.style, 'inline');
+  assert.equal(memory['devkits.system-display'].sidebar.cpuMode, 'total');
   assert.equal(closed.at(-1), 'display');
   target = {}; view.systemMonitor.hardware = { cpu: 25, cores: 2 };
   ui.nodes.clear(); view.systemDisplay.renderSidebar({});
-  assert.equal(ui.nodes.get('system-usage').height, 64);
-  assert.deepEqual(ui.textOf('sidebar-system-cpu'), ['CPU', '25%']);
-  assert.ok(!ui.nodes.has('system-cpu') && !ui.nodes.has('system-usage-resize'));
+  assert.ok(ui.textOf('system-cpu').includes('25%'));
+  assert.ok(ui.nodes.has('system-usage-resize') && !ui.nodes.has('sidebar-system-cpu'));
   target = { view: 'system-display-menu', surface: 'status', overlay: 'display' };
   const statusMenu = new View(); statusMenu.init({}, cx); ui.nodes.clear(); statusMenu.render(cx);
   assert.ok(!ui.nodes.has('system-display-sidebar') && !ui.nodes.has('system-display-inline') && !ui.nodes.has('system-display-cores'));
@@ -418,7 +429,7 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   target = { view: 'system-display-menu', overlay: 'display' };
   const reloaded = new View(); reloaded.init({}, cx); reloaded.render(cx);
   ui.nodes.get('system-display-sidebar').click({}, cx);
-  assert.equal(memory['devkits.system-display'].sidebar.style, 'inline');
+  assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
   assert.equal(memory['devkits.system-display'].status.visible, true);
   assert.equal(memory['devkits.system-monitor'], undefined, 'Display changes never overwrite monitoring preferences');
   reloaded.render(cx);
@@ -2922,7 +2933,7 @@ test('interface settings control features before locations and preserve preferen
   choose('interface-system-location', 'both');
   assert.equal(memory['devkits.system-display'].sidebar.visible, true);
   assert.equal(memory['devkits.system-display'].status.visible, true);
-  choose('interface-system-style', 'compact');
+  assert.ok(!ui.nodes.has('interface-system-style'));
   choose('interface-system-cpu', 'total');
   choose('interface-system-height-mode', 'rows-4');
   ui.nodes.get('interface-system-visible').change(false, renderContext); render();
@@ -2947,8 +2958,8 @@ test('interface settings control features before locations and preserve preferen
     assert.ok(!ui.nodes.has(id), `${id} only applies to the Sidebar location`);
   choose('interface-system-location', 'sidebar');
   assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
-  choose('interface-system-style', 'inline');
-  assert.ok(!ui.nodes.has('interface-system-cpu'));
+  assert.ok(!ui.nodes.has('interface-system-style'));
+  assert.ok(ui.nodes.has('interface-system-cpu'));
   assert.equal(memory['devkits.system-monitor'], monitoring);
   assert.equal(sideEffects, 0, 'Interface settings do not start provider reads or discovery');
   assert.deepEqual(closed, []);

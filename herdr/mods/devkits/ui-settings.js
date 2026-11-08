@@ -18,7 +18,7 @@ export class InterfaceSettings {
   init(cx) {
     this.handle = cx.focus_handle(); this.handle.focus();
     this.page = props()?.page === 'usage' ? 'usage' : 'system';
-    this.location = new SelectState(cx); this.style = new SelectState(cx); this.cpuMode = new SelectState(cx);
+    this.location = new SelectState(cx); this.cpuMode = new SelectState(cx);
     this.heightMode = new SelectState(cx);
   }
 
@@ -66,11 +66,6 @@ export class InterfaceSettings {
                     sidebar: { visible: value !== 'status' }, status: { visible: value !== 'sidebar' },
                   }, cx), t, { width: 176, boxed: true })))
               .when(config.sidebar.visible, el => el
-                .child(row('Sidebar style', 'Choose compact values or resource widgets.',
-                  Select('interface-system-style', this.style, config.sidebar.style,
-                    options([['inline', 'Inline values'], ['compact', 'Compact widgets'], ['graph', 'History widgets']]),
-                    'Sidebar style', (style, cx) => saveSystemDisplay({ sidebar: { style } }, cx), t, { width: 176, boxed: true })))
-                .when(config.sidebar.style !== 'inline', el => el
                   .child(row('Widget CPU view', 'Show total usage or individual logical processors.',
                     Select('interface-system-cpu', this.cpuMode, config.sidebar.cpuMode,
                       options([['total', 'Total'], ['cores', 'Per core']]), 'Widget CPU view',
@@ -82,7 +77,7 @@ export class InterfaceSettings {
                       (value, cx) => {
                         saveSystemDisplay({ sidebar: value.startsWith('rows-')
                           ? { heightMode: 'rows', rows: Number(value.slice(5)) } : { heightMode: value } }, cx);
-                      }, t, { width: 176, boxed: true })))))
+                      }, t, { width: 176, boxed: true }))))
               .child(row('Monitoring', 'Choose shared resources, sampling interval and resource details.',
                 Button('interface-monitor-settings', t, { variant: 'secondary' }).child('Monitor settings…')
                   .on_click(() => openSystemDetails('settings'))))))
