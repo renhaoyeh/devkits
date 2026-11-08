@@ -3247,6 +3247,62 @@ async function taskBoardFor(records = {}) {
   return { ui, view, project, projects, runtime, memory, key, cx, render, dialogs, launches, Board };
 }
 
+test('Tasks Archived includes legacy conversations and missing snapshots without recreating deleted tasks', async () => {
+  const existing = { gid: 'local:existing', source: 'local', name: 'Current name', status: 'fail', archived: true, archiveId: 'existing' };
+  const board = await taskBoardFor({ [existing.gid]: existing });
+  const entries = [
+    { id: 'legacy', folder: '/project/', title: 'Older conversation', task: null, profile: 'profile' },
+    { id: 'snapshot', folder: '/project', title: 'Saved conversation', boardTask: { gid: 'thread:saved', source: 'thread', name: 'Saved task', status: 'fail', lastOutput: 'Retained output' } },
+    { id: 'existing', folder: '/project', title: 'Old title', boardTask: { ...existing, name: 'Old title', status: 'done' } },
+    { id: 'deleted', folder: '/project', title: 'Deleted local task', boardTask: null, task: null },
+    { id: 'other', folder: '/other', title: 'Other project' },
+  ];
+  board.memory['devkits.archived-threads'] = structuredClone(entries);
+  board.render();
+  assert.ok(!board.ui.nodes.has('board-card-archive:legacy'));
+  board.ui.nodes.get('board-archived').click({}, board.cx); board.render();
+  assert.ok(board.ui.nodes.has('board-card-archive:legacy'));
+  assert.ok(board.ui.nodes.has('board-card-thread:saved'));
+  assert.ok(board.ui.nodes.has('board-card-local:existing'));
+  const records = board.memory['devkits.agent-board'][board.key];
+  assert.equal(Object.keys(records).length, 3);
+  assert.equal(records['archive:legacy'].agentKey, 'profile');
+  assert.equal(records['archive:legacy'].status, 'todo', 'Unknown legacy progress is not marked completed');
+  assert.equal(records['thread:saved'].lastOutput, 'Retained output');
+  assert.equal(records['thread:saved'].status, 'fail');
+  assert.deepEqual(records[existing.gid], existing, 'Current task metadata wins over the archived snapshot');
+  board.view.search.set_value('older'); board.render();
+  assert.ok(board.ui.nodes.has('board-card-archive:legacy'));
+  assert.ok(!board.ui.nodes.has('board-card-thread:saved'));
+  const saved = structuredClone(board.memory);
+  board.render(); assert.deepEqual(board.memory, saved, 'Repeated reads do not duplicate or rewrite archived cards');
+  board.project.machine = 'remote'; board.render();
+  assert.equal(board.memory['devkits.agent-board']['["remote","/project"]'], undefined);
+  assert.deepEqual(board.memory['devkits.archived-threads'], entries);
+});
+
+test('restoring a legacy archive reconnects the migrated task identity and keeps its progress', async () => {
+  const board = await taskBoardFor();
+  const entry = { id: 'codex:legacy', folder: '/project', title: 'Older conversation', task: null,
+    profile: 'profile', argv: ['codex', 'resume', 'legacy'] };
+  board.memory['devkits.archived-threads'] = [entry]; board.render();
+  const gid = 'archive:codex:legacy';
+  board.memory['devkits.agent-board'][board.key][gid].status = 'fail';
+  const View = await viewFor({ spaces: () => board.projects,
+    shared: key => board.memory[key], setShared: (key, value) => { board.memory[key] = value; } });
+  const view = new View(); let reopened;
+  view.openThread = (...args) => { reopened = args; };
+  view.restoreThread(entry);
+  assert.equal(reopened[4].gid, gid);
+  assert.equal(reopened[4].source, 'thread');
+  assert.deepEqual(reopened[2], entry.argv);
+  assert.equal(board.memory['devkits.agent-board'][board.key][gid].archived, false);
+  assert.equal(board.memory['devkits.agent-board'][board.key][gid].status, 'fail');
+  assert.deepEqual(board.memory['devkits.archived-threads'], []);
+  board.render();
+  assert.ok(board.ui.nodes.has(`board-card-${gid}`));
+});
+
 test('task details create subtasks in a separate composer and navigate between parent and child tasks', async () => {
   const parent = { gid: 'local:parent', source: 'local', name: 'Ship release', status: 'todo' };
   const child = { gid: 'local:child', source: 'local', name: 'Add tests', status: 'todo', parentId: parent.gid };
