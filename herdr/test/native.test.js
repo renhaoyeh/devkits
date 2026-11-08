@@ -75,7 +75,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
   const usageOwner = await Promise.all(['monitor', 'details'].map(name => readFile(new URL(`../mods/devkits-usage/${name}.js`, import.meta.url), 'utf8')));
@@ -339,7 +339,7 @@ test('the host context menu toggles status monitoring independently of the sideb
   const view = new View(), cx = { ...renderContext, timer: { every: (ms, tick) => ticks.push([ms, tick]) },
     spawn: task => tasks.push(task(cx)) };
   const choose = key => {
-    target = { view: 'system-display-menu', overlay: 'display-menu' };
+    target = { view: 'system-display-menu', surface: 'status', overlay: 'display-menu' };
     const menu = new View(); menu.init({}, cx); menu.render(cx);
     ui.nodes.get(`system-display-${key}`).click({}, cx); target = { view: 'status' };
   };
@@ -383,11 +383,13 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   ui.nodes.get('system-usage').mouseDownByButton.right({ position: { x: 100, y: 300 } }, cx);
   assert.deepEqual(opened.at(-1).at, { x: 100, y: 300 });
   assert.equal(opened.at(-1).props.view, 'system-display-menu');
+  assert.equal(opened.at(-1).props.surface, 'sidebar');
   target = { ...opened.at(-1).props, overlay: 'display' };
-  const menu = new View(); menu.init({}, cx); menu.render(cx);
-  // Keyboard chooses Inline values after the two visibility controls.
+  const menu = new View(); menu.init({}, cx); ui.nodes.clear(); menu.render(cx);
+  assert.ok(!ui.nodes.has('system-display-status'));
+  // Keyboard chooses Inline values after the sidebar visibility control.
   const element = ui.nodes.get('system-display-menu');
-  element.keyDown({ key: 'down' }, cx); element.keyDown({ key: 'down' }, cx); element.keyDown({ key: 'enter' }, cx);
+  element.keyDown({ key: 'down' }, cx); element.keyDown({ key: 'enter' }, cx);
   assert.equal(memory['devkits.system-display'].sidebar.style, 'inline');
   assert.equal(closed.at(-1), 'display');
   target = {}; view.systemMonitor.hardware = { cpu: 25, cores: 2 };
@@ -395,7 +397,9 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   assert.equal(ui.nodes.get('system-usage').height, 64);
   assert.deepEqual(ui.textOf('sidebar-system-cpu'), ['CPU', '25%']);
   assert.ok(!ui.nodes.has('system-cpu') && !ui.nodes.has('system-usage-resize'));
-  target = { view: 'system-display-menu', overlay: 'display' }; menu.render(cx);
+  target = { view: 'system-display-menu', surface: 'status', overlay: 'display' };
+  const statusMenu = new View(); statusMenu.init({}, cx); ui.nodes.clear(); statusMenu.render(cx);
+  assert.ok(!ui.nodes.has('system-display-sidebar') && !ui.nodes.has('system-display-inline') && !ui.nodes.has('system-display-cores'));
   ui.nodes.get('system-display-status').click({}, cx);
   assert.equal(memory['devkits.system-display'].status.visible, true);
   assert.equal(memory['devkits.system-display'].sidebar.visible, true);
@@ -406,8 +410,10 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
     assert.equal(ui.nodes.get(id).mouseDownByButton?.right, undefined, `${id} must not open SYSTEM's menu`);
   ui.nodes.get('status-system').mouseDownByButton.right({ position: { x: 400, y: 700 } }, cx);
   assert.equal(opened.at(-1).props.view, 'system-display-menu');
+  assert.equal(opened.at(-1).props.surface, 'status');
   ui.nodes.get('system-monitor-settings').mouseDownByButton.right({ position: { x: 600, y: 700 } }, cx);
   assert.equal(opened.at(-1).props.view, 'system-display-menu', 'The menu is reachable while sidebar monitoring is hidden');
+  assert.equal(opened.at(-1).props.surface, 'status');
   target = { view: 'system-display-menu', overlay: 'display' };
   const reloaded = new View(); reloaded.init({}, cx); reloaded.render(cx);
   ui.nodes.get('system-display-sidebar').click({}, cx);
@@ -434,37 +440,74 @@ test('SystemMonitor exposes data and independently mountable renderers without h
   assert.ok(monitor.snapshot().widgets.includes('cpu'));
 });
 
-test('sidebar monitor resize follows zoom, saves on release or leave and reserves project space', async () => {
-  const ui = fakeElements(), memory = {}, saved = [];
+test('System row presets use actual card sizes and dragging snaps to a preset', async () => {
+  const ui = fakeElements(), memory = {
+    'devkits.system-monitor': { order: ['cpu', 'ram', 'disk'], visible: { gpu: false, network: false, storage: false, battery: false, sensors: false } },
+    'devkits.system-display': { enabled: true, sidebar: { visible: true, style: 'graph', heightMode: 'rows', rows: 2 } },
+  };
+  const View = await systemViewFor({ ...ui, theme: () => ({}), setAgentOrder() {},
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(), cx = { ...renderContext, spawn() {} };
+  const render = () => { ui.nodes.clear(); view.systemDisplay.renderSidebar({}); };
+  render();
+  ui.nodes.get('system-cpu-layout').sizeChange({ height: 52 }, cx);
+  ui.nodes.get('system-ram-layout').sizeChange({ height: 38 }, cx);
+  ui.nodes.get('system-disk-layout').sizeChange({ height: 60 }, cx); render();
+  assert.equal(ui.nodes.get('system-usage').height, 123);
+  memory['devkits.system-monitor'].order = ['disk', 'ram', 'cpu']; render();
+  assert.equal(ui.nodes.get('system-usage').height, 131);
+  memory['devkits.system-display'].sidebar.rows = 6; render();
+  assert.equal(ui.nodes.get('system-usage').height, 183, 'No empty rows when fewer cards are available');
+  view.systemDisplay.sidebarContainer(ui.element().id('row-test-sidebar'));
+  const root = ui.nodes.get('row-test-sidebar');
+  ui.nodes.get('system-usage-resize').mouseDown({ position: { y: 900 } }, cx);
+  root.mouseMove({ position: { y: 1000 }, bounds: { height: 1200 } }, cx);
+  root.mouseUp({}, cx); render();
+  assert.equal(memory['devkits.system-display'].sidebar.rows, 2);
+  assert.equal(Object.hasOwn(memory['devkits.system-display'].sidebar, 'height'), false);
+  ui.nodes.get('system-usage-resize').click({ click_count: 2 }, cx);
+  assert.equal(memory['devkits.system-display'].sidebar.rows, 4);
+  view.systemDisplay.available = 228; render();
+  assert.equal(ui.nodes.get('system-usage').height, 100);
+  assert.equal(memory['devkits.system-display'].sidebar.rows, 4, 'Window changes preserve the selected preset');
+});
+
+test('auto System height fits content and only scrolls when available space is smaller', async () => {
+  const ui = fakeElements(), memory = {
+    'devkits.system-monitor': { order: ['cpu', 'ram', 'disk'], visible: { gpu: false, network: false, storage: false, battery: false, sensors: false } },
+    'devkits.system-display': { enabled: true, sidebar: { visible: true, style: 'graph', heightMode: 'auto', rows: 4 }, status: { visible: false } },
+  };
   const View = await systemViewFor({ ...ui, theme: () => ({}), setAgentOrder() {}, run() {},
-    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; saved.push(key); } });
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(); view.folded = new Set();
   const cx = { ...renderContext, spawn() {} }, render = () => { ui.nodes.clear(); view.render(cx); };
   render();
-  ui.nodes.get('devkits-sidebar').sizeChange({ height: 800 }, cx);
+  ui.nodes.get('devkits-sidebar').sizeChange({ height: 1200 }, cx);
   ui.nodes.get('account-usage').sizeChange({ height: 200 }, cx);
-  render();
-  ui.nodes.get('system-usage-resize').mouseDown({ position: { y: 1000 } }, cx);
-  ui.nodes.get('devkits-sidebar').mouseMove({ position: { y: 800 }, bounds: { height: 1600 } }, cx);
-  assert.equal(memory['devkits.system-monitor'], undefined, 'Moving the divider does not persist every frame');
-  render(); assert.equal(ui.nodes.get('system-usage').height, 340);
+  ui.nodes.get('system-cpu-layout').sizeChange({ height: 52 }, cx);
+  ui.nodes.get('system-ram-layout').sizeChange({ height: 38 }, cx);
+  ui.nodes.get('system-disk-layout').sizeChange({ height: 60 }, cx); render();
+  assert.equal(ui.nodes.get('system-usage').height, 183, 'Auto fits the measured card layout');
+  ui.nodes.get('account-usage').sizeChange({ height: 300 }, cx); render();
+  assert.equal(ui.nodes.get('system-usage').height, 183, 'Quota changes do not expand the monitor');
+  ui.nodes.get('devkits-sidebar').sizeChange({ height: 500 }, cx); render();
+  assert.equal(ui.nodes.get('system-usage').height, 72, 'Only constrained content scrolls');
+  ui.nodes.get('devkits-sidebar').sizeChange({ height: 1200 }, cx); render();
+  assert.equal(ui.nodes.get('system-usage').height, 183);
+  memory['devkits.system-monitor'].visible.ram = false; render();
+  assert.equal(ui.nodes.get('system-usage').height, 145, 'Only visible cards contribute to content height');
+  memory['devkits.system-display'].sidebar.style = 'compact'; render();
+  ui.nodes.get('system-cpu-layout').sizeChange({ height: 22 }, cx);
+  ui.nodes.get('system-disk-layout').sizeChange({ height: 34 }, cx); render();
+  assert.equal(ui.nodes.get('system-usage').height, 89, 'Measurements follow the selected card style');
+  ui.nodes.get('system-usage').sizeChange({ height: 89 }, cx);
+  assert.equal(memory['devkits.system-display'].sidebar.heightMode, 'auto');
+  assert.equal(memory['devkits.system-display'].sidebar.rows, 4);
+  ui.nodes.get('system-usage-resize').mouseDown({ position: { y: 900 } }, cx);
+  ui.nodes.get('devkits-sidebar').mouseMove({ position: { y: 1000 }, bounds: { height: 1200 } }, cx);
   ui.nodes.get('devkits-sidebar').mouseUp({}, cx);
-  assert.equal(memory['devkits.system-display'].sidebar.height, 340);
-  const reloaded = new View(); reloaded.folded = new Set(); reloaded.render(cx);
-  assert.equal(ui.nodes.get('system-usage').height, 340);
-  render(); ui.nodes.get('system-usage-resize').mouseDown({ position: { y: 800 } }, cx);
-  ui.nodes.get('devkits-sidebar').mouseMove({ position: { y: -1000 }, bounds: { height: 800 } }, cx);
-  render(); assert.equal(ui.nodes.get('system-usage').height, 472, 'Project list keeps 96px beside the quota area and footer');
-  ui.nodes.get('devkits-sidebar').hover(false, cx);
-  assert.equal(memory['devkits.system-display'].sidebar.height, 472);
-  assert.equal(view.systemDisplay.resize, null);
-  render(); ui.nodes.get('devkits-sidebar').sizeChange({ height: 450 }, cx);
-  render(); assert.equal(ui.nodes.get('system-usage').height, 122);
-  assert.equal(memory['devkits.system-display'].sidebar.height, 472, 'A shorter window preserves the preferred height');
-  ui.nodes.get('system-usage-resize').click({ click_count: 2 }, cx);
-  assert.equal(memory['devkits.system-display'].sidebar.height, 240);
-  assert.equal(saved.filter(key => key === 'devkits.system-display').length, 3);
-  assert.ok(ui.nodes.get('system-widgets').scrollbar);
+  assert.equal(memory['devkits.system-display'].sidebar.heightMode, 'rows');
+  assert.ok([2, 4, 6].includes(memory['devkits.system-display'].sidebar.rows));
 });
 
 test('hardware ordering reuses drag handles, supports keyboard movement and cancels without changing preferences', async () => {
@@ -603,7 +646,7 @@ function fakeElements() {
     return el;
   };
   const asset = path => { assets.push(path); return element(); };
-  return { nodes, texts, textOf, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element,
+  return { nodes, texts, textOf, assets, element, div: element, svg: asset, image: asset, h_flex: element, v_flex: element, Input: { new: element },
     NativeSelect: { new: id => element().id(id) }, NativePopup: { new: (_id, trigger) => element().child(trigger) }, Popup: { new: (_id, trigger) => element().child(trigger) },
     NativeButton: { new: id => element().id(id) }, NativeCheckbox: { new: id => element().id(id) },
     NativeSwitch: { new: id => element().id(id) }, NativeToggleGroup: { new: id => element().id(id) }, NativeToggle: { new: id => element().id(id) } };
@@ -1337,18 +1380,19 @@ test('the Usage master switch hides the section and pauses reads while preservin
   const memory = { 'devkits.hidden-usage-profiles': ['work'], 'devkits.launcher-order': ['agent:work', 'agent:codex'],
     'devkits.usage-cache': { codex: { key: 'codex', checkedAt: Date.now(), windows: [] } } };
   const View = await viewFor({ ...ui, spaces: () => projects,
+    props: () => ({ view: 'ui-settings', page: 'usage' }), theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     exec: async (...args) => { reads.push(args); return { code: 0, stdout: '[]' }; } });
   const cx = { ...renderContext, spawn(task) { tasks.push(task(cx)); } }, view = new View();
   let discoveries = 0;
   view.cachedAgents = async () => { discoveries++; return [{ key: 'codex', name: 'Codex', run: ['codex'], installed: true }]; };
-  view.usageProfilesPage([], {});
+  view.init({}, cx); view.render(cx);
   assert.equal(ui.nodes.get('usage-visible').checked, true);
   ui.nodes.get('usage-visible').change(false, cx);
   ui.nodes.clear(); view.accountUsage({}); view.refreshUsage(cx, true, true);
   assert.ok(!ui.nodes.has('account-usage'));
   assert.equal(discoveries, 0); assert.equal(reads.length, 0);
-  const reloaded = new View(); reloaded.usageProfilesPage([], {});
+  const reloaded = new View(); reloaded.init({}, cx); reloaded.render(cx);
   assert.equal(ui.nodes.get('usage-visible').checked, false);
   ui.nodes.get('usage-visible').change(true, cx);
   view.refreshUsage(cx, false); await Promise.all(tasks.splice(0));
@@ -2847,6 +2891,135 @@ test('the header shows the branch beside the project; the status bar names only 
   assert.ok(!ui.texts.includes('Local project') && !ui.texts.includes('feature/login'));
   machine = 'vps'; new View().render();
   assert.ok(ui.texts.includes('vps'));
+});
+
+test('interface settings control features before locations and preserve preferences while hidden', async () => {
+  const ui = fakeElements(), opened = [], closed = [];
+  const monitoring = { interval: 3000, widgets: ['cpu', 'ram'], placement: 'sidebar' };
+  const memory = { 'devkits.system-monitor': monitoring,
+    'devkits.system-display': { sidebar: { visible: true, style: 'graph', cpuMode: 'cores', height: 320 }, status: { visible: false } } };
+  let target = {}, sideEffects = 0;
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), setAgentOrder() {},
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    openOverlay: spec => opened.push(spec), closeOverlay: id => closed.push(id),
+    exec: async () => { sideEffects++; return { code: 0 }; } });
+  const sidebar = new View(); sidebar.folded = new Set(); sidebar.render(renderContext);
+  ui.nodes.get('open-interface-settings').click();
+  assert.equal(opened.at(-1).props.view, 'ui-settings');
+  target = { view: 'ui-settings', overlay: 'interface' };
+  const settings = new View(); settings.init({}, renderContext);
+  const render = () => { ui.nodes.clear(); settings.render(renderContext); };
+  const choose = (id, value) => {
+    ui.nodes.get(id).click({}, renderContext); settings.render(renderContext);
+    ui.nodes.get(`${id}-option-${value}`).click({}, renderContext); render();
+  };
+  render();
+  assert.ok(ui.nodes.has('interface-page-system') && ui.nodes.has('interface-page-usage'));
+  assert.ok(!ui.nodes.has('interface-page-sidebar') && !ui.nodes.has('usage-visible'));
+  assert.equal(ui.nodes.get('interface-system-visible').checked, true);
+  choose('interface-system-location', 'both');
+  assert.equal(memory['devkits.system-display'].sidebar.visible, true);
+  assert.equal(memory['devkits.system-display'].status.visible, true);
+  choose('interface-system-style', 'compact');
+  choose('interface-system-cpu', 'total');
+  choose('interface-system-height-mode', 'rows-4');
+  ui.nodes.get('interface-system-visible').change(false, renderContext); render();
+  assert.ok(!ui.nodes.has('interface-system-location') && !ui.nodes.has('interface-system-style'));
+  assert.deepEqual(memory['devkits.system-display'], {
+    enabled: false, sidebar: { visible: true, style: 'compact', cpuMode: 'total', heightMode: 'rows', rows: 4 }, status: { visible: true },
+  });
+  target = {}; const hiddenSidebar = new View();
+  target = { view: 'status' }; const hiddenStatus = new View();
+  assert.equal(hiddenSidebar.systemDisplay.active(), false);
+  assert.equal(hiddenStatus.systemDisplay.active(), false);
+  ui.nodes.clear(); hiddenSidebar.systemDisplay.renderSidebar({}); hiddenStatus.systemDisplay.renderStatus({});
+  assert.ok(!ui.nodes.has('system-usage') && !ui.nodes.has('status-system'));
+  target = { view: 'ui-settings', overlay: 'interface' };
+  const reloaded = new View(); reloaded.init({}, renderContext); reloaded.render(renderContext);
+  assert.equal(ui.nodes.get('interface-system-visible').checked, false);
+  ui.nodes.get('interface-system-visible').change(true, renderContext); render();
+  assert.equal(memory['devkits.system-display'].sidebar.visible, true);
+  assert.equal(memory['devkits.system-display'].status.visible, true);
+  choose('interface-system-location', 'status');
+  for (const id of ['interface-system-style', 'interface-system-cpu', 'interface-system-reset-height'])
+    assert.ok(!ui.nodes.has(id), `${id} only applies to the Sidebar location`);
+  choose('interface-system-location', 'sidebar');
+  assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
+  choose('interface-system-style', 'inline');
+  assert.ok(!ui.nodes.has('interface-system-cpu'));
+  assert.equal(memory['devkits.system-monitor'], monitoring);
+  assert.equal(sideEffects, 0, 'Interface settings do not start provider reads or discovery');
+  assert.deepEqual(closed, []);
+  ui.nodes.get('interface-monitor-settings').click();
+  assert.equal(opened.at(-1).mod, 'devkits-system');
+  assert.equal(opened.at(-1).props.page, 'settings');
+  assert.deepEqual(closed, [], 'Provider settings stack above interface settings');
+  ui.nodes.get('interface-page-usage').click({}, renderContext); render();
+  assert.ok(!ui.nodes.has('interface-system-visible'));
+  assert.equal(ui.nodes.get('usage-visible').checked, true);
+  ui.nodes.get('usage-visible').change(false, renderContext); render();
+  assert.equal(ui.nodes.get('usage-visible').checked, false);
+  ui.nodes.get('interface-settings-done').click();
+  assert.deepEqual(closed, ['interface']);
+});
+
+test('System height settings offer row presets and automatic content height without pixel input', async () => {
+  const ui = fakeElements(), memory = { 'devkits.system-display': {
+    enabled: true, sidebar: { visible: true, style: 'graph', heightMode: 'fixed', height: 350 }, status: { visible: false },
+  } };
+  const View = await viewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'ui-settings' }),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const settings = new View(); settings.init({}, renderContext);
+  const render = () => { ui.nodes.clear(); settings.render(renderContext); };
+  render();
+  assert.equal(settings.interfaceSettings.heightInput, undefined);
+  assert.ok(!ui.nodes.has('interface-system-height'));
+  assert.ok(!ui.nodes.has('interface-system-height-mode-option-fixed'));
+  for (const value of ['rows-2', 'rows-4', 'rows-6', 'auto']) {
+    ui.nodes.get('interface-system-height-mode').click({}, renderContext); settings.render(renderContext);
+    ui.nodes.get(`interface-system-height-mode-option-${value}`).click({}, renderContext); render();
+    assert.equal(memory['devkits.system-display'].sidebar.heightMode, value === 'auto' ? 'auto' : 'rows');
+    if (value !== 'auto') assert.equal(memory['devkits.system-display'].sidebar.rows, Number(value.slice(5)));
+    assert.equal(Object.hasOwn(memory['devkits.system-display'].sidebar, 'height'), false);
+  }
+});
+
+test('System can enable old hidden preferences and quick visibility retains the last location', async () => {
+  const ui = fakeElements(), memory = { 'devkits.system-display': {
+    sidebar: { visible: false, style: 'compact', height: 350 }, status: { visible: false },
+  } };
+  let target = { view: 'ui-settings', overlay: 'interface' };
+  const View = await viewFor({ ...ui, theme: () => ({}), props: () => target,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, closeOverlay() {} });
+  const settings = new View(); settings.init({}, renderContext); settings.render(renderContext);
+  assert.equal(ui.nodes.get('interface-system-visible').checked, false);
+  assert.ok(!ui.nodes.has('interface-system-location'));
+  ui.nodes.get('interface-system-visible').change(true, renderContext);
+  assert.equal(memory['devkits.system-display'].enabled, true);
+  assert.equal(memory['devkits.system-display'].sidebar.visible, true);
+  assert.equal(memory['devkits.system-display'].sidebar.rows, 4);
+  target = { view: 'system-display-menu', surface: 'sidebar' };
+  const menu = new View(); menu.init({}, renderContext); menu.render(renderContext);
+  ui.nodes.get('system-display-sidebar').click({}, renderContext);
+  assert.equal(memory['devkits.system-display'].enabled, false);
+  assert.equal(memory['devkits.system-display'].sidebar.visible, true, 'Hide retains the last chosen location');
+  target = { view: 'system-display-menu', surface: 'status' };
+  const statusMenu = new View(); statusMenu.init({}, renderContext); statusMenu.render(renderContext);
+  ui.nodes.get('system-display-status').click({}, renderContext);
+  assert.equal(memory['devkits.system-display'].enabled, true);
+  assert.equal(memory['devkits.system-display'].sidebar.visible, false);
+  assert.equal(memory['devkits.system-display'].status.visible, true);
+  assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
+});
+
+test('agent account settings link to the single Usage display switch', async () => {
+  const ui = fakeElements(), opened = [];
+  const View = await viewFor({ ...ui, openOverlay: spec => opened.push(spec) });
+  new View().usageProfilesPage([], {});
+  assert.ok(!ui.nodes.has('usage-visible'));
+  ui.nodes.get('usage-interface-settings').click();
+  assert.equal(opened.at(-1).props.view, 'ui-settings');
+  assert.equal(opened.at(-1).props.page, 'usage');
 });
 
 test('the header branch opens a read-only list of local and remote branches, newest first', async () => {

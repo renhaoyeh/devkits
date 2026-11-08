@@ -7,10 +7,11 @@ import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuS
 import { glyph } from './components/icon.js';
 
 const displayKey = 'devkits.system-display';
-const displayConfig = () => systemDisplayPreferences(shared(displayKey), shared('devkits.system-monitor'));
-const saveDisplay = (patch, cx) => {
-  const current = displayConfig();
+export const systemDisplayConfig = () => systemDisplayPreferences(shared(displayKey), shared('devkits.system-monitor'));
+export const saveSystemDisplay = (patch, cx) => {
+  const current = systemDisplayConfig();
   setShared(displayKey, systemDisplayPreferences({
+    enabled: patch.enabled ?? current.enabled,
     sidebar: { ...current.sidebar, ...patch.sidebar }, status: { ...current.status, ...patch.status },
   }));
   cx.notify();
@@ -23,22 +24,22 @@ export const openSystemDetails = (page = 'overview') => openOverlay({
 
 // Devkits' adapter: placement, containers, sizing and context menus belong to this consumer.
 export class SystemDisplay {
-  constructor(monitor, view) { this.monitor = monitor; this.view = view; }
+  constructor(monitor, view) { this.monitor = monitor; this.view = view; this.widgetHeights = {}; }
 
   init() {
-    if (shared(displayKey) == null) setShared(displayKey, displayConfig());
+    if (shared(displayKey) == null) setShared(displayKey, systemDisplayConfig());
   }
 
   active() {
-    const config = displayConfig();
-    return this.view === 'hardware-details' || (this.view === 'status' ? config.status.visible : !this.view && config.sidebar.visible);
+    const config = systemDisplayConfig();
+    return this.view === 'hardware-details' || (config.enabled && (this.view === 'status' ? config.status.visible : !this.view && config.sidebar.visible));
   }
 
-  contextMenu(root) {
+  contextMenu(root, surface = 'sidebar') {
     return root.on_mouse_down('right', (event, cx) => {
       cx.stop_propagation();
       openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 248,
-        at: event.position, props: { view: 'system-display-menu' } });
+        at: event.position, props: { view: 'system-display-menu', surface } });
     });
   }
 
@@ -63,26 +64,42 @@ export class SystemDisplay {
     });
   }
 
-  sidebarSize(value = this.resize?.now ?? displayConfig().sidebar.height) {
-    return systemSidebarHeight(value, this.available === undefined ? 600 : this.available - (this.reserved || 0) - 32 - 96);
+  sidebarAvailableHeight() {
+    return Math.max(32, this.available === undefined ? 600 : this.available - (this.reserved || 0) - 32 - 96);
+  }
+
+  sidebarSize(value = this.resize?.now) {
+    const config = systemDisplayConfig().sidebar, available = this.sidebarAvailableHeight();
+    if (value !== undefined) return systemSidebarHeight(value, available);
+    return Math.min(Math.round(available), this.rowsHeight(config.heightMode === 'auto' ? Infinity : config.rows));
+  }
+
+  rowsHeight(rows = Infinity) {
+    const config = systemDisplayConfig().sidebar, ids = this.monitor.snapshot().widgets.slice(0, rows);
+    // Header and top border, then the measured cards in visible order.
+    return Math.ceil(33 + ids.reduce((total, id) => total + (this.widgetHeights[`${config.style}:${config.cpuMode}:${id}`] ?? 48), 0));
   }
 
   endResize(cx) {
     if (!this.resize) return;
     const height = this.sidebarSize(); this.resize = null;
-    saveDisplay({ sidebar: { height } }, cx);
+    const rows = [2, 4, 6].reduce((best, count) => Math.abs(this.rowsHeight(count) - height) < Math.abs(this.rowsHeight(best) - height) ? count : best, 4);
+    saveSystemDisplay({ sidebar: { heightMode: 'rows', rows } }, cx);
   }
 
   renderStatus(t) {
-    return displayConfig().status.visible ? this.contextMenu(this.monitor.renderInline(t, { id: 'status-system' })) : div().flex_1().min_w(0);
+    const config = systemDisplayConfig();
+    return config.enabled && config.status.visible ? this.contextMenu(this.monitor.renderInline(t, { id: 'status-system' }), 'status') : div().flex_1().min_w(0);
   }
 
   renderSidebar(t) {
-    const config = displayConfig().sidebar;
-    if (!config.visible) return div().h(0).flex_none();
+    const display = systemDisplayConfig(), config = display.sidebar;
+    if (!display.enabled || !config.visible) return div().h(0).flex_none();
     const inline = config.style === 'inline', widgets = this.monitor.snapshot().widgets.length > 0;
     return this.contextMenu(v_flex().id('system-usage').relative().w_full().min_h(0).flex_none()
-      .h(inline ? widgets ? 64 : 32 : widgets ? this.sidebarSize() : 32).border_t(1).border_color(t.border)
+      .h(inline ? widgets ? 64 : 32 : widgets ? this.sidebarSize() : 32)
+      .on_size_change((size) => { this.renderedHeight = size.height; })
+      .border_t(1).border_color(t.border)
       .accessibility_label('Current hardware usage of this computer')
       .child(h_flex().h(32).flex_none().pl(12).items_center()
         .child(div().flex_1().text_size(11).font_medium().text_color(t.muted).child('SYSTEM'))
@@ -90,45 +107,60 @@ export class SystemDisplay {
           .accessibility_label('Open system monitor').on_click(() => this.monitor.open()).child(glyph('chart-column'))))
       .when(widgets, el => el.child(inline
         ? h_flex().h(32).min_w(0).child(this.monitor.renderInline(t, { id: 'sidebar-system' }))
-        : this.monitor.renderWidgets(t, { style: config.style, cpuMode: config.cpuMode }).flex_1().min_h(0).overflow_y_scrollbar().pb(6)))
+        : this.monitor.renderWidgets(t, { style: config.style, cpuMode: config.cpuMode,
+          onWidgetSize: (id, size, cx) => {
+            if (!Number.isFinite(size.height) || size.height <= 0) return;
+            const key = `${config.style}:${config.cpuMode}:${id}`;
+            if (Math.abs((this.widgetHeights[key] ?? 0) - size.height) < 0.25) return;
+            this.widgetHeights[key] = size.height;
+            cx.notify();
+          },
+        }).flex_1().min_h(0).overflow_y_scrollbar()))
       .when(widgets && !inline, el => el.child(div().id('system-usage-resize').absolute().top(-3).left(0).right(0).h(6).cursor_row_resize()
-        .accessibility_label('Resize system monitor. Drag the top border; double-click to reset.')
+        .accessibility_label('Drag to choose 2, 4 or 6 monitor rows; double-click for 4 rows.')
         .on_mouse_down('left', (event, cx) => {
-          cx.stop_propagation(); const height = this.sidebarSize();
+          cx.stop_propagation(); const height = this.renderedHeight ?? this.sidebarSize();
           this.resize = { y: event.position.y, height, now: height }; cx.notify();
         })
         .on_click((event, cx) => {
           if (event.click_count < 2) return;
-          this.resize = null; saveDisplay({ sidebar: { height: 240 } }, cx);
+          this.resize = null; saveSystemDisplay({ sidebar: { heightMode: 'rows', rows: 4 } }, cx);
         }))));
   }
 }
 
 export class SystemDisplayMenu {
-  constructor({ overlay } = {}) { this.overlay = overlay; }
+  constructor({ overlay, surface } = {}) { this.overlay = overlay; this.surface = surface === 'status' ? 'status' : 'sidebar'; }
 
   init(cx) { this.handle = cx.focus_handle(); this.handle.focus(); this.index = 0; }
 
   render(t) {
-    const config = displayConfig(), overlay = this.overlay;
-    const actions = [
-      { key: 'sidebar', label: 'Show in sidebar', checked: config.sidebar.visible },
-      { key: 'status', label: 'Show in status bar', checked: config.status.visible },
+    const config = systemDisplayConfig(), overlay = this.overlay;
+    const actions = [...(this.surface === 'status' ? [
+      { key: 'status', label: 'Show in status bar', checked: config.enabled && config.status.visible },
+    ] : [
+      { key: 'sidebar', label: 'Show in sidebar', checked: config.enabled && config.sidebar.visible },
       { key: 'inline', label: 'Inline values', checked: config.sidebar.style === 'inline', section: 'SIDEBAR STYLE' },
       { key: 'compact', label: 'Compact widgets', checked: config.sidebar.style === 'compact' },
       { key: 'graph', label: 'History widgets', checked: config.sidebar.style === 'graph' },
       { key: 'total', label: 'Total', checked: config.sidebar.cpuMode === 'total', section: 'WIDGET CPU' },
       { key: 'cores', label: 'Per core', checked: config.sidebar.cpuMode === 'cores' },
+    ]),
       { key: 'settings', label: 'Monitor settings…', section: '' },
     ];
     const choose = (action, cx) => {
       cx.stop_propagation();
       if (!action) return;
-      const current = displayConfig();
+      const current = systemDisplayConfig();
       if (action.key === 'settings') { closeOverlay(overlay); openSystemDetails('settings'); return; }
-      if (['sidebar', 'status'].includes(action.key)) saveDisplay({ [action.key]: { visible: !current[action.key].visible } }, cx);
-      else if (['total', 'cores'].includes(action.key)) saveDisplay({ sidebar: { cpuMode: action.key } }, cx);
-      else saveDisplay({ sidebar: { visible: true, style: action.key } }, cx);
+      if (['sidebar', 'status'].includes(action.key)) {
+        const other = action.key === 'sidebar' ? 'status' : 'sidebar';
+        if (!current.enabled) saveSystemDisplay({ enabled: true, [action.key]: { visible: true }, [other]: { visible: false } }, cx);
+        else if (current[action.key].visible && !current[other].visible) saveSystemDisplay({ enabled: false }, cx);
+        else saveSystemDisplay({ [action.key]: { visible: !current[action.key].visible } }, cx);
+      }
+      else if (['total', 'cores'].includes(action.key)) saveSystemDisplay({ sidebar: { cpuMode: action.key } }, cx);
+      else saveSystemDisplay({ sidebar: { style: action.key } }, cx);
       closeOverlay(overlay);
     };
     return DropdownMenuContent('system-display-menu', undefined, t).role('menu').accessibility_label('System display')
@@ -144,7 +176,7 @@ export class SystemDisplayMenu {
         else return;
         cx.stop_propagation();
       })
-      .child(DropdownMenuLabel(t).child('SYSTEM'))
+      .child(DropdownMenuLabel(t).child(this.surface === 'status' ? 'SYSTEM · STATUS BAR' : 'SYSTEM · SIDEBAR'))
       .children(actions.flatMap((action, index) => [
         ...(action.section !== undefined ? [DropdownMenuSeparator(t), ...(action.section ? [DropdownMenuLabel(t).child(action.section)] : [])] : []),
         DropdownMenuItem(`system-display-${action.key}`, t).role('menu_item').accessibility_label(action.label)
