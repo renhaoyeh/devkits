@@ -297,6 +297,9 @@ test('monitor settings persist module choices, order, interval, style and select
   assert.ok(!ui.nodes.has('system-network'));
   assert.ok(ui.nodes.has('system-storage') && ui.nodes.has('system-disk') && ui.nodes.has('system-battery'));
   assert.ok(ui.nodes.has('system-core-bars-0') && ui.nodes.has('system-core-bars-2'));
+  assert.equal(ui.nodes.get('system-core-bars').height, 12);
+  assert.equal(ui.nodes.get('system-cpu-bar').width, ui.nodes.get('system-ram-bar').width);
+  assert.equal(ui.nodes.get('system-cpu-usage').children.length, ui.nodes.get('system-ram-usage').children.length);
   assert.ok(!ui.nodes.has('system-core-bars-1') && !ui.nodes.has('system-core-bars-3'));
   assert.equal(reloaded.systemMonitor.hardware.cores, 4, 'Choosing displayed cores must not fabricate the detected core count');
   assert.deepEqual(memory['devkits.system-monitor'].cores, [0, 2]);
@@ -400,7 +403,9 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   const menu = new View(); menu.init({}, cx); ui.nodes.clear(); menu.render(cx);
   assert.ok(!ui.nodes.has('system-display-status'));
   for (const style of ['inline', 'compact', 'graph']) assert.ok(!ui.nodes.has(`system-display-${style}`));
-  // Keyboard chooses Total after the sidebar visibility control.
+  assert.ok(ui.textOf('system-display-total').includes('Overall CPU'));
+  assert.ok(ui.textOf('system-display-cores').includes('Per logical CPU'));
+  // Keyboard chooses Overall CPU after the sidebar visibility control.
   const element = ui.nodes.get('system-display-menu');
   element.keyDown({ key: 'down' }, cx); element.keyDown({ key: 'enter' }, cx);
   assert.equal(memory['devkits.system-display'].sidebar.cpuMode, 'total');
@@ -408,6 +413,13 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   target = {}; view.systemMonitor.hardware = { cpu: 25, cores: 2 };
   ui.nodes.clear(); view.systemDisplay.renderSidebar({});
   assert.ok(ui.textOf('system-cpu').includes('25%'));
+  assert.ok(ui.nodes.has('system-cpu-bar') && !ui.nodes.has('system-core-bars'));
+  assert.equal(ui.nodes.get('system-cpu-bar').width, ui.nodes.get('system-ram-bar').width);
+  assert.equal(ui.nodes.get('system-cpu-bar-segments').height, ui.nodes.get('system-ram-bar-segments').height);
+  assert.equal(ui.nodes.get('system-cpu-usage').children.length, ui.nodes.get('system-ram-usage').children.length);
+  assert.ok(ui.textOf('system-cpu-bar').includes('25%'));
+  assert.ok(!ui.nodes.has('system-cpu-value'), 'CPU usage is shown once beside its bar');
+  assert.equal([...ui.nodes.keys()].filter(key => /^system-cpu-bar-\d+-fill$/.test(key)).length, 5);
   assert.ok(ui.nodes.has('system-usage-resize') && !ui.nodes.has('sidebar-system-cpu'));
   target = { view: 'system-display-menu', surface: 'status', overlay: 'display' };
   const statusMenu = new View(); statusMenu.init({}, cx); ui.nodes.clear(); statusMenu.render(cx);
@@ -462,9 +474,9 @@ test('System row presets use actual card sizes and dragging snaps to a preset', 
   const view = new View(), cx = { ...renderContext, spawn() {} };
   const render = () => { ui.nodes.clear(); view.systemDisplay.renderSidebar({}); };
   render();
-  ui.nodes.get('system-cpu-layout').sizeChange({ height: 52 }, cx);
-  ui.nodes.get('system-ram-layout').sizeChange({ height: 38 }, cx);
-  ui.nodes.get('system-disk-layout').sizeChange({ height: 60 }, cx); render();
+  ui.nodes.get('system-compact-cores-cpu-layout').sizeChange({ height: 52 }, cx);
+  ui.nodes.get('system-compact-cores-ram-layout').sizeChange({ height: 38 }, cx);
+  ui.nodes.get('system-compact-cores-disk-layout').sizeChange({ height: 60 }, cx); render();
   assert.equal(ui.nodes.get('system-usage').height, 123);
   memory['devkits.system-monitor'].order = ['disk', 'ram', 'cpu']; render();
   assert.equal(ui.nodes.get('system-usage').height, 131);
@@ -496,10 +508,15 @@ test('auto System height fits content and only scrolls when available space is s
   render();
   ui.nodes.get('devkits-sidebar').sizeChange({ height: 1200 }, cx);
   ui.nodes.get('account-usage').sizeChange({ height: 200 }, cx);
-  ui.nodes.get('system-cpu-layout').sizeChange({ height: 52 }, cx);
-  ui.nodes.get('system-ram-layout').sizeChange({ height: 38 }, cx);
-  ui.nodes.get('system-disk-layout').sizeChange({ height: 60 }, cx); render();
+  ui.nodes.get('system-compact-cores-cpu-layout').sizeChange({ height: 52 }, cx);
+  ui.nodes.get('system-compact-cores-ram-layout').sizeChange({ height: 38 }, cx);
+  ui.nodes.get('system-compact-cores-disk-layout').sizeChange({ height: 60 }, cx); render();
   assert.equal(ui.nodes.get('system-usage').height, 183, 'Auto fits the measured card layout');
+  memory['devkits.system-display'].sidebar.cpuMode = 'total'; render();
+  assert.equal(ui.nodes.get('system-usage').height, 183, 'Switching CPU modes reuses equal card heights before new measurements arrive');
+  assert.ok(ui.nodes.has('system-compact-total-cpu-layout') && !ui.nodes.has('system-compact-cores-cpu-layout'), 'A new native measurement element receives the new mode callbacks');
+  memory['devkits.system-display'].sidebar.cpuMode = 'cores'; render();
+  assert.equal(ui.nodes.get('system-usage').height, 183, 'Returning to per-core mode keeps the full Auto height');
   ui.nodes.get('account-usage').sizeChange({ height: 300 }, cx); render();
   assert.equal(ui.nodes.get('system-usage').height, 183, 'Quota changes do not expand the monitor');
   ui.nodes.get('devkits-sidebar').sizeChange({ height: 500 }, cx); render();
@@ -509,8 +526,8 @@ test('auto System height fits content and only scrolls when available space is s
   memory['devkits.system-monitor'].visible.ram = false; render();
   assert.equal(ui.nodes.get('system-usage').height, 145, 'Only visible cards contribute to content height');
   memory['devkits.system-display'].sidebar.style = 'compact'; render();
-  ui.nodes.get('system-cpu-layout').sizeChange({ height: 22 }, cx);
-  ui.nodes.get('system-disk-layout').sizeChange({ height: 34 }, cx); render();
+  ui.nodes.get('system-compact-cores-cpu-layout').sizeChange({ height: 22 }, cx);
+  ui.nodes.get('system-compact-cores-disk-layout').sizeChange({ height: 34 }, cx); render();
   assert.equal(ui.nodes.get('system-usage').height, 89, 'Measurements follow the selected card style');
   ui.nodes.get('system-usage').sizeChange({ height: 89 }, cx);
   assert.equal(memory['devkits.system-display'].sidebar.heightMode, 'auto');

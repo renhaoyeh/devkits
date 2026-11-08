@@ -66,9 +66,9 @@ export class InterfaceSettings {
                     sidebar: { visible: value !== 'status' }, status: { visible: value !== 'sidebar' },
                   }, cx), t, { width: 176, boxed: true })))
               .when(config.sidebar.visible, el => el
-                  .child(row('Widget CPU view', 'Show total usage or individual logical processors.',
+                  .child(row('Widget CPU view', 'Overall CPU averages all logical processors. Per logical CPU shows one bar per processor.',
                     Select('interface-system-cpu', this.cpuMode, config.sidebar.cpuMode,
-                      options([['total', 'Total'], ['cores', 'Per core']]), 'Widget CPU view',
+                      options([['total', 'Overall CPU'], ['cores', 'Per logical CPU']]), 'Widget CPU view',
                       (cpuMode, cx) => saveSystemDisplay({ sidebar: { cpuMode } }, cx), t, { width: 176, boxed: true })))
                   .child(row('Visible rows', 'Choose a row count, or fit all monitor cards automatically.',
                     Select('interface-system-height-mode', this.heightMode,

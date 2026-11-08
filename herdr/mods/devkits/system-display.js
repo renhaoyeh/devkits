@@ -75,9 +75,9 @@ export class SystemDisplay {
   }
 
   rowsHeight(rows = Infinity) {
-    const config = systemDisplayConfig().sidebar, ids = this.monitor.snapshot().widgets.slice(0, rows);
+    const ids = this.monitor.snapshot().widgets.slice(0, rows);
     // Header and top border, then the measured cards in visible order.
-    return Math.ceil(33 + ids.reduce((total, id) => total + (this.widgetHeights[`${config.style}:${config.cpuMode}:${id}`] ?? 48), 0));
+    return Math.ceil(33 + ids.reduce((total, id) => total + (this.widgetHeights[id] ?? 48), 0));
   }
 
   endResize(cx) {
@@ -108,9 +108,9 @@ export class SystemDisplay {
       .when(widgets, el => el.child(this.monitor.renderWidgets(t, { style: config.style, cpuMode: config.cpuMode,
           onWidgetSize: (id, size, cx) => {
             if (!Number.isFinite(size.height) || size.height <= 0) return;
-            const key = `${config.style}:${config.cpuMode}:${id}`;
-            if (Math.abs((this.widgetHeights[key] ?? 0) - size.height) < 0.25) return;
-            this.widgetHeights[key] = size.height;
+            // Compact CPU modes share the same row geometry and measured card heights.
+            if (Math.abs((this.widgetHeights[id] ?? 0) - size.height) < 0.25) return;
+            this.widgetHeights[id] = size.height;
             cx.notify();
           },
         }).flex_1().min_h(0).overflow_y_scrollbar()))
@@ -138,8 +138,8 @@ export class SystemDisplayMenu {
       { key: 'status', label: 'Show in status bar', checked: config.enabled && config.status.visible },
     ] : [
       { key: 'sidebar', label: 'Show in sidebar', checked: config.enabled && config.sidebar.visible },
-      { key: 'total', label: 'Total', checked: config.sidebar.cpuMode === 'total', section: 'WIDGET CPU' },
-      { key: 'cores', label: 'Per core', checked: config.sidebar.cpuMode === 'cores' },
+      { key: 'total', label: 'Overall CPU', checked: config.sidebar.cpuMode === 'total', section: 'WIDGET CPU' },
+      { key: 'cores', label: 'Per logical CPU', checked: config.sidebar.cpuMode === 'cores' },
     ]),
       { key: 'settings', label: 'Monitor settings…', section: '' },
     ];
