@@ -234,6 +234,7 @@ test('system monitor opens from each summary and refreshes hardware details whil
   t.mock.method(Date, 'now', () => now);
   let request = 0;
   const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', overlay: 'system-overlay' }),
+    shared: key => key === 'devkits.system-monitor' ? { visible: { disk: true, network: true } } : key === 'devkits.system-display' ? { sidebar: { style: 'graph', cpuMode: 'total' } } : undefined,
     openOverlay: spec => opened.push(spec), closeOverlay: id => closed.push(id),
     exec: async () => ({ code: 0, stdout: JSON.stringify({ sample: { count: 10, total: 100, idle: 50 },
       cpu: ++request * 10, cores: 10, cpuName: 'Apple M4', load: [1, 2, 3],
@@ -271,7 +272,7 @@ test('system monitor opens from each summary and refreshes hardware details whil
 });
 
 test('monitor settings persist module choices, order, interval, style and selected CPU cores', async () => {
-  const ui = fakeElements(), memory = {};
+  const ui = fakeElements(), memory = { 'devkits.system-monitor': { visible: { disk: true, battery: true } } };
   const View = await systemViewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(), cx = renderContext;
   view.systemMonitor.hardware = { cores: 4, coreUsage: [10, 20, 30, 40], cpu: 25, cpuName: 'Fixture',
@@ -300,7 +301,7 @@ test('monitor settings persist module choices, order, interval, style and select
   assert.deepEqual(memory['devkits.system-monitor'].cores, [0, 2]);
   assert.equal(memory['devkits.system-monitor'].interval, 10);
   assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
-  assert.equal(memory['devkits.system-monitor'].order[5], 'battery');
+  assert.equal(memory['devkits.system-monitor'].order[3], 'battery');
   assert.ok(ui.textOf('system-disk').some(text => text.includes('R 1.0 KB/s') && text.includes('W 2.0 KB/s')));
   assert.ok(ui.textOf('system-disk').includes('Disk I/O · APPLE SSD AP0512Z'));
   reloaded.systemMonitor.hardwareModuleDetails('disk', {});
@@ -317,7 +318,7 @@ test('monitor settings persist module choices, order, interval, style and select
   reloaded.systemMonitor.hardwareSettings({});
   for (const id of Object.keys(memory['devkits.system-monitor'].visible)) ui.nodes.get(`hardware-visible-${id}`).change(false, cx);
   ui.nodes.clear(); reloaded.systemDisplay.renderSidebar({}); reloaded.statusBar({});
-  assert.ok(ui.nodes.has('system-monitor-settings') && ui.nodes.has('open-hardware-details'));
+  assert.ok(!ui.nodes.has('system-monitor-settings') && ui.nodes.has('open-hardware-details'));
   assert.ok(!ui.nodes.has('system-cpu') && !ui.nodes.has('system-battery'));
   reloaded.systemMonitor.hardwareSettings({}); ui.nodes.get('hardware-visible-battery').change(true, cx);
   reloaded.systemMonitor.hardware = { ...reloaded.systemMonitor.hardware, battery: null };
@@ -329,7 +330,7 @@ test('monitor settings persist module choices, order, interval, style and select
 
 test('the host context menu toggles status monitoring independently of the sidebar', async () => {
   const ui = fakeElements(), opened = [], ticks = [], tasks = [];
-  const memory = { 'devkits.system-display': null, 'devkits.system-monitor': { placement: 'sidebar', order: ['ram', 'cpu', 'disk', 'network'], visible: { gpu: false } } };
+  const memory = { 'devkits.system-display': null, 'devkits.system-monitor': { placement: 'sidebar', order: ['ram', 'cpu', 'disk', 'network'], visible: { gpu: false, storage: false, disk: true, network: true } } };
   let target = { view: 'status' };
   const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => target,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
@@ -355,13 +356,13 @@ test('the host context menu toggles status monitoring independently of the sideb
   assert.deepEqual(ui.textOf('status-system-network'), ['↓4K/s ↑0B/s']);
   assert.deepEqual([...ui.nodes.keys()].filter(id => /^status-system-(?:ram|cpu|disk|network)$/.test(id)),
     ['status-system-ram', 'status-system-cpu', 'status-system-disk', 'status-system-network']);
-  ui.nodes.get('status-system-ram').click(); ui.nodes.get('system-monitor-settings').click();
+  ui.nodes.get('status-system-ram').click(); choose('settings');
   assert.deepEqual(opened.map(spec => spec.props.page), ['ram', 'settings']);
   view.systemMonitor.hardwareSettings({});
   assert.ok(!ui.nodes.has('hardware-placement-status') && !ui.nodes.has('hardware-style-compact'));
   for (const id of ['ram', 'cpu', 'disk', 'network', 'battery']) ui.nodes.get(`hardware-visible-${id}`).change(false, cx);
   ui.nodes.clear(); view.render(cx);
-  assert.ok(ui.nodes.has('system-monitor-settings'));
+  assert.ok(!ui.nodes.has('system-monitor-settings'));
   assert.equal([...ui.nodes.keys()].filter(id => /^status-system-(?:ram|cpu|disk|network)$/.test(id)).length, 0);
   choose('status');
   ui.nodes.clear(); view.render(cx); ticks[0][1](cx);
@@ -411,9 +412,9 @@ test('SYSTEM right-click menus stay inside monitor targets and remain reachable 
   ui.nodes.get('status-system').mouseDownByButton.right({ position: { x: 400, y: 700 } }, cx);
   assert.equal(opened.at(-1).props.view, 'system-display-menu');
   assert.equal(opened.at(-1).props.surface, 'status');
-  ui.nodes.get('system-monitor-settings').mouseDownByButton.right({ position: { x: 600, y: 700 } }, cx);
-  assert.equal(opened.at(-1).props.view, 'system-display-menu', 'The menu is reachable while sidebar monitoring is hidden');
-  assert.equal(opened.at(-1).props.surface, 'status');
+  assert.ok(!ui.nodes.has('system-monitor-settings'));
+  ui.nodes.get('open-interface-settings').click();
+  assert.equal(opened.at(-1).props.view, 'ui-settings', 'Settings remain reachable while sidebar monitoring is hidden');
   target = { view: 'system-display-menu', overlay: 'display' };
   const reloaded = new View(); reloaded.init({}, cx); reloaded.render(cx);
   ui.nodes.get('system-display-sidebar').click({}, cx);
@@ -442,7 +443,7 @@ test('SystemMonitor exposes data and independently mountable renderers without h
 
 test('System row presets use actual card sizes and dragging snaps to a preset', async () => {
   const ui = fakeElements(), memory = {
-    'devkits.system-monitor': { order: ['cpu', 'ram', 'disk'], visible: { gpu: false, network: false, storage: false, battery: false, sensors: false } },
+    'devkits.system-monitor': { order: ['cpu', 'ram', 'disk'], visible: { disk: true, gpu: false, network: false, storage: false, battery: false, sensors: false } },
     'devkits.system-display': { enabled: true, sidebar: { visible: true, style: 'graph', heightMode: 'rows', rows: 2 } },
   };
   const View = await systemViewFor({ ...ui, theme: () => ({}), setAgentOrder() {},
@@ -474,7 +475,7 @@ test('System row presets use actual card sizes and dragging snaps to a preset', 
 
 test('auto System height fits content and only scrolls when available space is smaller', async () => {
   const ui = fakeElements(), memory = {
-    'devkits.system-monitor': { order: ['cpu', 'ram', 'disk'], visible: { gpu: false, network: false, storage: false, battery: false, sensors: false } },
+    'devkits.system-monitor': { order: ['cpu', 'ram', 'disk'], visible: { disk: true, gpu: false, network: false, storage: false, battery: false, sensors: false } },
     'devkits.system-display': { enabled: true, sidebar: { visible: true, style: 'graph', heightMode: 'auto', rows: 4 }, status: { visible: false } },
   };
   const View = await systemViewFor({ ...ui, theme: () => ({}), setAgentOrder() {}, run() {},
@@ -519,7 +520,7 @@ test('hardware ordering reuses drag handles, supports keyboard movement and canc
   assert.ok(ui.textOf('hardware-page-ram').includes('RAM'));
   assert.ok(!ui.nodes.has('hardware-order-cpu--1'));
   ui.nodes.get('hardware-drag-gpu').keyDown({ key: 'up', modifiers: { alt: true } }, renderContext);
-  assert.equal(memory['devkits.system-monitor'].order[0], 'gpu');
+  assert.equal(memory['devkits.system-monitor'].order[1], 'gpu');
   const order = [...memory['devkits.system-monitor'].order];
   ui.nodes.get('hardware-drag-battery').mouseDown({}, renderContext);
   ui.nodes.get('hardware-setting-row-cpu').mouseMove({}, renderContext);
@@ -2894,7 +2895,7 @@ test('the header shows the branch beside the project; the status bar names only 
 });
 
 test('interface settings control features before locations and preserve preferences while hidden', async () => {
-  const ui = fakeElements(), opened = [], closed = [];
+  const ui = fakeElements(), opened = [], closed = [], resetCommands = [];
   const monitoring = { interval: 3000, widgets: ['cpu', 'ram'], placement: 'sidebar' };
   const memory = { 'devkits.system-monitor': monitoring,
     'devkits.system-display': { sidebar: { visible: true, style: 'graph', cpuMode: 'cores', height: 320 }, status: { visible: false } } };
@@ -2902,6 +2903,7 @@ test('interface settings control features before locations and preserve preferen
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), setAgentOrder() {},
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     openOverlay: spec => opened.push(spec), closeOverlay: id => closed.push(id),
+    run: command => resetCommands.push(command),
     exec: async () => { sideEffects++; return { code: 0 }; } });
   const sidebar = new View(); sidebar.folded = new Set(); sidebar.render(renderContext);
   ui.nodes.get('open-interface-settings').click();
@@ -2954,8 +2956,17 @@ test('interface settings control features before locations and preserve preferen
   assert.equal(opened.at(-1).mod, 'devkits-system');
   assert.equal(opened.at(-1).props.page, 'settings');
   assert.deepEqual(closed, [], 'Provider settings stack above interface settings');
+  ui.nodes.get('interface-system-reset').click({}, renderContext); render();
+  assert.deepEqual(memory['devkits.system-display'], {
+    enabled: true, sidebar: { visible: true, style: 'compact', cpuMode: 'cores', heightMode: 'auto', rows: 6 }, status: { visible: false },
+  });
+  assert.equal(resetCommands.at(-1), 'devkits-system.reset', 'The monitoring owner handles its own reset');
+  assert.equal(memory['devkits.system-monitor'], monitoring, 'The host never writes monitoring preferences');
+  assert.equal(sideEffects, 0, 'Reset does not launch a hardware reader');
+  assert.deepEqual(closed, [], 'Reset keeps settings open');
   ui.nodes.get('interface-page-usage').click({}, renderContext); render();
   assert.ok(!ui.nodes.has('interface-system-visible'));
+  assert.ok(!ui.nodes.has('interface-system-reset'), 'SYSTEM reset is scoped to its own page');
   assert.equal(ui.nodes.get('usage-visible').checked, true);
   ui.nodes.get('usage-visible').change(false, renderContext); render();
   assert.equal(ui.nodes.get('usage-visible').checked, false);
@@ -2997,7 +3008,7 @@ test('System can enable old hidden preferences and quick visibility retains the 
   ui.nodes.get('interface-system-visible').change(true, renderContext);
   assert.equal(memory['devkits.system-display'].enabled, true);
   assert.equal(memory['devkits.system-display'].sidebar.visible, true);
-  assert.equal(memory['devkits.system-display'].sidebar.rows, 4);
+  assert.equal(memory['devkits.system-display'].sidebar.rows, 6);
   target = { view: 'system-display-menu', surface: 'sidebar' };
   const menu = new View(); menu.init({}, renderContext); menu.render(renderContext);
   ui.nodes.get('system-display-sidebar').click({}, renderContext);

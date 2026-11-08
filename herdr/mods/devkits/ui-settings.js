@@ -1,7 +1,8 @@
 import { div } from 'gpui-kit';
 import { h_flex, v_flex } from 'gpui-base';
-import { shared, setShared, props, openOverlay, closeOverlay } from 'herdr';
+import { shared, setShared, props, openOverlay, closeOverlay, run } from 'herdr';
 import { systemDisplayConfig, saveSystemDisplay, openSystemDetails } from './system-display.js';
+import { systemDisplayPreferences } from './system-display-model.js';
 import { Button } from './components/button.js';
 import { Switch } from './components/switch.js';
 import { Select, SelectState } from './components/select.js';
@@ -77,7 +78,7 @@ export class InterfaceSettings {
                   .child(row('Visible rows', 'Choose a row count, or fit all monitor cards automatically.',
                     Select('interface-system-height-mode', this.heightMode,
                       config.sidebar.heightMode === 'rows' ? `rows-${config.sidebar.rows}` : config.sidebar.heightMode,
-                      options([['rows-2', '2 rows'], ['rows-4', '4 rows (default)'], ['rows-6', '6 rows'], ['auto', 'Auto height']]), 'Visible monitor rows',
+                      options([['rows-2', '2 rows'], ['rows-4', '4 rows'], ['rows-6', '6 rows'], ['auto', 'Auto height (default)']]), 'Visible monitor rows',
                       (value, cx) => {
                         saveSystemDisplay({ sidebar: value.startsWith('rows-')
                           ? { heightMode: 'rows', rows: Number(value.slice(5)) } : { heightMode: value } }, cx);
@@ -91,6 +92,13 @@ export class InterfaceSettings {
               Switch('usage-visible', usage, t).accessibility_label('Show Usage')
                 .on_change((visible, cx) => { setShared('devkits.usage-visible', visible); cx.notify(); }))))))
       .child(DialogFooter().flex_none()
+        .when(this.page === 'system', el => el.child(Button('interface-system-reset', t, { variant: 'secondary' })
+          .accessibility_label('Reset System settings to defaults')
+          .on_click((_event, cx) => {
+            setShared('devkits.system-display', systemDisplayPreferences());
+            run('devkits-system.reset');
+            cx.notify();
+          }).child('Reset')))
         .child(Button('interface-settings-done', t).on_click(done).child('Done')));
   }
 }
