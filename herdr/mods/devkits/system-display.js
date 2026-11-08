@@ -43,7 +43,7 @@ export class SystemDisplay {
   }
 
   sidebarContainer(root) {
-    return this.contextMenu(root).when(Boolean(this.resize), el => el.cursor_row_resize())
+    return root.when(Boolean(this.resize), el => el.cursor_row_resize())
       .on_size_change((size, cx) => {
         if (this.available !== size.height) { this.available = size.height; cx.notify(); }
       })
@@ -74,7 +74,7 @@ export class SystemDisplay {
   }
 
   renderStatus(t) {
-    return displayConfig().status.visible ? this.monitor.renderInline(t, { id: 'status-system' }) : div().flex_1().min_w(0);
+    return displayConfig().status.visible ? this.contextMenu(this.monitor.renderInline(t, { id: 'status-system' })) : div().flex_1().min_w(0);
   }
 
   renderSidebar(t) {

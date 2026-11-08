@@ -328,7 +328,7 @@ test('the host context menu toggles status monitoring independently of the sideb
   assert.equal(memory['devkits.system-display'].sidebar.visible, true);
 });
 
-test('Devkits right-click menus retain independent mounts, choose sidebar inline UI and reopen after hiding', async () => {
+test('SYSTEM right-click menus stay inside monitor targets and remain reachable after hiding', async () => {
   const ui = fakeElements(), opened = [], closed = [], memory = {};
   let target = {};
   const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => target, setAgentOrder() {}, run() {},
@@ -337,7 +337,9 @@ test('Devkits right-click menus retain independent mounts, choose sidebar inline
   const view = new View(); view.folded = new Set();
   const cx = { ...renderContext, spawn() {} };
   view.render(cx);
-  ui.nodes.get('devkits-sidebar').mouseDown({ position: { x: 100, y: 300 } }, cx);
+  assert.equal(ui.nodes.get('devkits-sidebar').mouseDownByButton?.right, undefined);
+  assert.equal(ui.nodes.get('project-list').mouseDownByButton?.right, undefined);
+  ui.nodes.get('system-usage').mouseDownByButton.right({ position: { x: 100, y: 300 } }, cx);
   assert.deepEqual(opened.at(-1).at, { x: 100, y: 300 });
   assert.equal(opened.at(-1).props.view, 'system-display-menu');
   target = { ...opened.at(-1).props, overlay: 'display' };
@@ -359,7 +361,11 @@ test('Devkits right-click menus retain independent mounts, choose sidebar inline
   menu.render(cx); ui.nodes.get('system-display-sidebar').click({}, cx);
   target = {}; ui.nodes.clear(); view.render(cx); view.statusBar({});
   assert.ok(!ui.nodes.has('system-usage'));
-  ui.nodes.get('devkits-status').mouseDown({ position: { x: 600, y: 700 } }, cx);
+  for (const id of ['devkits-status', 'status-actions', 'status-workspace-actions', 'open-calendar', 'settings'])
+    assert.equal(ui.nodes.get(id).mouseDownByButton?.right, undefined, `${id} must not open SYSTEM's menu`);
+  ui.nodes.get('status-system').mouseDownByButton.right({ position: { x: 400, y: 700 } }, cx);
+  assert.equal(opened.at(-1).props.view, 'system-display-menu');
+  ui.nodes.get('system-monitor-settings').mouseDownByButton.right({ position: { x: 600, y: 700 } }, cx);
   assert.equal(opened.at(-1).props.view, 'system-display-menu', 'The menu is reachable while sidebar monitoring is hidden');
   target = { view: 'system-display-menu', overlay: 'display' };
   const reloaded = new View(); reloaded.init({}, cx); reloaded.render(cx);
@@ -530,7 +536,7 @@ function fakeElements() {
         if (key === 'text_color') data.textColor = args[0];
         if (key === 'disabled') data.disabled = args[0];
         if (key === 'on_key_down') data.keyDown = args[0];
-        if (key === 'on_mouse_down') data.mouseDown = args[1];
+        if (key === 'on_mouse_down') { data.mouseDown = args[1]; (data.mouseDownByButton ||= {})[args[0]] = args[1]; }
         if (key === 'on_mouse_down_out') data.mouseDownOut = args[0];
         if (key === 'on_mouse_up') data.mouseUp = args[1];
         if (key === 'on_mouse_move') data.mouseMove = args[0];
