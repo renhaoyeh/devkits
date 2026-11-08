@@ -635,7 +635,7 @@ test('Storage details groups partitions by physical disk and keeps shared or unk
   assert.ok(ui.textOf('hardware-storage-System').includes('APFS · Shares pool capacity'));
 });
 
-test('main-panel controls persist independent storage, I/O and temperature selections and measure every expanded card', async () => {
+test('Overview controls persist independent storage, I/O and temperature selections and measure every expanded card', async () => {
   const ui = fakeElements(), memory = { 'devkits.system-monitor': { visible: { cpu: false, ram: false, gpu: false, storage: true, disk: false, sensors: false } } };
   const View = await systemViewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(), monitor = view.systemMonitor;
@@ -645,38 +645,61 @@ test('main-panel controls persist independent storage, I/O and temperature selec
       volumes: [volume('volume:c', 'C:', true), volume('volume:d', 'D:', false)] },
     diskIO: [{ id: 'drive:a', model: 'Drive A', device: 'disk0', total: 10000, supported: true, rates: { read: 2048, write: 1024 } }],
     sensors: [{ name: 'CPU temperature', type: 'Temperature', value: 70 }, { name: 'GPU temperature', type: 'Temperature', value: 45 }] };
-  monitor.hardwareStorageDetails({});
+  monitor.renderDetails({});
+  assert.ok(ui.nodes.has('hardware-overview-display'));
+  assert.ok(ui.nodes.has('hardware-disk-combined'));
+  assert.ok(ui.nodes.has('hardware-display-temperature-gpu'));
   assert.equal(ui.nodes.get('hardware-display-volume:c').checked, true);
   ui.nodes.get('hardware-display-volume:d').change(true, renderContext);
   assert.deepEqual(memory['devkits.system-monitor'].storageVolumes, ['volume:c', 'volume:d']);
-  ui.nodes.clear(); monitor.hardwareStorageDetails({});
+  ui.nodes.clear(); monitor.renderDetails({});
   ui.nodes.get('hardware-display-volume:c').change(false, renderContext);
   const measured = [];
   ui.nodes.clear(); monitor.renderWidgets({}, { id: 'selection', onWidgetSize: id => measured.push(id) });
   assert.ok(ui.textOf('selection-volume%3Ad-storage').includes('Storage · D:'));
   ui.nodes.get('selection-volume%3Ad-compact-total-storage-layout').sizeChange({ height: 60 }, renderContext);
   assert.deepEqual(measured, ['storage:volume:d']);
-  monitor.hardwareDiskDisplay({}); ui.nodes.get('hardware-display-io-drive:a').change(true, renderContext);
+  monitor.renderDetails({}); ui.nodes.get('hardware-display-io-drive:a').change(true, renderContext);
   assert.deepEqual(memory['devkits.system-monitor'].ioDisks, ['drive:a']);
   assert.equal(memory['devkits.system-monitor'].visible.disk, true);
   ui.nodes.clear(); monitor.renderWidgets({});
   assert.ok(ui.textOf('system-drive%3Aa-disk-subtitle').join(' ').includes('R2K/s W1K/s'));
-  monitor.hardwareSensorDetails({});
+  monitor.renderDetails({});
   ui.nodes.get('hardware-display-temperature-cpu').change(false, renderContext);
   ui.nodes.get('hardware-display-temperature-ssd').change(false, renderContext);
   assert.deepEqual(memory['devkits.system-monitor'].temperatureGroups, ['gpu']);
   ui.nodes.clear(); monitor.renderWidgets({});
   assert.ok(ui.nodes.has('system-sensor-gpu'));
   assert.ok(!ui.nodes.has('system-sensor-cpu') && !ui.nodes.has('system-sensor-ssd'));
-  monitor.hardwareSensorDetails({}); ui.nodes.get('hardware-display-temperature-gpu').change(false, renderContext);
+  monitor.renderDetails({}); ui.nodes.get('hardware-display-temperature-gpu').change(false, renderContext);
   assert.equal(memory['devkits.system-monitor'].visible.sensors, false);
   monitor.hardware.storage.volumes = monitor.hardware.storage.volumes.filter(row => row.id !== 'volume:d');
-  ui.nodes.clear(); monitor.hardwareStorageDetails({});
+  ui.nodes.clear(); monitor.renderDetails({});
   assert.ok(ui.nodes.has('hardware-display-volume:d'), 'An unavailable selection can still be removed');
   ui.nodes.get('hardware-display-volume:d').change(false, renderContext);
   assert.deepEqual(memory['devkits.system-monitor'].storageVolumes, []);
-  monitor.hardwareDiskDisplay({}); ui.nodes.get('hardware-disk-combined').change(true, renderContext);
+  monitor.renderDetails({}); ui.nodes.get('hardware-disk-combined').change(true, renderContext);
   assert.equal(memory['devkits.system-monitor'].ioDisks, null);
+  ui.nodes.get('hardware-storage-system-default').click({}, renderContext);
+  assert.equal(memory['devkits.system-monitor'].storageVolumes, null);
+  assert.equal(memory['devkits.system-monitor'].visible.storage, true);
+  for (const page of ['storage', 'disk', 'sensors']) {
+    monitor.hardwarePage = page;
+    ui.nodes.clear(); monitor.renderDetails({});
+    assert.ok(!ui.nodes.has('hardware-display-volume:c'));
+    assert.ok(!ui.nodes.has('hardware-disk-combined'));
+    assert.ok(!ui.nodes.has('hardware-display-temperature-cpu'));
+  }
+  monitor.hardwarePage = 'settings';
+  ui.nodes.clear(); monitor.renderDetails({});
+  ui.nodes.get('hardware-choose-overview').click({}, renderContext);
+  monitor.hardware = null;
+  memory['devkits.system-monitor'].visible = Object.fromEntries(['cpu', 'ram', 'gpu', 'storage', 'network', 'disk', 'battery', 'sensors'].map(id => [id, false]));
+  ui.nodes.clear(); monitor.renderDetails({});
+  assert.equal(monitor.hardwarePage, 'overview');
+  assert.ok(ui.nodes.has('hardware-overview-display'), 'Choices remain reachable with no readings and every widget hidden');
+  assert.ok(ui.nodes.has('hardware-disk-combined'));
+  assert.ok(ui.nodes.has('hardware-display-temperature-cpu'));
 });
 
 test('opening a monitor reuses warm data without requesting a repaint during initialization', async t => {
