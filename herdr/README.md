@@ -117,7 +117,7 @@ herdr-app do layout.switch --name main
 
 See [design guidelines](../design.md) and the [development workflow](DEVELOPMENT.md) for further changes.
 
-## Tasks and Asana import
+## Tasks, Asana and MantisBT import
 
 Open **Tasks** at the far right of the bottom status bar. Use **New task** for a manual task, or **Import from Asana** to pick an Asana source. Open **Settings** inside Asana to save, replace or clear a token; **Back to tasks** or **Cancel** returns without saving. The first time, paste a personal access token from the [Asana developer console](https://app.asana.com/0/my-apps) (saved under Herdr's home in `data/devkits/asana.json`) and choose the Asana project for this Devkits project from the searchable project dropdown in the toolbar. Each Devkits project remembers its binding. Tasks open in a modal pop-out with Asana-style project tabs, a task table and rounded board cards. Close it from its header; the background workspace is blocked while it is open. Switching projects keeps the pop-out bound to its original project. Choosing **Import into Tasks** closes the source browser and opens a task draft. Devkits only reads Asana and never changes it.
 
@@ -128,6 +128,12 @@ Select a task to open a fresh preview on the right with its status, assignee, du
 Choose **Import into Tasks** on a source preview. The normal Tasks composer lets you edit the imported title and description, add your own instructions, and choose priority and agent. **Create task** saves a local Todo without starting a session. Canceled import drafts survive reopening, separately per source and project from manual drafts. Asana has no bookmark step; pick a source and import it directly into a task draft.
 
 Open the created Todo to continue editing its title, description and assignment. Its Asana source link and imported comments remain available even when disconnected; local edits never change Asana. Choose **Agent**, **Model** and **Effort** in Tasks before **Start session**. The opening prompt includes the edited description and added instructions, the source link and parent, and the latest five imported comments (each shortened to 500 characters). Task links in thread headers return to Tasks.
+
+**Import from MantisBT** opens a native interface matching MantisBT 2.28: charcoal navbar, compact gray sidebar, blue widget headers, status colors and ruled issue tables. **My View** shows open issues assigned to you; **View Issues** shows all open issues in the selected project, loading pages of 100 source issues. Search the loaded issues by number, summary, category, status or assignee, and expand **Filters** to narrow by status. Selecting an issue opens **View Issue Details**, with the metadata grid, description, **Relationships** and **Activities**. **Back to issues** returns to the table, while **Import into Tasks** opens the normal editable Tasks draft. MantisBT uses its own light palette and full-page issue view.
+
+In **My Account**, enter the installation's **Server URL** (for example `https://tracker.example.com/mantis`) and an API Token created in MantisBT's **My Account → API Tokens**. Connect validates the token before saving it under Herdr's home in `data/devkits/mantisbt.json`, independently of Asana. API URLs ending in `/api/rest/` also work. Project bindings are specific to the server and Devkits folder. Resolved issues follow the project's configured resolved-status threshold. Devkits uses only GET requests and supports both Bearer authentication and the bare Token header used by MantisBT 2.28 and earlier.
+
+Imported MantisBT tasks retain their source URL, description, parent and comments offline. Canceled drafts stay separate from manual tasks, Asana imports and other MantisBT servers.
 
 The Files and Git buttons toggle only the right dock. Switching between them keeps the central document; selecting a file, changed file, commit or View Diff opens its content there. Closing a file tab returns to the most recently active tab. Ctrl+Tab / Ctrl+Shift+Tab in file content cycle recent tabs while Control is held. The Threads sidebar is resizable, and each project also remembers its conversation width. Hiding the conversation returns focus to the editor; selecting a thread focuses its terminal. Run reveals its output even when the conversation was hidden.
 

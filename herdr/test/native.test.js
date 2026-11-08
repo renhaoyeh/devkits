@@ -3482,6 +3482,34 @@ test('imported local Todo descriptions remain editable and their source links op
   assert.deepEqual(urls, [asana.url]);
 });
 
+test('MantisBT import routes through the same Tasks draft without launching an agent', async () => {
+  const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] }, drafts = [], closed = [], commands = [];
+  const source = { source: 'mantisbt', gid: '1', server: 'https://mantis.test', name: 'Selected issue', notes: 'Instructions', comments: [] };
+  const View = await viewFor({ props: () => ({ view: 'mantisbt', project, overlay: 'mantisbt' }),
+    spaces: () => [project], closeOverlay: id => closed.push(id), openTaskComposer: (...args) => drafts.push(args),
+    run: (...args) => commands.push(args) });
+  const view = new View();
+  view.asana = { render: (bound, onImport) => { assert.equal(bound, project); onImport(source); } };
+  view.asanaPanel({});
+  assert.deepEqual(closed, ['mantisbt']); assert.deepEqual(drafts, [[project, null, 'todo', source]]);
+  assert.deepEqual(commands, []);
+});
+
+test('imported MantisBT tasks stay editable offline and retain source links and comments in session context', async () => {
+  const mantisbt = { gid: '1', server: 'https://mantis.test', url: 'https://mantis.test/view.php?id=1', comments: [{ author: 'Amy', text: 'Source note' }] };
+  const board = await taskBoardFor({ 'local:mantis': { gid: 'local:mantis', source: 'local', name: 'Imported MantisBT', status: 'todo', notes: 'Original', mantisbt } });
+  assert.ok(board.ui.nodes.has('board-mantisbt'));
+  board.ui.nodes.get('board-card-local:mantis').click({}, board.cx); board.render();
+  board.view.description.edit('Updated locally'); board.render();
+  assert.equal(board.memory['devkits.agent-board'][board.key]['local:mantis'].notes, 'Updated locally');
+  assert.deepEqual(board.memory['devkits.agent-board'][board.key]['local:mantis'].mantisbt, mantisbt);
+  assert.deepEqual(board.launches.at(-1).comments, mantisbt.comments);
+  assert.deepEqual(board.launches.at(-1).mantisbt, mantisbt);
+  assert.equal(board.runtime.tokenReads, undefined);
+  const urls = []; board.ui.nodes.get('board-asana-source').click({}, { open_url: url => urls.push(url) });
+  assert.deepEqual(urls, [mantisbt.url]);
+});
+
 test('reselecting the current Tasks card keeps its preview and output; another task or explicit refresh still loads', async () => {
   const board = await taskBoardFor({
     a: { gid: 'a', source: 'local', name: 'A', status: 'todo', notes: 'Description', lastOutput: 'Saved output' },

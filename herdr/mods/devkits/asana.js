@@ -140,12 +140,13 @@ const commentLimit = 5, commentLength = 500;
 // The prompt carries the latest comments, which often hold the decisions the description lacks.
 export function taskPrompt(task) {
   const notes = (task.notes || '').trim();
-  const source = task.asana || task, stories = source.comments || [];
+  const source = task.mantisbt || task.asana || task, stories = source.comments || [];
+  const name = task.mantisbt || task.source === 'mantisbt' ? 'MantisBT ' : task.asana || !task.source || task.source === 'asana' ? 'Asana ' : '';
   const comments = stories.slice(-commentLimit).map(comment => {
     const text = comment.text.length > commentLength ? `${comment.text.slice(0, commentLength)}…` : comment.text;
     return `- ${comment.author}${comment.at ? ` (${comment.at.slice(0, 10)})` : ''}: ${text.replace(/\s*\n\s*/g, ' ')}`;
   });
-  return [`Work on this ${task.asana || !task.source || task.source === 'asana' ? 'Asana ' : ''}task: ${task.name}`, source.url,
+  return [`Work on this ${name}task: ${task.name}`, source.url,
     source.parent && [`It is a subtask of: ${source.parent.name}`, source.parent.url].filter(Boolean).join('\n'),
     notes && `Description:\n${task.source === 'local' ? notes : clip(notes)}`,
     comments.length && `Latest comments${stories.length > comments.length ? ` (${comments.length} of ${stories.length})` : ''}:\n${comments.join('\n')}`,
@@ -164,7 +165,15 @@ export async function saveAsanaToken(token) {
 
 // Bindings belong to the Devkits project folder and stay on this computer.
 const projectKey = folder => JSON.stringify(['', folderKey(folder)]);
-const binding = folder => shared('devkits.asana-projects')?.[projectKey(folder)] || null;
+const binding = (folder, source = 'asana') => shared(`devkits.${source}-projects`)?.[projectKey(folder)] || null;
+
+const asanaSource = {
+  key: 'asana', name: 'Asana',
+  tokenHelp: 'No token is saved. Paste a personal access token from the Asana developer console to connect.',
+  readConnection: async () => ({ token: await readAsanaToken() }),
+  saveConnection: connection => saveAsanaToken(connection.token),
+  searchProjects, projectTasksPage, projectWorkspace, myProjectTasks, openSubtasks, taskDetails, taskComments,
+};
 // Bounds and positions are in zoomed pixels; the list and the preview each keep at least 320px.
 export const previewWidthAt = (bounds, x, zoom) =>
   Math.round(Math.max(320, Math.min(bounds.width / zoom - 320, (bounds.x + bounds.width - x) / zoom)));
@@ -187,12 +196,14 @@ export function dueLabel(due, now = new Date()) {
 
 // The Asana project menu: a dropdown under the toolbar's project button, searched with Asana's typeahead.
 export class AsanaProjectPicker {
+  get source() { return asanaSource; }
+
   init(target, cx) {
     this.folder = target.folder;
     this.overlay = target.overlay;
     this.projects = []; this.index = 0; this.loading = true; this.error = null;
     this.handle = cx.focus_handle();
-    this.search = InputState.new({ placeholder: 'Search Asana projects' });
+    this.search = InputState.new({ placeholder: `Search ${this.source.name} projects` });
     this.search.on('change', (_event, cx) => { this.index = 0; this.find(cx); });
     this.search.on('submit', () => this.choose(this.projects[this.index]));
     this.search.focus();
@@ -204,9 +215,9 @@ export class AsanaProjectPicker {
     this.loading = true; cx.notify();
     cx.spawn(async cx => {
       try {
-        const token = await readAsanaToken();
-        if (!token) throw new Error('Connect Asana first.');
-        const projects = await searchProjects(token, query);
+        const connection = await this.source.readConnection();
+        if (!connection?.token) throw new Error(`Connect ${this.source.name} first.`);
+        const projects = await this.source.searchProjects(this.source.server ? connection : connection.token, query);
         if (this.search.value() !== query) return;
         this.projects = projects; this.error = null;
       } catch (error) { if (this.search.value() === query) this.error = error.message; }
@@ -217,12 +228,14 @@ export class AsanaProjectPicker {
 
   choose(project) {
     if (!project) return;
-    setShared('devkits.asana-projects', { ...(shared('devkits.asana-projects') || {}), [projectKey(this.folder)]: { gid: project.gid, name: project.name, workspace: project.workspaceGid } });
+    const key = `devkits.${this.source.key}-projects`;
+    setShared(key, { ...(shared(key) || {}), [projectKey(this.folder)]: { gid: project.gid, name: project.name, workspace: project.workspaceGid,
+      ...(this.source.server ? { server: project.server } : {}) } });
     closeOverlay(this.overlay);
   }
 
   render() {
-    const t = asanaTheme(), current = binding(this.folder)?.gid;
+    const t = asanaTheme(), current = binding(this.folder, this.source.key)?.gid;
     return DropdownMenuContent('asana-project-picker', 360, t).rounded(8).shadow_lg().overflow_hidden().p(8).font_family('Arial').track_focus(this.handle)
       .on_key_down((event, cx) => {
         if (event.key === 'escape') closeOverlay(this.overlay);
@@ -232,7 +245,7 @@ export class AsanaProjectPicker {
         else return;
         cx.stop_propagation(); cx.notify();
       })
-      .child(Input.new(this.search).id('asana-project-search').accessibility_label('Search Asana projects')
+      .child(Input.new(this.search).id('asana-project-search').accessibility_label(`Search ${this.source.name} projects`)
         .h(36).flex_none().px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(13))
       .child(DropdownMenuLabel(t).text_size(12).child('Projects'))
       .child(v_flex().id('asana-project-list').flex_1().min_h(0).overflow_y_scrollbar().gap(1)
@@ -252,9 +265,18 @@ export class AsanaProjectPicker {
 
 // Read-only source selection. Confirm the import in the Tasks composer.
 export default class AsanaPanel {
+  // Source adapters share the existing geometry, controls and import flow.
+  get source() { return asanaSource; }
+  key(suffix) { return `devkits.${this.source.key}-${suffix}`; }
+  credentials() { return this.source.server ? { url: this.server, token: this.token } : this.token; }
+  binding() {
+    const bound = binding(this.folder, this.source.key);
+    return this.source.server && bound?.server !== this.server ? null : bound;
+  }
+
   init(cx) {
     this.handle = cx.focus_handle();
-    this.tab = shared('devkits.asana-tab') === 'all' ? 'all' : 'mine';
+    this.tab = shared(this.key('tab')) === 'all' ? 'all' : 'mine';
     this.folder = undefined;
     this.reset();
     this.search = InputState.new({ placeholder: 'Search tasks' });
@@ -265,6 +287,10 @@ export default class AsanaPanel {
     this.tokenInput.set_masked(true);
     this.tokenInput.on('change', (_event, cx) => { this.tokenCopied = false; cx.notify(); });
     this.tokenInput.on('submit', (_event, cx) => this.saveToken(cx));
+    if (this.source.server) {
+      this.serverInput = InputState.new({ placeholder: 'https://mantis.example.com' });
+      this.serverInput.on('submit', (_event, cx) => this.saveToken(cx));
+    }
   }
 
   reset() {
@@ -297,7 +323,10 @@ export default class AsanaPanel {
     if (this.token) { this.needsToken = false; return; }
     this.needsToken = null;
     cx.spawn(async cx => {
-      this.token = await readAsanaToken();
+      const connection = await this.source.readConnection();
+      this.token = connection?.token || null;
+      this.server = connection?.url || '';
+      this.serverInput?.set_value(this.server);
       this.needsToken = !this.token;
       if (this.needsToken) this.tokenInput.focus();
       cx.notify();
@@ -307,7 +336,7 @@ export default class AsanaPanel {
   // Loads whenever the bound Asana project differs from the one shown, including after the project menu changes it.
   // Mine loads first and is small; All loads a page only when it is shown, and more on request.
   sync(cx) {
-    const bound = binding(this.folder), gid = bound?.gid || null;
+    const bound = this.binding(), gid = bound?.gid || null;
     if (this.needsToken !== false) return;
     if (gid !== this.loadedGid) {
       const folder = this.folder;
@@ -316,10 +345,11 @@ export default class AsanaPanel {
       this.load(cx, async () => {
         let workspace = bound.workspace;
         if (!workspace) {
-          workspace = await projectWorkspace(this.token, gid);
-          setShared('devkits.asana-projects', { ...(shared('devkits.asana-projects') || {}), [projectKey(folder)]: { ...bound, workspace } });
+          workspace = await this.source.projectWorkspace(this.credentials(), gid);
+          if (this.folder !== folder || this.loadedGid !== gid) return;
+          setShared(this.key('projects'), { ...(shared(this.key('projects')) || {}), [projectKey(folder)]: { ...bound, workspace } });
         }
-        const mine = await myProjectTasks(this.token, gid, workspace);
+        const mine = await this.source.myProjectTasks(this.credentials(), gid, workspace);
         if (this.folder !== folder || this.loadedGid !== gid) return;
         this.mine = mine;
       });
@@ -343,7 +373,7 @@ export default class AsanaPanel {
     this.loadingMore = true;
     cx.spawn(async cx => {
       try {
-        const page = await projectTasksPage(this.token, gid, this.all.next);
+        const page = await this.source.projectTasksPage(this.credentials(), gid, this.all.next);
         if (this.page === request) this.all = { tasks: [...this.all.tasks, ...page.tasks], next: page.next, loaded: true };
       } catch (error) { if (this.page === request) this.fail(error); }
       if (this.page === request) this.loadingMore = false;
@@ -355,6 +385,7 @@ export default class AsanaPanel {
     this.settingsOpen = true;
     this.tokenCopied = false;
     this.tokenInput.set_value(this.token || '');
+    this.serverInput?.set_value(this.server || '');
     this.error = null;
     cx.notify();
   }
@@ -363,12 +394,19 @@ export default class AsanaPanel {
     const token = this.tokenInput.value().trim();
     if (this.tokenBusy) return;
     if (!token) { this.error = 'Enter a personal access token.'; cx.notify(); return; }
-    if (token === this.token && this.needsToken === false) {
+    const url = this.serverInput?.value().trim() || '';
+    if (token === this.token && (!this.source.server || url === this.server) && this.needsToken === false) {
       this.settingsOpen = false; this.tokenInput.set_value(''); this.error = null; cx.notify(); return;
     }
     this.tokenBusy = true;
     cx.spawn(async cx => {
-      try { await saveAsanaToken(token); this.token = token; this.needsToken = false; this.settingsOpen = false; this.states?.clear(); this.reset(); this.tokenInput.set_value(''); }
+      try {
+        const connection = this.source.server ? { url: this.source.normalizeUrl(url), token } : { token };
+        if (this.source.validateConnection) await this.source.validateConnection(connection);
+        await this.source.saveConnection(connection);
+        this.server = connection.url; this.token = token; this.needsToken = false; this.settingsOpen = false;
+        this.states?.clear(); this.reset(); this.tokenInput.set_value('');
+      }
       catch (error) { this.error = error.message; }
       this.tokenBusy = false; cx.notify();
     });
@@ -387,7 +425,7 @@ export default class AsanaPanel {
     this.tokenBusy = true;
     cx.spawn(async cx => {
       try {
-        await saveAsanaToken('');
+        await this.source.saveConnection({ url: this.server || '', token: '' });
         this.token = null; this.needsToken = true; this.states?.clear(); this.reset();
         this.settingsOpen = true; this.tokenInput.set_value('');
       } catch (error) { this.error = error.message; }
@@ -403,10 +441,14 @@ export default class AsanaPanel {
   }
 
   loadSubtasks(task, cx) {
+    const request = this.page, credentials = this.credentials();
     this.subtasks.set(task.gid, null);
     cx.spawn(async cx => {
-      try { this.subtasks.set(task.gid, (await openSubtasks(this.token, task.gid)).map(sub => ({ ...sub, parent: task.name }))); }
-      catch (error) { this.subtasks.delete(task.gid); this.expanded.delete(task.gid); this.fail(error); }
+      try {
+        const subtasks = await this.source.openSubtasks(credentials, task.gid);
+        if (this.page === request) this.subtasks.set(task.gid, subtasks.map(sub => ({ ...sub, parent: task.name })));
+      }
+      catch (error) { if (this.page === request) { this.subtasks.delete(task.gid); this.expanded.delete(task.gid); this.fail(error); } }
       cx.notify();
     });
   }
@@ -420,13 +462,13 @@ export default class AsanaPanel {
     this.selected = gid; this.cursor = gid; this.detail = null; this.detailError = null;
     cx.spawn(async cx => {
       try {
-        const detail = await taskDetails(this.token, gid, binding(this.folder)?.gid);
+        const detail = await this.source.taskDetails(this.credentials(), gid, this.binding()?.gid);
         if (this.detailRequest !== request || this.selected !== gid || this.folder !== request.folder) return;
-        if (!detail || detail.completed) this.detailError = 'This task was completed or deleted in Asana.';
+        if (!detail || detail.completed) this.detailError = `This task was completed or deleted in ${this.source.name}.`;
         else {
           this.detail = detail;
           if (detail.subtasks && !this.subtasks.has(gid)) this.loadSubtasks(detail, cx);
-          this.loadComments(detail, cx);
+          if (!detail.comments) this.loadComments(detail, cx);
         }
       } catch (error) { if (this.detailRequest === request) { this.detailError = error.message; if (error.unauthorized) this.fail(error); } }
       finally { if (this.detailRequest === request) { this.detailRequest = null; cx.notify(); } }
@@ -438,7 +480,7 @@ export default class AsanaPanel {
   loadComments(detail, cx) {
     cx.spawn(async cx => {
       try {
-        const comments = await taskComments(this.token, detail.gid);
+        const comments = await this.source.taskComments(this.credentials(), detail.gid);
         if (this.detail === detail) this.detail = { ...detail, comments };
       } catch (error) { if (this.detail === detail) this.detail = { ...detail, comments: [], commentsError: error.message }; }
       cx.notify();
@@ -469,7 +511,7 @@ export default class AsanaPanel {
       ...(nested && this.expanded.has(task.gid) ? (this.subtasks.get(task.gid) || []).map(sub => ({ task: sub, depth: 1 })) : [])]));
   }
 
-  view() { return shared('devkits.asana-view') === 'board' ? 'board' : 'list'; }
+  view() { return shared(this.key('view')) === 'board' ? 'board' : 'list'; }
 
   navigate(event, cx) {
     const rows = this.rows();
@@ -488,7 +530,7 @@ export default class AsanaPanel {
 
   toolbar(t, close) {
     const ready = this.needsToken === false;
-    const bound = binding(this.folder);
+    const bound = this.binding();
     const toggle = (id, label, active, action) => asanaButton(id, t, { variant: 'ghost' }).h(28).px(10)
       .when(active, el => el.bg(t.selected).text_color(t.accent))
       .accessibility_label(`${label}${active ? ', selected' : ''}`)
@@ -505,27 +547,27 @@ export default class AsanaPanel {
         .child(div().size(32).rounded(6).bg(t.project).flex().items_center().justify_center()
           .child(glyph('list-todo', 20).text_color('#1e1f21')))
         .child(DropdownMenuTrigger(asanaButton('asana-project-menu', t, { variant: 'ghost' }).h(36).px(4).gap(8).text_size(20).font_semibold().text_color(t.foreground)
-          .accessibility_label('Choose Asana project').disabled(!ready)
+          .accessibility_label(`Choose ${this.source.name} project`).disabled(!ready)
           .on_mouse_down('left', (_event, cx) => cx.stop_propagation()), 360,
           (_cx, at) => { if (ready) openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 360, at,
-            props: { view: 'asana-projects', folder: this.folder } }); }, 'start', { x: 0, y: 4 })
-          .child(div().max_w(400).truncate().child(bound?.name || 'Choose Asana project'))
+            props: { view: `${this.source.key}-projects`, folder: this.folder } }); }, 'start', { x: 0, y: 4 })
+          .child(div().max_w(400).truncate().child(bound?.name || `Choose ${this.source.name} project`))
           .child(glyph('chevron-down', 14).text_color(t.muted)))
         .child(div().flex_1())
         .when(this.needsToken !== null && !this.settingsOpen, el => el.child(asanaButton('asana-settings', t, { variant: 'ghost', size: 'icon' })
-          .disabled(this.tokenBusy).accessibility_label('Asana settings')
+          .disabled(this.tokenBusy).accessibility_label(`${this.source.name} settings`)
           .on_click((_event, cx) => this.openSettings(cx))
           .child(glyph('gear', 14))))
-        .child(asanaButton('asana-close', t, { variant: 'ghost', size: 'icon' }).rounded(6).accessibility_label('Close Asana tasks')
+        .child(asanaButton('asana-close', t, { variant: 'ghost', size: 'icon' }).rounded(6).accessibility_label(`Close ${this.source.name} tasks`)
           .on_mouse_down('left', (_event, cx) => cx.stop_propagation()).on_click(close).child(glyph('close'))))
       .when(ready && Boolean(bound) && !this.settingsOpen, el => el
         .child(h_flex().h(36).px(24).gap(20).items_center().border_b(1).border_color(t.border)
-          .child(tab('asana-view-list', 'List', this.view() === 'list', () => setShared('devkits.asana-view', 'list')))
-          .child(tab('asana-view-board', 'Board', this.view() === 'board', () => setShared('devkits.asana-view', 'board'))))
+          .child(tab('asana-view-list', 'List', this.view() === 'list', () => setShared(this.key('view'), 'list')))
+          .child(tab('asana-view-board', 'Board', this.view() === 'board', () => setShared(this.key('view'), 'board'))))
         .child(h_flex().h(56).px(24).gap(8).items_center()
           .on_mouse_down('left', (_event, cx) => cx.stop_propagation()).border_b(1).border_color(t.border)
           .children([['mine', 'Mine'], ['all', 'All']].map(([value, label]) =>
-            toggle(`asana-tab-${value}`, label, this.tab === value, () => { this.tab = value; setShared('devkits.asana-tab', value); })))
+            toggle(`asana-tab-${value}`, label, this.tab === value, () => { this.tab = value; setShared(this.key('tab'), value); })))
           .child(div().flex_1())
           .child(Input.new(this.search).id('asana-search').accessibility_label('Search tasks')
             .w(200).h(30).px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(12))
@@ -630,12 +672,16 @@ export default class AsanaPanel {
     return v_flex().flex_1().max_w(560).p(32).gap(16)
       .child(h_flex().child(asanaButton('asana-settings-back', t, { variant: 'ghost' }).gap(6).disabled(this.tokenBusy)
         .on_click((_event, cx) => this.token ? back(cx) : close()).child(glyph('chevron-right', 14)).child(this.token ? 'Back to tasks' : 'Close')))
-      .child(div().text_size(24).font_semibold().child('Asana settings'))
+      .child(div().text_size(24).font_semibold().child(`${this.source.name} settings`))
+      .when(Boolean(this.source.server), el => el
+        .child(div().text_size(14).font_medium().child('Server URL'))
+        .child(Input.new(this.serverInput).id('source-server').accessibility_label(`${this.source.name} server URL`)
+          .w_full().h(36).px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(13)))
       .child(div().text_size(14).font_medium().child('Personal access token'))
       .child(DialogDescription(t).child(this.token ? 'Your saved token is masked below. Replace it to change accounts, or clear it below.'
-        : 'No token is saved. Paste a personal access token from the Asana developer console to connect.'))
+        : this.source.tokenHelp))
       .child(h_flex().gap(8).items_center()
-        .child(Input.new(this.tokenInput).id('asana-token').accessibility_label('Asana personal access token')
+        .child(Input.new(this.tokenInput).id('asana-token').accessibility_label(`${this.source.name} personal access token`)
         .flex_1().min_w(0).h(36).px(10).rounded(6).border(1).border_color(t.input).bg(t.background).text_color(t.foreground).text_size(13))
         .child(asanaButton('asana-copy-token', t, { variant: 'outline' }).w(80).h(36).disabled(!this.tokenInput.value().trim())
           .accessibility_label('Copy personal access token').on_click((_event, cx) => this.copyToken(cx))
@@ -661,12 +707,12 @@ export default class AsanaPanel {
       .min_h(0).h_full().bg(t.background).border_l(1).border_color(t.border)
       .child(h_flex().h(48).flex_none().pl(16).pr(8).gap(6).items_center().border_b(1).border_color(t.border).text_size(12)
         .child(h_flex().flex_1().min_w(0).gap(6).items_center().text_color(t.muted)
-          .child(div().flex_none().max_w(160).truncate().child(binding(this.folder)?.name || 'Asana'))
+          .child(div().flex_none().max_w(160).truncate().child(this.binding()?.name || this.source.name))
           .when(Boolean(task?.parent), el => el.child('›').child(div().id('asana-parent-crumb').min_w(0).truncate().cursor_pointer()
             .hover(el => el.text_color(t.foreground)).on_click((_event, cx) => this.show(task.parent, cx)).child(task.parent.name))))
         .when(Boolean(task), el => el
-          .child(asanaButton('asana-open', t, { variant: 'ghost' }).h(28).px(8).accessibility_label('Open in Asana')
-            .on_click((_event, cx) => cx.open_url(task.url)).child('Open in Asana')))
+          .child(asanaButton('asana-open', t, { variant: 'ghost' }).h(28).px(8).accessibility_label(`Open in ${this.source.name}`)
+            .on_click((_event, cx) => cx.open_url(task.url)).child(`Open in ${this.source.name}`)))
         .child(asanaButton('asana-close-preview', t, { variant: 'ghost', size: 'icon' }).accessibility_label('Close preview')
           .on_click((_event, cx) => { this.selected = null; this.detail = null; cx.notify(); }).child(glyph('close'))))
       .child(v_flex().id(`asana-preview-${this.selected}`).flex_1().min_h(0).overflow_y_scrollbar().px(32).py(28).gap(24)
@@ -795,21 +841,21 @@ export default class AsanaPanel {
     if (this.folder !== (project?.folder || null)) this.open(project, cx);
     this.sync(cx);
     // A thread's Asana link asks for its task; the preview shows it once the token is known.
-    const focus = shared('devkits.asana-focus');
+    const focus = shared(this.key('focus'));
     if (focus && this.needsToken === false && folderKey(focus.folder) === folderKey(this.folder)) {
-      setShared('devkits.asana-focus', null);
+      setShared(this.key('focus'), null);
       if (this.selected !== focus.gid) this.show({ gid: focus.gid }, cx);
     }
     const t = asanaTheme();
-    const ready = this.needsToken === false && !this.settingsOpen, bound = Boolean(binding(this.folder));
+    const ready = this.needsToken === false && !this.settingsOpen, bound = Boolean(this.binding());
     const rows = ready && bound ? this.rows() : [];
-    const empty = !bound ? 'Choose the Asana project for this Devkits project from the menu above.'
+    const empty = !bound ? `Choose the ${this.source.name} project for this Devkits project from the menu above.`
       : this.search.value().trim() ? 'No matching tasks.' : this.tab === 'mine' ? 'No open tasks assigned to you in this project.' : 'No open tasks in this project.';
     const status = text => div().p(12).text_size(12).text_color(t.muted).child(text);
     const stopResize = () => {
       if (!this.resizing) return;
       this.resizing = false;
-      if (this.width) setShared('devkits.asana-preview-width', this.width);
+      if (this.width) setShared(this.key('preview-width'), this.width);
     };
     return v_flex().id('asana-panel').size_full().min_h(0).rounded(10).shadow_xl().overflow_hidden().font_family('Arial').border(1).border_color(t.border).bg(t.background).text_color(t.foreground)
       .on_mouse_down('right', (_event, cx) => cx.stop_propagation())
@@ -846,6 +892,6 @@ export default class AsanaPanel {
 
   // The tasks and the preview split the space evenly until the divider is dragged; the dragged width is remembered.
   previewWidth() {
-    return this.resizing ? this.width : shared('devkits.asana-preview-width') || null;
+    return this.resizing ? this.width : shared(this.key('preview-width')) || null;
   }
 }
