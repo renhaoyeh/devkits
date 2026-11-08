@@ -8,6 +8,8 @@ Open **Calendar** from the calendar icon beside Tasks in the bottom status bar. 
 
 Type **@** in the title or notes to search existing Tasks by task or project name. The picker opens directly below the typed @, including on later lines. Choose a result with the mouse or Arrow keys and Enter; Escape closes only the picker. Task references appear as inline labels and are saved with the event. Click a reference in an existing event to open its project’s Tasks detail. New selections omit archived tasks; existing links still open archived tasks. A removed task keeps its saved label and shows an unavailable message when clicked. Linking a task does not run it.
 
+Click outside Calendar to close it. When a new-event dialog is open, clicking its backdrop closes only that dialog, discards the unsaved event and returns to Calendar.
+
 Committed events are saved in Herdr's local shared storage and survive reloads and restarts. Timed events use this computer's time zone. No account connection is required. The calendar is independent of project selection and does not automatically start tasks or agents.
 
 SYSTEM runs in its own `devkits-system` mod; Devkits consumes its snapshot/rendering SDK and controls placement through the right-click menu. Asana and MantisBT are separate `devkits-asana` and `devkits-mantisbt` mods. They own their connections and source browsers; Devkits receives import snapshots and owns Tasks drafts and execution. Existing connections and preferences are retained.
