@@ -315,7 +315,7 @@ test('monitor settings persist module choices, order, interval, style and select
   assert.ok(ui.textOf('system-disk').includes('Disk I/O'));
   assert.ok(ui.textOf('system-disk-model').includes('APPLE SSD AP0512Z'));
   reloaded.systemMonitor.hardwareModuleDetails('disk', {});
-  assert.ok(ui.textOf('hardware-module-disk').includes('APPLE SSD AP0512Z'));
+  assert.ok(ui.textOf('hardware-module-disk').includes('All physical disks · disk images excluded'));
   assert.ok(ui.textOf('system-gpu-value').includes('24 GB unified'));
   assert.ok(ui.textOf('system-gpu-model').includes('Apple M4'));
   assert.ok(ui.textOf('system-gpu-subtitle').includes('1.0 GB used'));
@@ -606,6 +606,77 @@ test('CPU detail renders Task Manager style processor histories, P/E groups and 
   assert.ok(ui.textOf('hardware-sensor-availability-cpu').includes('Unavailable'));
   assert.ok(ui.textOf('hardware-sensor-availability-gpu').includes('47.0 °C'));
   assert.ok(ui.textOf('hardware-module-sensors').some(text => text.includes('LibreHardwareMonitor WMI provider')));
+});
+
+test('Storage details groups partitions by physical disk and keeps shared or unknown volumes separate', async () => {
+  const ui = fakeElements();
+  const View = await systemViewFor({ ...ui, shared: () => null });
+  const view = new View(), monitor = view.systemMonitor;
+  const disk = { mount: 'C:', model: 'Same model', total: 10000, free: 4000, used: 6000, percent: 60 };
+  const volume = (mount, driveIds, poolId = null) => ({ id: mount, mount, mounts: [mount], type: 'NTFS', total: 5000, used: 3000,
+    free: 2000, percent: 60, system: mount === 'C:', driveIds, poolId });
+  monitor.hardware = { disk, storage: { available: true,
+    drives: [{ id: 'b', device: 'disk1', model: 'Same model', total: 20000 }, { id: 'a', device: 'disk0', model: 'Same model', total: 10000 }],
+    volumes: [volume('C:', ['a']), volume('D:', ['a']), volume('Unknown:', [])], pools: [] } };
+  monitor.hardwareModuleDetails('storage', {});
+  assert.ok(ui.textOf('hardware-storage-drive-a').some(text => text.includes('C:')));
+  assert.ok(ui.textOf('hardware-storage-drive-a').some(text => text.includes('D:')));
+  assert.ok(ui.textOf('hardware-storage-drive-b').includes('No mounted volumes'));
+  assert.ok(!ui.textOf('hardware-storage-drive-a').some(text => text.includes('Unknown:')));
+  assert.ok(ui.textOf('hardware-module-storage').includes('Shared or unmapped volumes'));
+  assert.deepEqual([...ui.nodes.keys()].filter(id => id.startsWith('hardware-storage-drive-')), ['hardware-storage-drive-a', 'hardware-storage-drive-b']);
+  view.systemDisplay.renderSidebar({});
+  assert.ok(ui.textOf('system-storage').includes('Storage · 2 disks'));
+  assert.ok(ui.textOf('system-storage-model').includes('C: · Same model'));
+  monitor.hardware.storage.volumes = [volume('System', ['a'], 'apfs:disk3'), volume('Data', ['a'], 'apfs:disk3')].map(row => ({ ...row, type: 'APFS' }));
+  monitor.hardware.storage.pools = [{ id: 'apfs:disk3', device: 'disk3', driveIds: ['a'], total: 10000, used: 6000, free: 4000 }];
+  ui.nodes.clear(); monitor.hardwareModuleDetails('storage', {});
+  assert.equal(ui.textOf('hardware-module-storage').filter(text => text === 'APFS shared pool · disk3').length, 1);
+  assert.ok(ui.textOf('hardware-storage-System').includes('APFS · Shares pool capacity'));
+});
+
+test('main-panel controls persist independent storage, I/O and temperature selections and measure every expanded card', async () => {
+  const ui = fakeElements(), memory = { 'devkits.system-monitor': { visible: { cpu: false, ram: false, gpu: false, storage: true, disk: false, sensors: false } } };
+  const View = await systemViewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(), monitor = view.systemMonitor;
+  const volume = (id, mount, system) => ({ id, mount, mounts: [mount], system, type: 'NTFS', driveIds: ['drive:a'], total: 10000, used: 4000, free: 6000, percent: 40 });
+  monitor.hardware = { disk: { mount: 'C:', model: 'Drive A', total: 10000, used: 4000, free: 6000, percent: 40 },
+    storage: { available: true, drives: [{ id: 'drive:a', device: 'disk0', model: 'Drive A', total: 10000 }], pools: [],
+      volumes: [volume('volume:c', 'C:', true), volume('volume:d', 'D:', false)] },
+    diskIO: [{ id: 'drive:a', model: 'Drive A', device: 'disk0', total: 10000, supported: true, rates: { read: 2048, write: 1024 } }],
+    sensors: [{ name: 'CPU temperature', type: 'Temperature', value: 70 }, { name: 'GPU temperature', type: 'Temperature', value: 45 }] };
+  monitor.hardwareStorageDetails({});
+  assert.equal(ui.nodes.get('hardware-display-volume:c').checked, true);
+  ui.nodes.get('hardware-display-volume:d').change(true, renderContext);
+  assert.deepEqual(memory['devkits.system-monitor'].storageVolumes, ['volume:c', 'volume:d']);
+  ui.nodes.clear(); monitor.hardwareStorageDetails({});
+  ui.nodes.get('hardware-display-volume:c').change(false, renderContext);
+  const measured = [];
+  ui.nodes.clear(); monitor.renderWidgets({}, { id: 'selection', onWidgetSize: id => measured.push(id) });
+  assert.ok(ui.textOf('selection-volume%3Ad-storage').includes('Storage · D:'));
+  ui.nodes.get('selection-volume%3Ad-compact-total-storage-layout').sizeChange({ height: 60 }, renderContext);
+  assert.deepEqual(measured, ['storage:volume:d']);
+  monitor.hardwareDiskDisplay({}); ui.nodes.get('hardware-display-io-drive:a').change(true, renderContext);
+  assert.deepEqual(memory['devkits.system-monitor'].ioDisks, ['drive:a']);
+  assert.equal(memory['devkits.system-monitor'].visible.disk, true);
+  ui.nodes.clear(); monitor.renderWidgets({});
+  assert.ok(ui.textOf('system-drive%3Aa-disk-subtitle').join(' ').includes('R2K/s W1K/s'));
+  monitor.hardwareSensorDetails({});
+  ui.nodes.get('hardware-display-temperature-cpu').change(false, renderContext);
+  ui.nodes.get('hardware-display-temperature-ssd').change(false, renderContext);
+  assert.deepEqual(memory['devkits.system-monitor'].temperatureGroups, ['gpu']);
+  ui.nodes.clear(); monitor.renderWidgets({});
+  assert.ok(ui.nodes.has('system-sensor-gpu'));
+  assert.ok(!ui.nodes.has('system-sensor-cpu') && !ui.nodes.has('system-sensor-ssd'));
+  monitor.hardwareSensorDetails({}); ui.nodes.get('hardware-display-temperature-gpu').change(false, renderContext);
+  assert.equal(memory['devkits.system-monitor'].visible.sensors, false);
+  monitor.hardware.storage.volumes = monitor.hardware.storage.volumes.filter(row => row.id !== 'volume:d');
+  ui.nodes.clear(); monitor.hardwareStorageDetails({});
+  assert.ok(ui.nodes.has('hardware-display-volume:d'), 'An unavailable selection can still be removed');
+  ui.nodes.get('hardware-display-volume:d').change(false, renderContext);
+  assert.deepEqual(memory['devkits.system-monitor'].storageVolumes, []);
+  monitor.hardwareDiskDisplay({}); ui.nodes.get('hardware-disk-combined').change(true, renderContext);
+  assert.equal(memory['devkits.system-monitor'].ioDisks, null);
 });
 
 test('opening a monitor reuses warm data without requesting a repaint during initialization', async t => {
