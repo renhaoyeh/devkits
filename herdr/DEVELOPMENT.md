@@ -14,7 +14,8 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | --- | --- |
 | Window structure and block sizes | `layouts/devkits.json` |
 | Native views and interactions | `mods/devkits/main.js` |
-| SYSTEM monitoring and its UI lifecycle | `mods/devkits/system-monitor.js`; hardware readers/model in `hardware-*.js` |
+| SYSTEM sampling, settings and details | `mods/devkits-system/`; consumer SDK in `mods/devkits/components/system-monitor.js` |
+| Asana and MantisBT source browsers | `mods/devkits-asana/`, `mods/devkits-mantisbt/`; Tasks adapter in `mods/devkits/task-sources.js` |
 | Shared native UI components | `mods/devkits/components/`; other mods carry copies (`COPIES`, `sync-shared.js`) |
 | iOS Simulator panel | `mods/devkits-simulator/` |
 | Project and thread data transformations | `mods/devkits/model.js` |
@@ -27,9 +28,11 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 - Use `theme()` tokens. Use native async and animation APIs; do not retain a view context beyond its lifetime or use browser timers.
 - Add a focused test for new nontrivial logic. Existing tests use mocked native APIs and temporary directories so they do not operate on real sessions.
 
-SYSTEM is composed as a `SystemMonitor` instance, independently of the host View's state and prototype. Its constructor accepts `{ active, details, page, overlay, openDetails }`: `active()` determines whether this consumer needs sampling and `openDetails(page)` delegates navigation to the consumer. Call `init(cx)` once. The monitor owns readings, bounded history, coalescing and its details UI. Its `devkits.system-monitor` preferences contain monitoring choices only; live data/history stay in session memory.
+SYSTEM runs as the independent `devkits-system` mod. Its `service` view is mounted in the layout; it owns hardware readers, dependencies, sampling, bounded history, settings and details. Other mods bundle the public `components/system-monitor.js` SDK through `COPIES` and instantiate `SystemMonitor({ receiver: "your-mod-name", active, openDetails })`, calling `init(cx)` and `close()` with their view lifecycle. The SDK registers expiring consumer leases and receives serialized snapshots through Herdr's native mod command bus (`run`/`nextCommand`); it never starts a reader. The service is the only sampler, including while details are open. Do not use `sessionStorage` as a cross-mod transport: the installed runtime isolates it between script contexts. Live readings/history stay in session memory; only monitoring preferences persist.
 
-The reusable interface is `snapshot()` (data, history, error, updatedAt and selected/available widget IDs), `renderInline(t, { id })`, `renderWidgets(t, { id, style, cpuMode })`, `renderDetails(t)` and `open(page)`. Renderer names describe presentation, with no sidebar/status placement checks. A consumer may put either renderer in any container, render both against one snapshot, or draw its own UI from the data. Give simultaneous mounts distinct IDs. Rendered elements and callbacks belong to the current native view; never store a context for later. Herdr's per-mod import boundary still applies: a consumer must bundle the module and its dependencies within its own mod, rather than importing another mod's source at runtime.
+The consumer interface is `snapshot()` (data, history, error, updatedAt and selected/available widget IDs), `renderInline(t, { id })`, `renderWidgets(t, { id, style, cpuMode })` and `open(page)`. A consumer chooses its own container and renderer, or draws directly from the snapshot. Give simultaneous mounts distinct IDs. The provider exposes `service`, `inline`, `widgets` and `details` native views. Rendered elements and callbacks belong to the current native view; never retain its context. Herdr's import boundary requires SDK copies within each mod, rather than runtime imports of another mod's source.
+
+Asana and MantisBT each have their own `main.js`, API, connection storage and UI, and can open independently. The shared `source-channel.js` SDK uses Herdr shared state for short-lived JSON requests and events, removing each request on import or close: a caller creates a request with its context/binding, opens the provider with the channel ID, then consumes binding/import/close events. Providers return task snapshots with explicit domain fields, without credentials or native callbacks. Devkits' `TaskSources` adapter owns project bindings and opens a Tasks draft on import. Only confirming that draft creates a local Todo; task/session controls remain in Devkits. Connection files and existing preference keys remain compatible. Historical source cards use the provider's finite, read-only `read-task.js` endpoint.
 
 Devkits' `system-display.js` is the consumer adapter. It owns the right-click menu, frames, resize interactions and independent sidebar/status visibility. `system-display-model.js` normalizes its separate `devkits.system-display` preferences and migrates old display fields before SYSTEM can save monitoring settings. The host calls `renderStatus(t)` and `renderSidebar(t)`, wraps its sidebar with `sidebarContainer(root)` and measures the content above the monitor with `reservedSidebarContent(root)`. SYSTEM Settings must not expose Devkits placement or widget style controls.
 
@@ -40,6 +43,9 @@ Run from the repository root as appropriate for the change:
 ```sh
 npm test
 herdr-app check ./herdr/mods/devkits
+herdr-app check ./herdr/mods/devkits-system
+herdr-app check ./herdr/mods/devkits-asana
+herdr-app check ./herdr/mods/devkits-mantisbt
 herdr-app check ./herdr/mods/devkits-simulator
 herdr-app check ./herdr/mods/devkits-sim-frames
 ```
@@ -66,6 +72,9 @@ For the default installation:
 
 ```sh
 herdr-app check ~/.config/herdr-app/mods/devkits
+herdr-app check ~/.config/herdr-app/mods/devkits-system
+herdr-app check ~/.config/herdr-app/mods/devkits-asana
+herdr-app check ~/.config/herdr-app/mods/devkits-mantisbt
 herdr-app check ~/.config/herdr-app/mods/devkits-simulator
 herdr-app check ~/.config/herdr-app/mods/devkits-sim-frames
 herdr-app status

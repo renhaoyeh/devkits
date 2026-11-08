@@ -17,8 +17,8 @@ const saveDisplay = (patch, cx) => {
 };
 
 export const openSystemDetails = (page = 'overview') => openOverlay({
-  mod: 'devkits', kind: 'dialog', frame: 'none', modal: false, width: 0.9, height: 0.82,
-  props: { view: 'hardware-details', page },
+  mod: 'devkits-system', kind: 'dialog', frame: 'none', modal: false, width: 0.9, height: 0.82,
+  props: { view: 'details', page },
 });
 
 // Devkits' adapter: placement, containers, sizing and context menus belong to this consumer.

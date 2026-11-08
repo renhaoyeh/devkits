@@ -27,7 +27,6 @@
           "content": { "mod": "devkits", "props": { "view": "header" } } },
         { "id": "workspace-row", "type": "row", "divider": { "width": 1, "color": "border" }, "children": [
         { "id": "workspace-view", "type": "stack", "active": "main", "hidden": true, "size": { "weight": 1 }, "min": 320, "children": [
-        { "id": "asana", "type": "block", "content": { "mod": "devkits", "props": { "view": "asana" } } },
         { "id": "project-empty", "type": "block", "content": { "mod": "devkits", "props": { "view": "project-empty" } } },
         { "id": "main", "type": "block",
           "content": { "tab": "active", "pane": {
@@ -40,7 +39,10 @@
         { "id": "simulator", "type": "block", "hidden": true, "size": { "px": 380 }, "min": 300, "max": 900,
           "content": { "mod": "devkits-simulator", "props": { "view": "simulator" } } }
         ] },
-        { "id": "status", "type": "block", "size": { "px": 32 }, "content": { "mod": "devkits", "props": { "view": "status" } } }
+        { "id": "status", "type": "column", "size": { "px": 32 }, "resizable": false, "children": [
+          { "id": "system-service", "type": "block", "size": { "px": 1 }, "content": { "mod": "devkits-system", "props": { "view": "service" } } },
+          { "id": "status-content", "type": "block", "content": { "mod": "devkits", "props": { "view": "status" } } }
+        ] }
       ]
     }
   ]

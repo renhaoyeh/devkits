@@ -1,7 +1,4 @@
-import { appHome, readTextFile, writeTextFile } from 'herdr';
-import MantisUI, { MantisProjectMenu } from './mantisbt-ui.js';
 
-const connectionPath = () => `${appHome()}/data/devkits/mantisbt.json`;
 const authSchemes = new Map();
 const configurations = new Map();
 const pageSize = 100;
@@ -37,18 +34,6 @@ async function mantisRequest(connection, path, request = fetch) {
   if (!body || typeof body !== 'object') throw new Error('The server did not return MantisBT API data. Check the server URL and REST API configuration.');
   authSchemes.set(key, scheme);
   return body;
-}
-
-export async function readMantisConnection() {
-  try {
-    const connection = JSON.parse(await readTextFile(connectionPath()) || 'null');
-    return connection?.token && connection?.url ? { url: normalizeUrl(connection.url), token: connection.token } : null;
-  } catch { return null; }
-}
-
-export async function saveMantisConnection(connection) {
-  const current = await readTextFile(connectionPath());
-  await writeTextFile(connectionPath(), `${JSON.stringify({ url: connection.url, token: connection.token }, null, 2)}\n`, current);
 }
 
 export async function validateConnection(connection, request = fetch) {
@@ -172,14 +157,3 @@ export async function openSubtasks(connection, gid, request = fetch) {
   const children = await Promise.all(relationships(issue, 'parent-of').map(relation => taskDetails(connection, relation.issue.id, null, request)));
   return children.filter(task => task && !task.completed).map(listTask);
 }
-
-export const mantisSource = {
-  key: 'mantisbt', name: 'MantisBT', server: true, normalizeUrl,
-  tokenHelp: 'Paste an API token from MantisBT → My Account → API Tokens to connect.',
-  readConnection: readMantisConnection, saveConnection: saveMantisConnection, validateConnection,
-  searchProjects, projectTasksPage, projectWorkspace: async (_connection, project) => project,
-  myProjectTasks, openSubtasks, taskDetails, taskComments,
-};
-
-export class MantisProjectPicker extends MantisProjectMenu { get source() { return mantisSource; } }
-export default class MantisPanel extends MantisUI { get source() { return mantisSource; } }

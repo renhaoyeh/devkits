@@ -7,9 +7,11 @@ export async function install(home) {
   const layout = join(home, 'layouts', 'devkits.json');
   const mod = join(home, 'mods', 'devkits');
   const simulator = join(home, 'mods', 'devkits-simulator');
+  const companionNames = ['devkits-system', 'devkits-asana', 'devkits-mantisbt'];
+  const companions = companionNames.map(name => join(home, 'mods', name));
   const frames = join(home, 'mods', 'devkits-sim-frames');
   const themes = ['devkits', 'devkits-light'].map(name => join(home, 'themes', `${name}.json`));
-  for (const path of [layout, mod, simulator, frames, ...themes]) {
+  for (const path of [layout, mod, simulator, frames, ...companions, ...themes]) {
     try { await access(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     throw new Error(`Already exists: ${path}. Refusing to overwrite.`);
   }
@@ -18,13 +20,18 @@ export async function install(home) {
   await mkdir(join(home, 'themes'), { recursive: true });
   const stage = await mkdtemp(join(home, 'mods', '.devkits-'));
   let installed = false, simulatorInstalled = false, framesInstalled = false, layoutWritten = false;
-  const writtenThemes = [];
+  const writtenThemes = [], writtenCompanions = [];
   try {
     await cp(new URL('./mods/devkits/', import.meta.url), stage, { recursive: true,
       filter: source => !source.endsWith('/gpui-kit.d.ts') && !source.endsWith('/jsconfig.json') });
     await rename(stage, mod); installed = true;
     simulatorInstalled = true;
     await cp(new URL('./mods/devkits-simulator/', import.meta.url), simulator, { recursive: true, errorOnExist: true, force: false });
+    for (const [index, name] of companionNames.entries()) {
+      writtenCompanions.push(companions[index]);
+      await cp(new URL(`./mods/${name}/`, import.meta.url), companions[index], { recursive: true, errorOnExist: true, force: false,
+        filter: source => !source.endsWith('/gpui-kit.d.ts') && !source.endsWith('/jsconfig.json') });
+    }
     await mkdir(frames);
     framesInstalled = true;
     for (const name of ['mod.json', 'main.js'])
@@ -41,6 +48,7 @@ export async function install(home) {
     if (simulatorInstalled) await rm(simulator, { recursive: true, force: true });
     if (framesInstalled) await rm(frames, { recursive: true });
     for (const path of writtenThemes) await rm(path);
+    for (const path of writtenCompanions) await rm(path, { recursive: true, force: true });
     throw error;
   } finally { await rm(stage, { recursive: true, force: true }); }
   return layout;

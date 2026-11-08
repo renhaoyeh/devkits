@@ -1,7 +1,7 @@
 import { div, svg } from 'gpui-kit';
 import { h_flex, v_flex, Input, InputState } from 'gpui-base';
-import { shared, setShared, openOverlay, closeOverlay } from 'herdr';
-import AsanaPanel, { AsanaProjectPicker } from './asana.js';
+import { TaskSourceController, TaskSourceProjectPicker } from './components/task-source.js';
+import { mantisSource } from './source.js';
 import { Button } from './components/button.js';
 import { DropdownMenuTrigger } from './components/dropdown-menu.js';
 
@@ -34,12 +34,14 @@ const cell = (value, width, header = false) => div().when(Boolean(width), el => 
   .when(!width, el => el.flex_1().min_w(0)).h_full().px(8).flex().items_center().truncate()
   .text_color(header ? mantisTheme.accent : mantisTheme.foreground).when(header, el => el.font_semibold()).child(value || '—');
 
-export class MantisProjectMenu extends AsanaProjectPicker {
+export class MantisProjectPicker extends TaskSourceProjectPicker {
+  constructor(options = {}) { super({ ...options, source: mantisSource }); }
+
   render() {
     return v_flex().id('mantis-project-picker').w_full().h(360).p(4).gap(4).border(1).border_color(mantisTheme.border)
       .bg('#ffffff').text_color(mantisTheme.foreground).font_family('Open Sans').text_size(13).track_focus(this.handle)
       .on_key_down((event, cx) => {
-        if (event.key === 'escape') closeOverlay(this.overlay);
+        if (event.key === 'escape') this.close();
         else if (event.key === 'enter') this.choose(this.projects[this.index]);
         else if ((event.key === 'down' || event.key === 'up') && this.projects.length)
           this.index = (this.index + (event.key === 'down' ? 1 : this.projects.length - 1)) % this.projects.length;
@@ -58,7 +60,9 @@ export class MantisProjectMenu extends AsanaProjectPicker {
   }
 }
 
-export default class MantisUI extends AsanaPanel {
+export default class MantisPanel extends TaskSourceController {
+  constructor(options = {}) { super({ ...options, source: mantisSource }); }
+
   init(cx) {
     super.init(cx);
     this.statusFilter = null;
@@ -84,7 +88,7 @@ export default class MantisUI extends AsanaPanel {
         [task.name, issueNumber(task.gid), task.section, task.assignee, task.category].filter(Boolean).join(' ').toLowerCase().includes(word)));
   }
   chooseView(tab, cx) {
-    this.tab = tab; setShared(this.key('tab'), tab);
+    this.tab = tab; this.writeState('tab', tab);
     this.settingsOpen = false; this.selected = null; this.detail = null; this.detailRequest = null;
     this.handle.focus(); cx.notify();
   }
@@ -98,8 +102,7 @@ export default class MantisUI extends AsanaPanel {
       .child(DropdownMenuTrigger(Button('mantis-project-menu', mantisTheme, { variant: 'ghost' }).h(45).px(14).rounded(0).gap(8)
         .text_color('#ffffff').bg('#555555').accessibility_label('Choose MantisBT project').disabled(!ready)
         .child(div().max_w(320).truncate().child(bound?.name || 'Select Project')).child(glyph('chevron-down', 12)), 360,
-      (_cx, at) => { if (ready) openOverlay({ mod: 'devkits', kind: 'popup', frame: 'none', width: 360, at,
-        props: { view: 'mantisbt-projects', folder: this.folder } }); }, 'end', { x: 0, y: 0 }))
+      (_cx, at) => { if (ready) this.openProjectPicker?.(this.folder, at); }, 'end', { x: 0, y: 0 }))
       .child(Button('mantis-close', mantisTheme, { variant: 'ghost', size: 'icon' }).size(45).rounded(0).text_color('#ffffff')
         .accessibility_label('Close MantisBT tasks').on_click(close).child(glyph('close', 16)));
   }
@@ -189,7 +192,7 @@ export default class MantisUI extends AsanaPanel {
         .child(full('Description', task.notes || 'No description.'))
         .child(full('Tags', task.tags?.join(', ') || 'No tags attached.'))
         .child(h_flex().p(10).justify_end().bg('#f5f5f5')
-          .child(button('mantis-import', 'Import into Tasks', () => importTask(task), { primary: true, icon: 'plus', disabled: !task.comments && !task.commentsError }))))
+          .child(button('mantis-import', this.importLabel, () => importTask(task), { primary: true, icon: 'plus', disabled: !this.onImport || (!task.comments && !task.commentsError) }))))
       .when(Boolean(task.parent) || task.subtasks > 0, el => el.child(widget().id('mantis-relationships')
         .child(widgetHeader('mantis-relationships-header', 'Relationships', 'list-tree'))
         .when(task.subtasks > 0 && !children, el => el.child(div().p(12).child('Loading relationships…')))

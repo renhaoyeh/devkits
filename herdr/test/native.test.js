@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, launcherLabel, launcherOption, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents } from '../mods/devkits/model.js';
@@ -75,12 +75,13 @@ async function loadView(host) {
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
   // The feature views main.js mixes into its view.
-  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'hardware-topology', 'hardware-model', 'system-monitor', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'agent-board-model', 'agent-task-evidence', 'agent-board-state', 'git-result-toast']
+  const features = await Promise.all(['shell-command', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'system-display-model', 'system-display', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'agent-board-model', 'agent-task-evidence', 'agent-board-state', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
+  const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
   // Run native actions with a fake host; no real Herdr session is touched.
   return new Function('View', ...Object.keys(host), [...components, ...features].join('\n')
     .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\n' + source
-    .replace(/^import .*;\r?\n/gm, '').replace('export default class', 'class') + '\nreturn Devkits;');
+    .replace(/^import .*;\r?\n/gm, '').replace('export default class', 'class') + '\nDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;\n' + provider.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\nreturn SystemMonitorCore; })(); return Devkits;');
 }
 async function viewFor(host) {
   const memory = {};
@@ -88,7 +89,7 @@ async function viewFor(host) {
   const input = host.InputState || { new: () => ({ text: '', events: {}, value() { return this.text; },
     set_value(value) { assert.equal(rendering, false, 'retained input values must change outside render'); this.text = value; },
     on(name, action) { this.events[name] = action; } }) };
-  host = { savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: true, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   host.InputState = { new: (...args) => { assert.equal(rendering, false, 'InputState.new cannot run during render'); return input.new(...args); } };
   const textarea = host.TextareaState || input;
@@ -102,10 +103,29 @@ async function viewFor(host) {
   return View;
 }
 
+async function systemViewFor(host) {
+  const Parent = await viewFor(host);
+  return class SystemFixture extends Parent {
+    constructor() {
+      super();
+      this.systemMonitor = new Parent.SystemMonitorCore({ active: () => this.systemDisplay.active(),
+        details: host.props?.()?.view === 'hardware-details', page: host.props?.()?.page, overlay: host.props?.()?.overlay,
+        openDetails: page => host.openOverlay?.({ mod: 'devkits-system', width: 0.9, height: 0.82, props: { view: 'details', page } }),
+      });
+      this.systemDisplay.monitor = this.systemMonitor;
+    }
+    init(props, cx) {
+      if (host.props?.()?.view === 'hardware-details') { this.systemDisplay.init(); this.systemMonitor.init(cx); }
+      else super.init(props, cx);
+    }
+    render(cx) { return host.props?.()?.view === 'hardware-details' ? this.systemMonitor.renderDetails(host.theme?.() || {}) : super.render(cx); }
+  };
+}
+
 test('SystemMonitor keeps host and window state separate while coalescing reads across surfaces', async () => {
   const ui = fakeElements(), tasks = [], timers = [], reads = [], notifications = [];
   let target = {}, finish;
-  const View = await viewFor({ ...ui, props: () => target,
+  const View = await systemViewFor({ ...ui, props: () => target,
     exec: (...args) => { reads.push(args); return new Promise(resolve => { finish = resolve; }); } });
   const sidebar = new View();
   target = { view: 'status' }; const status = new View();
@@ -137,7 +157,7 @@ test('SystemMonitor keeps host and window state separate while coalescing reads 
 test('hardware refresh avoids overlap, clears failed readings and recovers with a new sample', async () => {
   const ui = fakeElements(), calls = [], tasks = [];
   let finish;
-  const View = await viewFor({ ...ui, exec: (...args) => {
+  const View = await systemViewFor({ ...ui, exec: (...args) => {
     calls.push(args); return new Promise(resolve => { finish = resolve; });
   } });
   const view = new View(), cx = { notify() {}, spawn(task) { tasks.push(task(cx)); } };
@@ -172,7 +192,7 @@ test('system monitor opens from each summary and refreshes hardware details whil
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
   let request = 0;
-  const View = await viewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', overlay: 'system-overlay' }),
+  const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', overlay: 'system-overlay' }),
     openOverlay: spec => opened.push(spec), closeOverlay: id => closed.push(id),
     exec: async () => ({ code: 0, stdout: JSON.stringify({ sample: { count: 10, total: 100, idle: 50 },
       cpu: ++request * 10, cores: 10, cpuName: 'Apple M4', load: [1, 2, 3],
@@ -201,7 +221,7 @@ test('system monitor opens from each summary and refreshes hardware details whil
   assert.ok(ui.textOf('system-disk-value').includes('500 GB'));
   assert.ok(ui.textOf('system-disk-subtitle').includes('R 1.0 KB/s   W 2.0 KB/s'));
   for (const id of ['system-cpu', 'system-gpu', 'system-ram', 'system-disk', 'system-network', 'open-hardware-details']) ui.nodes.get(id).click();
-  assert.ok(opened.every(spec => spec.props.view === 'hardware-details'));
+  assert.ok(opened.every(spec => spec.props.view === 'details'));
   assert.ok(opened.every(spec => spec.width === 0.9), 'The monitor uses the window width rather than a fixed narrow dialog');
   assert.ok(ui.textOf('system-cpu-subtitle').includes('Apple M4 · 10 cores'));
   ui.nodes.get('hardware-details').keyDown({ key: 'escape' }, cx);
@@ -211,7 +231,7 @@ test('system monitor opens from each summary and refreshes hardware details whil
 
 test('monitor settings persist module choices, order, interval, style and selected CPU cores', async () => {
   const ui = fakeElements(), memory = {};
-  const View = await viewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
+  const View = await systemViewFor({ ...ui, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(), cx = renderContext;
   view.systemMonitor.hardware = { cores: 4, coreUsage: [10, 20, 30, 40], cpu: 25, cpuName: 'Fixture',
     gpus: [{ name: 'Apple M4', percent: 30, memory: { type: 'unified', total: 24 * 1024 ** 3, used: 1024 ** 3 } }],
@@ -270,7 +290,7 @@ test('the host context menu toggles status monitoring independently of the sideb
   const ui = fakeElements(), opened = [], ticks = [], tasks = [];
   const memory = { 'devkits.system-display': null, 'devkits.system-monitor': { placement: 'sidebar', order: ['ram', 'cpu', 'disk', 'network'], visible: { gpu: false } } };
   let target = { view: 'status' };
-  const View = await viewFor({ ...ui, theme: () => ({}), props: () => target,
+  const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => target,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     closeOverlay() {}, openOverlay: spec => opened.push(spec), exec: async () => ({ code: 0, stdout: JSON.stringify({ cpu: 25,
       memory: { total: 32 * 1024 ** 3, used: 8 * 1024 ** 3, percent: 25 },
@@ -311,7 +331,7 @@ test('the host context menu toggles status monitoring independently of the sideb
 test('Devkits right-click menus retain independent mounts, choose sidebar inline UI and reopen after hiding', async () => {
   const ui = fakeElements(), opened = [], closed = [], memory = {};
   let target = {};
-  const View = await viewFor({ ...ui, theme: () => ({}), props: () => target, setAgentOrder() {}, run() {},
+  const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => target, setAgentOrder() {}, run() {},
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     openOverlay: spec => opened.push(spec), closeOverlay: id => closed.push(id) });
   const view = new View(); view.folded = new Set();
@@ -354,7 +374,7 @@ test('Devkits right-click menus retain independent mounts, choose sidebar inline
 
 test('SystemMonitor exposes data and independently mountable renderers without host layout decisions', async () => {
   const ui = fakeElements(), memory = { 'devkits.system-monitor': { placement: 'status', style: 'compact', sidebarHeight: 380 } };
-  const View = await viewFor({ ...ui, shared: key => memory[key] });
+  const View = await systemViewFor({ ...ui, shared: key => memory[key] });
   const monitor = new View().systemMonitor;
   monitor.hardware = { cpu: 42, cores: 2 }; monitor.hardwareHistory = [{ at: 1, cpu: 42 }];
   monitor.renderInline({}, { id: 'anywhere-inline' });
@@ -369,7 +389,7 @@ test('SystemMonitor exposes data and independently mountable renderers without h
 
 test('sidebar monitor resize follows zoom, saves on release or leave and reserves project space', async () => {
   const ui = fakeElements(), memory = {}, saved = [];
-  const View = await viewFor({ ...ui, theme: () => ({}), setAgentOrder() {}, run() {},
+  const View = await systemViewFor({ ...ui, theme: () => ({}), setAgentOrder() {}, run() {},
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; saved.push(key); } });
   const view = new View(); view.folded = new Set();
   const cx = { ...renderContext, spawn() {} }, render = () => { ui.nodes.clear(); view.render(cx); };
@@ -402,7 +422,7 @@ test('sidebar monitor resize follows zoom, saves on release or leave and reserve
 
 test('hardware ordering reuses drag handles, supports keyboard movement and cancels without changing preferences', async () => {
   const ui = fakeElements(), memory = {}, closed = [];
-  const View = await viewFor({ ...ui, theme: () => ({}), shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+  const View = await systemViewFor({ ...ui, theme: () => ({}), shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     props: () => ({ view: 'hardware-details', page: 'settings', overlay: 'monitor' }), closeOverlay: id => closed.push(id) });
   const view = new View(); view.handle = { focus() {} }; view.render(renderContext);
   assert.ok(ui.textOf('hardware-setting-row-ram').includes('RAM'));
@@ -430,7 +450,7 @@ test('hardware ordering reuses drag handles, supports keyboard movement and canc
 
 test('CPU detail renders Task Manager style processor histories, P/E groups and optional real sensor readings', async () => {
   const ui = fakeElements(), memory = {};
-  const View = await viewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', page: 'cpu' }),
+  const View = await systemViewFor({ ...ui, theme: () => ({}), props: () => ({ view: 'hardware-details', page: 'cpu' }),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const view = new View(); view.handle = { focus() {} };
   view.systemMonitor.hardware = { cpu: 40, cpuName: 'Fixture', cores: 4, coreUsage: [10, 20, 50, 80],
@@ -464,7 +484,7 @@ test('opening a monitor reuses warm data without requesting a repaint during ini
   Object.defineProperty(globalThis, 'window', { configurable: true, writable: true,
     value: { sessionStorage: { getItem: () => JSON.stringify(cache) } } });
   t.after(() => { if (previous) Object.defineProperty(globalThis, 'window', previous); else delete globalThis.window; });
-  const View = await viewFor({ props: () => ({ view: 'hardware-details' }) });
+  const View = await systemViewFor({ props: () => ({ view: 'hardware-details' }) });
   let notifications = 0;
   const cx = { focus_handle: () => ({ focus() {} }), timer: { every() {} }, notify() { notifications++; },
     spawn() { assert.fail('A warm cache must not start another hardware reader'); } };
@@ -2006,7 +2026,8 @@ test('Asana import opens from Tasks and stays bound to its originating project',
   const view = new View(); view.agentBoard = { render: (_p, _a, _l, actions) => actions };
   view.boardPanel(project, {}).asana();
   assert.equal(overlays[0].kind, 'dialog'); assert.equal(overlays[0].modal, true);
-  assert.equal(overlays[0].props.project.folder, '/Code/one');
+  assert.equal(overlays[0].mod, 'devkits-asana');
+  assert.equal(overlays[0].props.context.folder, '/Code/one');
 });
 test('starting a task from Tasks names the thread, adds the model, effort and task prompt, without a bookmark step', async () => {
   const ui = fakeElements(), commands = [];
@@ -2261,11 +2282,19 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(layout.children[0].id, 'sidebar');
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
-  const hardwarePackage = JSON.parse(await readFile(join(mod, 'vendor', 'systeminformation', 'package.json'), 'utf8'));
+  const system = join(home, 'mods', 'devkits-system');
+  for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt']) {
+    const path = join(home, 'mods', name);
+    assert.equal(JSON.parse(await readFile(join(path, 'mod.json'), 'utf8')).place, 'none');
+    assert.equal(await readFile(join(path, 'main.js'), 'utf8'), await readFile(new URL(`../mods/${name}/main.js`, import.meta.url), 'utf8'));
+  }
+  const hostFiles = await readdir(mod);
+  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor']) assert.ok(!hostFiles.includes(obsolete));
+  const hardwarePackage = JSON.parse(await readFile(join(system, 'vendor', 'systeminformation', 'package.json'), 'utf8'));
   assert.equal(hardwarePackage.version, '5.33.19');
   assert.equal(hardwarePackage.license, 'MIT');
-  assert.match(await readFile(join(mod, 'vendor', 'systeminformation', 'LICENSE'), 'utf8'), /MIT License/);
-  assert.match(await readFile(join(mod, 'hardware-package.js'), 'utf8'), /vendor\/systeminformation\/lib\/index\.js/);
+  assert.match(await readFile(join(system, 'vendor', 'systeminformation', 'LICENSE'), 'utf8'), /MIT License/);
+  assert.match(await readFile(join(system, 'hardware-package.js'), 'utf8'), /vendor\/systeminformation\/lib\/index\.js/);
   for (const name of (await readdir(new URL('../mods/devkits/components/', import.meta.url))).filter(name => name.endsWith('.js'))) {
     assert.equal(await readFile(join(mod, 'components', name), 'utf8'),
       await readFile(new URL(`../mods/devkits/components/${name}`, import.meta.url), 'utf8'));
@@ -2308,6 +2337,16 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   const before = await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8');
   await assert.rejects(install(home), /Refusing to overwrite/);
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
+});
+
+for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt']) test(`installer preserves an existing ${name} mod`, async t => {
+  const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const path = join(home, 'mods', name);
+  await mkdir(path, { recursive: true }); await writeFile(join(path, 'main.js'), 'existing module');
+  await assert.rejects(install(home), /Refusing to overwrite/);
+  assert.equal(await readFile(join(path, 'main.js'), 'utf8'), 'existing module');
+  await assert.rejects(readFile(join(home, 'mods', 'devkits', 'main.js')), { code: 'ENOENT' });
 });
 
 test('installer keeps the person\'s keys and an F5 they already bound', async t => {
@@ -3321,7 +3360,8 @@ async function taskBoardFor(records = {}) {
     shared: key => memory[key], setShared: (key, value) => { memory[key] = structuredClone(value); },
     currentAgents: () => runtime.agents, currentSpaces: () => projects, terminals: () => [],
     withTaskInputEvidence: agents => agents, savedTasks: () => [],
-    AsanaPanel: class { init() {} launchRow(task) { launches.push(task); return ui.element(); } },
+    SourceTaskReader: class { init() {} show(task) { runtime.tokenReads = (runtime.tokenReads || 0) + 1; this.detailError = runtime.token ? null : 'Connect Asana'; } },
+    TaskSession: class { init() {} render(task) { launches.push(task); return ui.element(); } },
     boardTheme: () => ({ appearance: 'linear', fontFamily: 'Arial', foreground: '#fff', secondary: '#eee',
       background: '#121213', muted: '#959597', border: '#232426', selected: '#29292b', hover: '#232424',
       popover: '#1c1c1d', control: '#1c1c1d', controlBorder: '#303032', menuHover: '#29292b',
@@ -3802,10 +3842,9 @@ test('confirming an Asana selection closes the picker and opens a Tasks draft wi
   const source = { gid: 'a1', name: 'Selected source', notes: 'Source instructions', comments: [] };
   const View = await viewFor({ props: () => ({ view: 'asana', project, overlay: 'asana' }),
     spaces: () => [project], closeOverlay: id => closed.push(id), openTaskComposer: (...args) => drafts.push(args),
+    TaskSources: class { constructor(onImport) { this.onImport = onImport; } open(bound, key) { assert.equal(bound, project); assert.equal(key, 'asana'); this.onImport(bound, source); } },
     run: (...args) => commands.push(args) });
-  const view = new View();
-  view.asana = { render: (bound, onImport) => { assert.equal(bound, project); onImport(source); } };
-  view.asanaPanel({});
+  const view = new View(); view.init({}, renderContext);
   assert.deepEqual(closed, ['asana']); assert.deepEqual(drafts, [[project, null, 'todo', source]]);
   assert.deepEqual(commands, []);
 });
@@ -3827,10 +3866,9 @@ test('MantisBT import routes through the same Tasks draft without launching an a
   const source = { source: 'mantisbt', gid: '1', server: 'https://mantis.test', name: 'Selected issue', notes: 'Instructions', comments: [] };
   const View = await viewFor({ props: () => ({ view: 'mantisbt', project, overlay: 'mantisbt' }),
     spaces: () => [project], closeOverlay: id => closed.push(id), openTaskComposer: (...args) => drafts.push(args),
+    TaskSources: class { constructor(onImport) { this.onImport = onImport; } open(bound, key) { assert.equal(bound, project); assert.equal(key, 'mantisbt'); this.onImport(bound, source); } },
     run: (...args) => commands.push(args) });
-  const view = new View();
-  view.asana = { render: (bound, onImport) => { assert.equal(bound, project); onImport(source); } };
-  view.asanaPanel({});
+  const view = new View(); view.init({}, renderContext);
   assert.deepEqual(closed, ['mantisbt']); assert.deepEqual(drafts, [[project, null, 'todo', source]]);
   assert.deepEqual(commands, []);
 });
@@ -3922,7 +3960,7 @@ test('Tasks deduplicates pending and loaded external detail reads while allowing
   board.view.detail.show = function(task) { detailReads++; this.detail = { ...task, notes: 'Source description' }; };
   board.ui.nodes.get('board-card-a').click({}, board.cx);
   board.ui.nodes.get('board-card-a').click({}, board.cx);
-  assert.equal(board.runtime.tokenReads, 1);
+  assert.equal(board.runtime.tokenReads, undefined, 'The host does not read provider credentials');
   await settle();
   const detail = board.view.detail.detail;
   assert.equal(detailReads, 1); assert.equal(detail.notes, 'Source description');
