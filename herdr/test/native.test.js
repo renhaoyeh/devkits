@@ -2696,6 +2696,36 @@ test('Windows account launchers keep provider icons in the sidebar and pane head
   }
 });
 
+for (const kind of ['codex', 'claude']) test(`Windows ${kind} archive uses shared JS discovery and retains account and resume flags`, async () => {
+  const ui = fakeElements(), memory = { 'devkits.thread-profiles': { 'tab-0': 'work-profile' } }, commands = [], tasks = [], lookups = [];
+  const id = '12345678-1234-1234-1234-123456789abc', directory = 'C:\\Accounts\\Work account';
+  const command = ['env', `${kind === 'codex' ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'}=${directory}`, kind,
+    ...(kind === 'codex' ? ['-m', 'fixture-model', '--sandbox', 'read-only'] : ['--permission-mode', 'bypassPermissions'])];
+  const wrapped = terminalArgv(command, 'windows');
+  const argv = ['powershell.exe', '-NoExit', '-Command', '& ' + wrapped.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ')];
+  const agent = { ...claudeAgent, app: kind === 'codex' ? 'codex' : 'claude-code', status: 'idle', seq: 1 };
+  const thread = { ...claudeThread, agent, agents: [agent] };
+  const terminal = { address: agent.address, argv, cwd: '/Code/api', status: 'idle', foreground: { pid: 42 } };
+  const file = kind === 'codex' ? `${directory}\\sessions\\rollout-2026-11-08T00-00-00-${id}.jsonl` : `${directory}\\projects\\work\\${id}.jsonl`;
+  const View = await viewFor({ ...ui, window: () => ({ platform: 'windows' }), spaces: () => projects,
+    terminals: () => [terminal], shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (...args) => commands.push(args), hc: async () => ({ code: 0, stdout: JSON.stringify(terminal) }),
+    exec: async (...args) => { lookups.push(args); return { code: 0, stdout: JSON.stringify({ file }) }; } });
+  const view = new View(), cx = { notify() {}, spawn: fn => tasks.push(fn(cx)) };
+  view.prepareThreadArchive(thread, cx); await Promise.all(tasks);
+  ui.nodes.clear(); view.threadRow(thread, {});
+  assert.equal(ui.nodes.get('archive-thread-tab-0').disabled, false);
+  assert.ok(!ui.nodes.has('close-thread-tab-0'));
+  assert.deepEqual(commands, [], 'Checking a conversation never archives or closes it');
+  assert.deepEqual(lookups[0], ['node', ['/herdr/mods/devkits/components/agent-session-windows.js', '42', kind, directory]]);
+  await view.archiveThread(thread);
+  const entry = memory['devkits.archived-threads'][0];
+  assert.equal(entry.id, `${kind}:${id}`);
+  assert.equal(entry.profile, 'work-profile');
+  assert.deepEqual(entry.argv, resumeArgv(command, id));
+  assert.deepEqual(commands, [['tab.close', { id: thread.tab.id }]]);
+});
+
 test('Codex without a readable rollout offers Close and only ends on the next click', async () => {
   const commands = [], notes = [], ui = fakeElements();
   const View = await viewFor({ ...ui, spaces: () => projects, run: (...args) => commands.push(args),
@@ -2763,7 +2793,9 @@ for (const platform of ['windows', 'macos', 'linux']) test(`${platform} archive 
   const View = await viewFor({ ...ui, window: () => ({ platform }), spaces: () => projects,
     terminals: () => [terminal], run: (...args) => commands.push(args),
     hc: () => new Promise(resolve => { reply = () => resolve({ code: 0, stdout: JSON.stringify(terminal) }); }),
-    exec: async () => ({ code: 0, stdout: 'n/home/rollout-2026-11-08-12345678-1234-1234-1234-123456789abc.jsonl\n' }) });
+    exec: async () => ({ code: 0, stdout: platform === 'windows'
+      ? JSON.stringify({ file: 'C:\\Account\\sessions\\rollout-2026-11-08-12345678-1234-1234-1234-123456789abc.jsonl' })
+      : 'n/home/rollout-2026-11-08-12345678-1234-1234-1234-123456789abc.jsonl\n' }) });
   const view = new View(), cx = { notify() {}, spawn: fn => tasks.push(fn(cx)) };
   view.prepareThreadArchive(thread, cx);
   terminal.status = agent.status = 'working'; agent.seq++;
