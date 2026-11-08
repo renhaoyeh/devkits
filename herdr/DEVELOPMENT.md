@@ -14,6 +14,7 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | --- | --- |
 | Window structure and block sizes | `layouts/devkits.json` |
 | Native views and interactions | `mods/devkits/main.js` |
+| SYSTEM monitoring and its UI lifecycle | `mods/devkits/system-monitor.js`; hardware readers/model in `hardware-*.js` |
 | Shared native UI components | `mods/devkits/components/`; other mods carry copies (`COPIES`, `sync-shared.js`) |
 | iOS Simulator panel | `mods/devkits-simulator/` |
 | Project and thread data transformations | `mods/devkits/model.js` |
@@ -25,6 +26,12 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 - Edit this repository first; it is the installable source. Modify only the custom layout, mod, and themes, not Herdr's bundled or generated files.
 - Use `theme()` tokens. Use native async and animation APIs; do not retain a view context beyond its lifetime or use browser timers.
 - Add a focused test for new nontrivial logic. Existing tests use mocked native APIs and temporary directories so they do not operate on real sessions.
+
+SYSTEM is composed as a `SystemMonitor` instance, independently of the host View's state and prototype. Its constructor accepts `{ active, details, page, overlay, openDetails }`: `active()` determines whether this consumer needs sampling and `openDetails(page)` delegates navigation to the consumer. Call `init(cx)` once. The monitor owns readings, bounded history, coalescing and its details UI. Its `devkits.system-monitor` preferences contain monitoring choices only; live data/history stay in session memory.
+
+The reusable interface is `snapshot()` (data, history, error, updatedAt and selected/available widget IDs), `renderInline(t, { id })`, `renderWidgets(t, { id, style, cpuMode })`, `renderDetails(t)` and `open(page)`. Renderer names describe presentation, with no sidebar/status placement checks. A consumer may put either renderer in any container, render both against one snapshot, or draw its own UI from the data. Give simultaneous mounts distinct IDs. Rendered elements and callbacks belong to the current native view; never store a context for later. Herdr's per-mod import boundary still applies: a consumer must bundle the module and its dependencies within its own mod, rather than importing another mod's source at runtime.
+
+Devkits' `system-display.js` is the consumer adapter. It owns the right-click menu, frames, resize interactions and independent sidebar/status visibility. `system-display-model.js` normalizes its separate `devkits.system-display` preferences and migrates old display fields before SYSTEM can save monitoring settings. The host calls `renderStatus(t)` and `renderSidebar(t)`, wraps its sidebar with `sidebarContainer(root)` and measures the content above the monitor with `reservedSidebarContent(root)`. SYSTEM Settings must not expose Devkits placement or widget style controls.
 
 ## 3. Check the source
 

@@ -15,18 +15,9 @@ export function hardwarePreferences(saved = {}) {
     visible: Object.fromEntries(ids.map(id => [id, typeof saved?.visible?.[id] === 'boolean' ? saved.visible[id] : !['storage', 'sensors'].includes(id)])),
     order: [...new Set([...(Array.isArray(saved?.order) ? saved.order.filter(id => ids.includes(id)) : []), ...ids])],
     interval: [1, 3, 5, 10].includes(saved?.interval) ? saved.interval : 3,
-    placement: saved?.placement === 'status' ? 'status' : 'sidebar',
-    sidebarHeight: hardwareSidebarHeight(saved?.sidebarHeight),
-    style: saved?.style === 'compact' ? 'compact' : 'graph',
-    cpuMode: saved?.cpuMode === 'cores' ? 'cores' : 'total',
     cpuGraph: ['total', 'logical', 'groups'].includes(saved?.cpuGraph) ? saved.cpuGraph : 'logical',
     cores: Array.isArray(saved?.cores) ? [...new Set(saved.cores.filter(id => Number.isInteger(id) && id >= 0))] : null,
   };
-}
-
-export function hardwareSidebarHeight(value, available = 600) {
-  const maximum = Math.max(32, Math.min(600, Number.isFinite(available) ? available : 600));
-  return Math.round(Math.max(Math.min(96, maximum), Math.min(maximum, Number.isFinite(value) ? value : 240)));
 }
 
 export function selectedHardwareCores(config, count) {
