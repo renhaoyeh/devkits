@@ -3422,7 +3422,7 @@ test('Auto starts the selected account furthest below quota pace and is remember
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, keys: () => [] });
   const view = new View();
   const agents = [{ key: 'codex', installed: true }, { key: 'devkits-codex-a', installed: true },
-    { key: 'devkits-codex-b', installed: true }, { key: 'devkits-claude-c', name: 'Claude · C', run: ['claude'], installed: true }];
+    { key: 'devkits-codex-b', name: 'Codex · B', installed: true }, { key: 'devkits-claude-c', name: 'Claude · C', run: ['claude'], installed: true }];
   // b has 40% left for half a week (0.8); c has 20% left for a tenth of it (2); a is at its 5h limit.
   assert.equal(view.autoThreadAgent(agents, null).key, 'devkits-claude-c');
   memory['devkits.auto-multipliers'] = { 'devkits-codex-b': 5 };
@@ -3449,6 +3449,11 @@ test('Auto starts the selected account furthest below quota pace and is remember
   delete memory['devkits.hidden-usage-profiles'];
   assert.ok(ui.textOf('auto-account-rules').join(' ').includes('most Room'));
   view.launcher({});
+  assert.equal(ui.textOf('start-auto').join(''), 'Auto · C');
+  memory['devkits.auto-multipliers'] = { 'devkits-codex-b': 5 };
+  ui.nodes.clear(); view.launcher({});
+  assert.equal(ui.textOf('start-auto').join(''), 'Auto · B', 'The preview follows the current quota ranking');
+  delete memory['devkits.auto-multipliers'];
   ui.nodes.get('start-auto').click({}, {});
   assert.deepEqual(started.at(-1), ['devkits-claude-c', { auto: true }]);
   view.openThread = () => {};
