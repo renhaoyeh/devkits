@@ -122,7 +122,8 @@ async function loadView(host) {
       snapshot() { return UsageOwner.UsageMonitor.prototype.snapshot.call(this); }
       publish() { return UsageOwner.UsageMonitor.prototype.publish.call(this); }
       refreshUsage(cx, force, manual) { return UsageOwner.UsageMonitor.prototype.refreshUsage.call(this, cx, force, manual); }
-      accountUsage(t) { return UsageClient.prototype.render.call(this, t); }
+      entries(snapshot) { return UsageClient.prototype.entries.call(this, snapshot); }
+      accountUsage(t) { return usageShownIn('sidebar') ? UsageClient.prototype.render.call(this, t, { style: usageStyle(), openMenu: at => openUsageDisplayMenu(at, 'sidebar') }) : div().h(0).flex_none(); }
       usageDetails(t) { return UsageOwner.UsageDetails.prototype.usageDetails.call(this, t); }
       drainTasks() {
         const service = new Domain.TaskRuntime(); service.projects = () => this.projects(); service.navigate = event => this.navigate(event);
@@ -1273,6 +1274,65 @@ test('hiding every agent says where Agent settings can restore the menu', async 
   assert.ok(!ui.nodes.has('start-codex'));
   assert.ok(ui.texts.includes('All agents are hidden. Show them in Agent settings → Add session.'));
 });
+test('compact Usage shows one line of percentages per account, and its right-click menu switches style or hides it', async () => {
+  const ui = fakeElements(), overlays = [], closed = [];
+  const memory = { 'devkits.usage-style': 'compact' };
+  let target = {};
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, shared: key => memory[key],
+    setShared: (key, value) => { memory[key] = value; }, openOverlay: overlay => overlays.push(overlay), closeOverlay: id => closed.push(id),
+    settings: () => ({ zoom: 1 }), window: () => ({}), layout: () => ({ children: [] }), theme: () => ({}) });
+  const view = new View(); view.usageMachine = null;
+  view.usageAgents = [{ key: 'codex', name: 'Codex', run: ['codex'] }, { key: 'pi', name: 'Pi', run: ['pi'] }];
+  view.usage = [{ key: 'codex', email: 'me@example.com', windows: [{ bucket: 'codex', minutes: 300, usedPercent: 28 },
+    { bucket: 'codex', minutes: 10080, usedPercent: 91 }] }];
+  view.accountUsage({});
+  assert.equal(ui.nodes.get('usage-agent:codex').height, 28);
+  assert.ok(!ui.nodes.has('usage-meter-agent:codex-300'));
+  assert.ok(ui.textOf('usage-name-agent:codex').includes('me@example.com'));
+  assert.ok(ui.textOf('usage-compact-agent:codex-300').includes('5h 28%'));
+  assert.ok(ui.textOf('usage-compact-agent:codex-10080').includes('W 91%'));
+  assert.ok(ui.textOf('usage-agent:pi').includes('—'));
+  ui.nodes.get('account-usage').mouseDownByButton.right({ position: { x: 20, y: 400 } }, renderContext);
+  assert.deepEqual(overlays.at(-1).props, { view: 'usage-display-menu', surface: 'sidebar' });
+  target = { view: 'usage-display-menu', surface: 'sidebar', overlay: 'usage-menu' };
+  const menu = new View(); menu.init({}, renderContext); menu.render(renderContext);
+  ui.nodes.get('usage-display-full').click({}, renderContext);
+  assert.equal(memory['devkits.usage-style'], 'full'); assert.deepEqual(closed, ['usage-menu']);
+  // Locations toggle like SYSTEM's; turning off the only one hides Usage.
+  ui.nodes.get('usage-display-status').click({}, renderContext);
+  assert.equal(memory['devkits.usage-location'], 'both');
+  ui.nodes.clear(); menu.render(renderContext);
+  ui.nodes.get('usage-display-sidebar').click({}, renderContext);
+  assert.equal(memory['devkits.usage-location'], 'status');
+  ui.nodes.clear(); menu.render(renderContext);
+  assert.ok(!ui.nodes.has('usage-display-compact'));
+  ui.nodes.get('usage-display-status').click({}, renderContext);
+  assert.equal(memory['devkits.usage-visible'], false);
+  ui.nodes.get('usage-display-sidebar').click({}, renderContext);
+  assert.equal(memory['devkits.usage-visible'], true); assert.equal(memory['devkits.usage-location'], 'sidebar');
+  ui.nodes.clear(); menu.render(renderContext);
+  ui.nodes.get('usage-display-hide').click({}, renderContext);
+  assert.equal(memory['devkits.usage-visible'], false);
+  ui.nodes.get('usage-display-settings').click({}, renderContext);
+  assert.deepEqual(overlays.at(-1).props, { view: 'ui-settings', page: 'usage' });
+  // Interface settings offers the same style choice while Usage is shown.
+  memory['devkits.usage-visible'] = true; target = { view: 'ui-settings', page: 'usage', overlay: 'interface' };
+  const settings = new View(); settings.init({}, renderContext); ui.nodes.clear(); settings.render(renderContext);
+  assert.ok(ui.nodes.has('interface-usage-location') && ui.nodes.has('interface-usage-style'));
+  // Status bar alone has no sidebar style, and the status bar shows one item per supported account.
+  memory['devkits.usage-location'] = 'status'; ui.nodes.clear(); settings.render(renderContext);
+  assert.ok(ui.nodes.has('interface-usage-location') && !ui.nodes.has('interface-usage-style'));
+  memory['devkits.usage.snapshot'] = { contexts: { null: { choices: [{ key: 'agent:codex', name: 'Codex', agent: { key: 'codex' }, provider: 'codex' },
+    { key: 'agent:pi', name: 'Pi', agent: { key: 'pi' }, provider: null }],
+    usage: [{ key: 'codex', email: 'me@example.com', windows: [{ bucket: 'codex', minutes: 10080, usedPercent: 91 }] }] } } };
+  target = { view: 'status' }; ui.nodes.clear(); new View().render(renderContext);
+  assert.ok(ui.textOf('status-usage-agent:codex').includes('me@example.com'));
+  assert.ok(ui.textOf('status-usage-agent:codex-10080').includes('W 91%'));
+  assert.ok(!ui.nodes.has('status-usage-agent:pi') && !ui.nodes.has('account-usage'));
+  memory['devkits.usage-visible'] = false; ui.nodes.clear(); settings.render(renderContext);
+  assert.ok(!ui.nodes.has('interface-usage-style'));
+});
+
 test('usage follows its independent profile selection and launcher order, shows actual quota windows, always has meters, and opens details', async () => {
   const ui = fakeElements(), overlays = [];
   const now = Date.UTC(2026, 0, 1);
