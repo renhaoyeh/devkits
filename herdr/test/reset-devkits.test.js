@@ -1,13 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { evaluateNative } from './source-harness.js';
 
-async function fixture() {
+function nesting(value) {
+  return value && typeof value === 'object' ? 1 + Math.max(0, ...Object.values(value).map(nesting)) : 0;
+}
+
+async function fixture(options = {}) {
   let target = { overlay: 'confirm' }, projects = [], confirmation = '';
   let autoClose = true, closeError = null, now = Date.now();
   const nodes = new Map(), calls = [], commands = [], closed = [], queue = [], timers = [];
   const memory = { layout: 'devkits', 'devkits.calendar-events': ['private'], 'other-mod': 'keep' };
-  const layout = { id: 'root', type: 'block', content: { mod: 'devkits' } }, source = JSON.stringify(layout);
+  const layout = options.layout || { id: 'root', type: 'block', content: { mod: 'devkits' } }, source = JSON.stringify(layout);
   const element = (id = '') => {
     const node = { id, children: [] };
     const el = new Proxy({}, { get: (_target, key) => (...args) => {
@@ -28,7 +33,10 @@ async function fixture() {
     InputState: { new: () => ({ on() {}, value: () => confirmation }) },
     props: () => target, appHome: () => '/herdr', spaces: () => projects,
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
-    readTextFile: async () => source, run: (...args) => commands.push(args),
+    readTextFile: async () => source, run: (...args) => {
+      if (nesting(args[1]) > 16) throw new Error('a host argument may not nest more than 16 levels deep');
+      commands.push(args);
+    },
     closeOverlay: id => closed.push(id), openOverlay: spec => spec, window: () => ({ platform: 'macos' }),
     exec: async (command, args) => {
       calls.push([command, args]);
@@ -104,7 +112,7 @@ test('confirmed reset closes all projects with explicit confirmation before acco
 
 test('deletion waits for native project closure and reports failures without clearing account data', async () => {
   const h = await fixture(); h.projects([{ id: 'one' }]); h.deferClose();
-  h.target({ phase: 'execute', token: 'one', original: h.layout });
+  h.target({ phase: 'execute', token: 'one', originalSource: JSON.stringify(h.layout) });
   h.memory['devkits.reset-authorization'] = { token: 'one', expiresAt: Date.now() + 10000 };
   const view = new h.ResetDevkits(); view.init(h.cx); h.timers[0].callback(h.cx);
   // Allow the mocked close command to resolve while the native model still has the project.
@@ -144,7 +152,7 @@ test('confirmed reset removes provider mounts before clearing and clears shared 
 
 test('failures show incomplete state, keep saved records and permit an explicit retry', async () => {
   const h = await fixture();
-  h.target({ phase: 'execute', token: 'one', original: h.layout });
+  h.target({ phase: 'execute', token: 'one', originalSource: JSON.stringify(h.layout) });
   h.memory['devkits.reset-authorization'] = { token: 'one', expiresAt: Date.now() + 10000 };
   const view = new h.ResetDevkits(); h.fail('Sign-out failed'); view.init(h.cx);
   h.timers[0].callback(h.cx); await h.drain(); view.render({});
@@ -158,10 +166,28 @@ test('failures show incomplete state, keep saved records and permit an explicit 
 
 test('a reload or expired authorization never replays a destructive reset', async () => {
   const h = await fixture();
-  h.target({ phase: 'execute', token: 'expired', original: h.layout });
+  h.target({ phase: 'execute', token: 'expired', originalSource: JSON.stringify(h.layout) });
   h.memory['devkits.reset-authorization'] = { token: 'expired', expiresAt: Date.now() - 1 };
   const view = new h.ResetDevkits(); view.init(h.cx); view.clear(h.cx); await h.drain();
   assert.match(view.error, /interrupted/);
   assert.deepEqual(h.calls, []);
   assert.deepEqual(h.timers, []);
+});
+
+test('the real Devkits layout stays below the host nesting limit when starting and restoring reset', async () => {
+  const layout = JSON.parse(await readFile(new URL('../layouts/devkits.json', import.meta.url), 'utf8'));
+  const h = await fixture({ layout }), view = new h.ResetDevkits();
+  assert.ok(nesting({ layout: { content: { props: { original: layout } } } }) > 16, 'The fixture reproduces the reported host limit');
+  view.init(h.cx); await h.drain(); h.confirmation('DEVKITS'); view.begin(h.cx); await h.drain();
+  assert.equal(view.error, undefined);
+  const request = h.commands[0][1];
+  assert.ok(nesting(request) <= 16);
+  assert.equal(typeof request.layout.content.props.originalSource, 'string');
+  assert.deepEqual(JSON.parse(request.layout.content.props.originalSource), layout);
+  h.target(request.layout.content.props);
+  const execution = new h.ResetDevkits(); execution.init(h.cx); h.timers[0].callback(h.cx); await h.drain();
+  assert.equal(execution.complete, true);
+  execution.restore();
+  assert.deepEqual(h.commands.at(-2), ['layout.set', { layout }]);
+  assert.ok(nesting(h.commands.at(-2)[1]) <= 16);
 });

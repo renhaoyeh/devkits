@@ -15,7 +15,8 @@ export class ResetDevkits {
     this.handle = cx.focus_handle(); this.handle.focus();
     this.executing = this.target.phase === 'execute';
     if (this.executing) {
-      this.original = this.target.original;
+      try { this.original = JSON.parse(this.target.originalSource); }
+      catch { this.error = 'Could not read the saved layout. No data has been cleared.'; return; }
       const authorization = shared(authorizationKey);
       this.authorized = Boolean(authorization?.token === this.target.token && authorization.expiresAt > Date.now());
       setShared(authorizationKey, null);
@@ -60,7 +61,9 @@ export class ResetDevkits {
         const token = `reset:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         setShared(authorizationKey, { token, expiresAt: Date.now() + 10000 });
         run('layout.set', { layout: { id: 'devkits-reset-root', type: 'block', theme: this.original.theme,
-          content: { mod: 'devkits', props: { view: 'reset-devkits', phase: 'execute', token, original: this.original } } } });
+          // Keep the saved tree as text: nesting the real layout inside these props
+          // exceeds Herdr's 16-level host argument limit before reset can start.
+          content: { mod: 'devkits', props: { view: 'reset-devkits', phase: 'execute', token, originalSource: this.source } } } });
         // No old Devkits provider or dialog may remain alive and repopulate cleared data.
         run('overlay.close'); run('overlay.close');
       } catch (error) { this.error = error.message; this.busy = false; cx.notify(); }
