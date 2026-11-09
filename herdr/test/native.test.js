@@ -1153,7 +1153,7 @@ test('profile permissions apply independently from Settings to the selected acco
   const pick = (section, key) => { ui.nodes.get(`defaults-${section}-select`).openChange(true, cx); view.render(cx);
     ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
   settings('agents');
-  assert.ok(['accounts', 'agents', 'agent-profiles', 'rules'].every(page => ui.nodes.has(`settings-page-${page}`)));
+  assert.ok(['accounts', 'agents', 'agent-profiles'].every(page => ui.nodes.has(`settings-page-${page}`)));
   assert.ok(!ui.nodes.has('settings-page-usage'));
   assert.ok(!ui.nodes.has('settings-page-models'));
   assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('defaults-') || id.startsWith('permissions-')));
@@ -1221,15 +1221,13 @@ test('new local Codex sessions receive shared MCP settings and remote sessions d
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv, ['codex']);
 });
 
-test('account actions are direct buttons on Accounts and Shared MCP sits once beside Rules', async () => {
+test('account actions are direct buttons on Accounts and Shared MCP stays out of Settings', async () => {
   const ui = fakeElements(), overlays = [];
   const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'manage' }),
     spaces: () => [], theme: () => ({}), closeOverlay() {}, openOverlay: value => overlays.push(value) });
   const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } });
   view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] }, { key: 'devkits-codex-work', name: 'Work', run: ['codex'] }];
-  view.settingsPage = 'rules'; view.render(renderContext);
-  assert.ok(ui.nodes.has('shared-local-mcp'));
-  view.settingsPage = 'accounts'; ui.nodes.clear(); view.render(renderContext);
+  view.settingsPage = 'accounts'; view.render(renderContext);
   assert.ok(!ui.nodes.has('shared-local-mcp'));
   // The default account has no Rename or Remove; selecting an added account shows them beside its details.
   assert.ok(!ui.nodes.has('account-actions-codex-rename'));
@@ -2102,7 +2100,7 @@ test('optional Agent profiles are a table separate from native settings, with no
   assert.ok(!ui.nodes.has('defaults-profile-select'));
   assert.ok(!ui.nodes.has('defaults-model-select'));
   const pageOrder = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules']);
+  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles']);
   const key = 'devkits-preset-one';
   memory['devkits.agent-configs'] = [{ key, name: 'Review', profileKey: 'claude' }]; h.render();
   assert.ok(!ui.textOf('agent-profiles-table').includes('Default agent'));
@@ -2226,7 +2224,7 @@ test('local account profiles and their login action stay out of remote project m
   const view = new View(); view.init({}, cx); await pending; view.render(renderContext);
   assert.deepEqual(view.launchers.map(agent => agent.key), ['codex']);
   // A remote project's Settings has no Claude or Codex page; their defaults and models are local.
-  assert.ok(!ui.nodes.has('settings-page-codex') && ui.nodes.has('settings-page-agents') && ui.nodes.has('settings-page-rules'));
+  assert.ok(!ui.nodes.has('settings-page-codex') && ui.nodes.has('settings-page-agents') && !ui.nodes.has('settings-page-rules'));
   assert.ok(!ui.nodes.has('add-codex-account'));
 });
 test('project dropdown switches projects and creates a default terminal for a new folder', async () => {
@@ -3217,10 +3215,10 @@ test('Claude and Codex threads show an archive button; terminals keep a close bu
 test('the global Agent Guide seeds visible task reporting once and preserves edits or intentional emptiness', async () => {
   let guide = null;
   const writes = [], root = 'C:\\Guide space\\Herdr';
-  const { ensureRules, RulesPreview } = await evaluateNative('../mods/devkits/global-rules.js', {
+  const { ensureRules, sessionRules } = await evaluateNative('../mods/devkits/global-rules.js', {
     appHome: () => root, readTextFile: async () => guide,
     writeTextFile: async (file, text, expected) => { writes.push({ file, text, expected }); guide = text; },
-  }, 'ensureRules, RulesPreview');
+  }, 'ensureRules, sessionRules');
   await ensureRules();
   assert.match(guide, /## Herdr task progress/);
   assert.match(guide, /herdr_tasks/);
@@ -3228,10 +3226,7 @@ test('the global Agent Guide seeds visible task reporting once and preserves edi
   assert.ok(!guide.includes(root) && !guide.includes('tasks-cli.cjs'), 'Guide discovers MCP tools without a local script path');
   assert.match(guide, /whole task is complete/);
   assert.equal(writes[0].expected, null);
-  const preview = new RulesPreview();
-  let loaded;
-  preview.start({ spawn(fn) { loaded = fn({ notify() {} }); }, timer: { every() {} } });
-  await loaded; assert.equal(preview.text, guide, 'Settings shows the exact startup Guide');
+  assert.equal((await sessionRules()).text, guide);
   for (const edited of ['My custom reporting policy', '']) {
     guide = edited; await ensureRules(); assert.equal(guide, edited);
   }
@@ -3505,28 +3500,16 @@ test('the header branch opens a read-only list of local and remote branches, new
   assert.equal(ui.nodes.get('branch-local-main').click, undefined);
 });
 
-test('Settings is the one place for the rules: a Rules & MCP page with icons beside each page, outside thread actions', async () => {
+test('Agent settings keeps Accounts, Agents and Profiles without Rules or Shared MCP', async () => {
   const ui = fakeElements();
-  let target = { view: 'pane', pane: 'p1' }, pending;
-  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}),
-    spaces: () => [{ id: 'api', active: true, tabs: [{ id: 'tab-0', active: true }] }],
-    agents: () => [{ address: 't1', space: 'api', tab: 'tab-0', app: 'claude-code', program: {} }],
-    panes: () => [{ pane: 'p1', tab: 'tab-0', program: {}, title: 'T' }], layout: () => ({ children: [] }), run() {},
-    readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? '# Global rules\n\nUse hc run.' : null,
-    TextView: { markdown: (_id, text) => { ui.texts.push(text); return ui.element(); } } });
-  new View().render();
-  assert.ok(ui.nodes.has('thread-menu-p1'));
-  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('thread-rules-')));
-  target = { view: 'manage-launchers', overlay: 'settings', space: 'api', page: 'rules' };
-  const view = new View(), cx = { focus_handle: () => ({ focus() {} }), notify() {}, spawn(task) { if (task.length) pending = task(cx); }, timer: { every() {} } };
-  view.initSessionMenu(cx); view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
-  await pending; view.render(cx);
-  assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
-  assert.ok(['accounts', 'agents', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'settings' }), theme: () => ({}) });
+  const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } });
+  view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
+  view.render(renderContext);
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules']);
-  assert.ok(!ui.nodes.has('hardware-settings'), 'System monitoring has its own settings outside agent configuration');
-  assert.ok(['user-round', 'square-plus', 'book-open'].every(icon => ui.assets.some(asset => asset.endsWith(`assets/icons/${icon}.svg`))));
+  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles']);
+  assert.ok(!ui.nodes.has('settings-page-rules') && !ui.nodes.has('shared-local-mcp'));
+  assert.ok(!ui.nodes.has('hardware-settings'));
 });
 
 test('new thread shortcut repeats the project agent and falls back for missing or hidden profiles', async () => {
@@ -3774,11 +3757,13 @@ test('archive rechecks live status after asynchronous session discovery', async 
 });
 
 
-test('thread header menu offers only Agent settings; closing stays in the sidebar', async () => {
+test('thread header menu opens Global Rules centrally and Shared MCP alongside Agent settings', async () => {
   const ui = fakeElements(), commands = [];
-  const overlays = [];
+  const overlays = [], requests = [];
   const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], props: () => ({ pane: 'p0' }),
     panes: () => [{ pane: 'p0', tab: 'tab-0', title: 'New thread' }], run: (...args) => commands.push(args),
+    shared: key => key === 'devkits.agent-cache' ? { null: [{ key: 'codex', installed: true }] } : undefined,
+    setShared: (key, value) => { if (key === 'devkits.open-file-request') requests.push(value); },
     openOverlay: value => overlays.push(value) });
   const view = new View(), cx = { ...renderContext };
   view.paneHeader({}, cx); ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
@@ -3786,6 +3771,18 @@ test('thread header menu offers only Agent settings; closing stays in the sideba
   assert.deepEqual(overlays.at(-1), { mod: 'devkits', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.8,
     props: { view: 'manage-launchers', space: projects.find(project => project.tabs?.some(tab => tab.id === 'tab-0'))?.id ?? null, page: 'accounts' } });
   assert.deepEqual(commands, []);
+  ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
+  ui.nodes.get('thread-actions-p0-mcp').click({}, cx);
+  assert.equal(overlays.at(-1).props.view, 'shared-mcp');
+  assert.equal(overlays.at(-1).modal, true);
+  ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
+  ui.nodes.get('thread-actions-p0-rules').click({}, cx);
+  assert.ok(commands.some(([name]) => name === 'devkits.open-file'));
+  assert.deepEqual(requests, [{ path: '/herdr/data/devkits/AGENTS.md', on: null }]);
+  assert.ok(commands.some(([name, args]) => name === 'layout.show' && args.id === 'editor'));
+  assert.ok(commands.some(([name, args]) => name === 'layout.select' && args.child === 'workspace-editor'));
+  assert.equal(overlays.length, 2, 'Rules opens centrally without creating a dialog');
+  commands.length = 0;
   ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
   for (const action of ['hide', 'stop', 'archive', 'close']) assert.ok(!ui.nodes.has(`thread-actions-p0-${action}`));
   assert.deepEqual(commands, []);
