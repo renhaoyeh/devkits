@@ -1123,6 +1123,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   assert.deepEqual(memory['devkits.launcher-order'], ['terminal', 'agent:devkits-codex-personal']);
   assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-personal': 'read-only' });
   assert.deepEqual(memory['devkits.profile-sessions'], { 'devkits-codex-personal': { model: 'b' } });
+  assert.equal(memory['devkits.profile-revision'], 1);
   assert.equal(overlays.at(-1).props.view, 'manage-launchers');
 });
 test('profile permissions apply independently from Settings to the selected account', async () => {
@@ -1453,6 +1454,26 @@ test('usage details refresh the reset countdown every minute while open', async 
   tick(cx);
   assert.equal(notified, 1);
 });
+test('account removal stays reflected in Settings and the cache while native discovery is stale', async () => {
+  const ui = fakeElements(), memory = {};
+  const removed = { key: 'devkits-codex-work', name: 'Codex · Work', installed: true };
+  const personal = { key: 'devkits-codex-personal', name: 'Codex · Personal', installed: true };
+  const base = { key: 'codex', name: 'Codex', installed: true };
+  const custom = { key: 'custom-agent', name: 'Custom', installed: true };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers' }), spaces: () => [], theme: () => ({}),
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    knownAgents: async () => [base, removed, personal, custom],
+    readTextFile: async () => JSON.stringify({ programs: { [personal.key]: { name: personal.name } } }) });
+  const view = new View();
+  view.launchers = await view.cachedAgents(null);
+  view.render(renderContext);
+  assert.ok(!ui.nodes.has(`account-actions-${removed.key}-remove`));
+  assert.ok(ui.nodes.has(`account-actions-${personal.key}-remove`));
+  assert.deepEqual(view.launchers.map(agent => agent.key), [base.key, personal.key, custom.key]);
+  assert.deepEqual(memory['devkits.agent-cache'].null.map(agent => agent.key), [base.key, personal.key, custom.key]);
+  assert.deepEqual(await new View().cachedAgents(null), view.launchers);
+});
+
 test('case-only profile renames refresh sidebar labels even while native discovery has the old name', async () => {
   const key = 'devkits-codex-work';
   const memory = {};
@@ -1480,6 +1501,7 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
   const memory = { 'devkits.hidden-usage-profiles': ['work'] };
   const claude = { key: 'devkits-claude-me', installed: true, run: ['env', 'CLAUDE_CONFIG_DIR=/accounts/me', 'claude'] };
   const View = await viewFor({ spaces: () => projects, shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    readTextFile: async () => JSON.stringify({ programs: { [claude.key]: { name: 'Claude · Me' } } }),
     home: () => '/home/me', ensureClaudeStatusLine: async (directory, options) => statusLines.push([directory, options.chain]),
     knownAgents: async () => {
       discovered++;
