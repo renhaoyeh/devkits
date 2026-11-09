@@ -2292,12 +2292,13 @@ test('the launcher stays alive until rules are read and suppresses duplicate sta
   }
 });
 
-test('Asana import opens from Tasks and stays bound to its originating project', async () => {
+test('Asana opens directly from the status bar and stays bound to its originating project', async () => {
   const overlays = [], memory = {}, project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] };
-  const View = await viewFor({ spaces: () => [project], openOverlay: spec => overlays.push(spec),
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, spaces: () => [project], openOverlay: spec => overlays.push(spec),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
-  const view = new View(); view.agentBoard = { render: (_p, _a, _l, actions) => actions };
-  view.boardPanel(project, {}).asana();
+  const view = new View(); view.statusBar({});
+  ui.nodes.get('open-asana').click(); view.drainTasks();
   assert.equal(overlays[0].kind, 'dialog'); assert.equal(overlays[0].modal, true);
   assert.equal(overlays[0].mod, 'devkits-asana');
   assert.equal(overlays[0].props.context.folder, '/Code/one');
@@ -2325,7 +2326,7 @@ test('project menus have no separate Asana entry; Tasks remains available in the
     assert.ok(!ui.nodes.has('menu-asana-tasks')); assert.ok(ui.nodes.has('menu-close-project'));
   }
   target = { view: 'status' }; new View().render();
-  assert.ok(ui.nodes.has('open-tasks')); assert.ok(!ui.nodes.has('open-asana'));
+  for (const id of ['open-tasks', 'open-asana', 'open-mantisbt']) assert.ok(ui.nodes.has(id));
 });
 test('empty projects stay empty until an agent is explicitly chosen', async () => {
   const ui = fakeElements();
@@ -3632,7 +3633,18 @@ test('Tasks opens from the visible bottom status bar without creating a terminal
   const order = [...ui.nodes.keys()];
   assert.ok(order.indexOf('open-tasks') < order.indexOf('open-files'));
   assert.ok(order.indexOf('open-tasks') > order.indexOf('open-calendar'));
+  assert.ok(order.indexOf('open-calendar') > order.indexOf('open-mantisbt'));
+  assert.ok(order.indexOf('open-mantisbt') > order.indexOf('open-asana'));
+  assert.ok(order.indexOf('open-tasks') > order.indexOf('open-mantisbt'));
   assert.ok(ui.textOf('open-tasks').includes('Tasks'));
+  for (const source of ['asana', 'mantisbt']) {
+    ui.nodes.get(`open-${source}`).click();
+    const request = memory['devkits.tasks.requests'].at(-1);
+    assert.equal(request.action, 'source');
+    assert.equal(request.source, source);
+    assert.equal(request.project.id, 'api');
+    assert.equal(memory['devkits.board-project'], undefined);
+  }
   ui.nodes.get('open-tasks').click();
   assert.equal(memory['devkits.board-project'], 'api');
   assert.ok(!commands.some(([name]) => ['tab.new', 'space.new', 'tab.close', 'terminal.kill'].includes(name)));
@@ -4322,7 +4334,8 @@ test('MantisBT import routes through the same Tasks draft without launching an a
 test('imported MantisBT tasks stay editable offline and retain source links and comments in session context', async () => {
   const mantisbt = { gid: '1', server: 'https://mantis.test', url: 'https://mantis.test/view.php?id=1', comments: [{ author: 'Amy', text: 'Source note' }] };
   const board = await taskBoardFor({ 'local:mantis': { gid: 'local:mantis', source: 'local', name: 'Imported MantisBT', status: 'todo', notes: 'Original', mantisbt } });
-  assert.ok(board.ui.nodes.has('board-mantisbt'));
+  assert.ok(!board.ui.nodes.has('board-mantisbt'));
+  assert.ok(!board.ui.nodes.has('board-asana'));
   board.ui.nodes.get('board-card-local:mantis').click({}, board.cx); board.render();
   board.view.description.edit('Updated locally'); board.render();
   assert.equal(board.memory['devkits.agent-board'][board.key]['local:mantis'].notes, 'Updated locally');
