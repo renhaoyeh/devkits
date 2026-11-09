@@ -12,7 +12,7 @@ import { taskTokenId } from '../mods/devkits/components/tasks-model.js';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const tasksMcpFlags = provider => provider === 'codex'
-  ? ['-c', 'mcp_servers.herdr_tasks={command="node",args=["/herdr/mods/devkits-tasks/mcp-server.cjs"],env={HERDR_APP_HOME="/herdr"}}']
+  ? ['-c', 'mcp_servers.herdr_tasks={command="node",args=["/herdr/mods/devkits-tasks/mcp-server.cjs"],env={HERDR_APP_HOME="/herdr"},env_vars=["HC_TERMINAL_ID"]}']
   : ['--mcp-config', JSON.stringify({ mcpServers: { herdr_tasks: { command: 'node', args: ['/herdr/mods/devkits-tasks/mcp-server.cjs'], env: { HERDR_APP_HOME: '/herdr' } } } })];
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {}, spawn() {} };
 
