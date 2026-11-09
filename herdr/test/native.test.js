@@ -8,11 +8,9 @@ import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 import { evaluateNative } from './source-harness.js';
 import { terminalArgv } from '../mods/devkits/shell-command.js';
-import { taskTokenId, taskReportingInstructions } from '../mods/devkits/components/tasks-model.js';
+import { taskTokenId } from '../mods/devkits/components/tasks-model.js';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
-const reportingArgv = (agent, argv, rules = null, extra = '') => rulesArgv(agent, argv, rules,
-  [extra, taskReportingInstructions('/herdr')].filter(Boolean).join('\n\n'));
 const tasksMcpFlags = provider => provider === 'codex'
   ? ['-c', 'mcp_servers.herdr_tasks={command="node",args=["/herdr/mods/devkits-tasks/mcp-server.cjs"],env={HERDR_APP_HOME="/herdr"}}']
   : ['--mcp-config', JSON.stringify({ mcpServers: { herdr_tasks: { command: 'node', args: ['/herdr/mods/devkits-tasks/mcp-server.cjs'], env: { HERDR_APP_HOME: '/herdr' } } } })];
@@ -757,7 +755,7 @@ test('Windows starts legacy account launchers locally and preserves commands on 
     await new View().launchThread(agent, { space: 'api', folder: 'C:/Project' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
     assert.equal(argv[0], machine ? 'env' : 'git');
-    assert.deepEqual(argv, machine ? agent.run : terminalArgv([...reportingArgv(agent, agent.run), ...tasksMcpFlags('codex')], 'windows'));
+    assert.deepEqual(argv, machine ? agent.run : terminalArgv([...rulesArgv(agent, agent.run), ...tasksMcpFlags('codex')], 'windows'));
   }
   assert.deepEqual(launcherArgv({ key: 'codex', run: ['C:\\bin\\codex.cmd'] }, 'read-only').slice(1),
     ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
@@ -1171,11 +1169,11 @@ test('profile permissions apply independently from Settings to the selected acco
   target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
-    [...reportingArgv(codex, ['codex']), ...tasksMcpFlags('codex'), '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+    [...rulesArgv(codex, ['codex']), ...tasksMcpFlags('codex'), '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
   // Another profile retains its own launcher permissions.
   target = { ...target, space: null, projectName: 'New project' }; await view.startThread(work);
   assert.deepEqual(commands.find(([name]) => name === 'space.new')[1].argv,
-    [...reportingArgv(work, ['env', 'CODEX_HOME=/accounts/work', 'codex']), ...tasksMcpFlags('codex'), '--no-daemon']);
+    [...rulesArgv(work, ['env', 'CODEX_HOME=/accounts/work', 'codex']), ...tasksMcpFlags('codex'), '--no-daemon']);
   settings('codex');
   pick('permissions', 'default');
   assert.deepEqual(memory['devkits.codex-permissions'], {});
@@ -1745,11 +1743,11 @@ test('model and effort defaults are independent per profile and explicit session
   assert.deepEqual(memory['devkits.profile-sessions'], { claude: { model: 'opus', effort: 'high' } });
   const space = { space: 'api', folder: '/Code/api' };
   await view.startThread(work, space);
-  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(work, work.run), ...tasksMcpFlags('claude')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(work, work.run), ...tasksMcpFlags('claude')]);
   await view.startThread(claude, space, { model: 'sonnet' });
-  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(claude, ['claude', '--model', 'sonnet', '--effort', 'high']), ...tasksMcpFlags('claude')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(claude, ['claude', '--model', 'sonnet', '--effort', 'high']), ...tasksMcpFlags('claude')]);
   await view.startThread(claude, space, { model: 'sonnet', effort: null });
-  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(claude, ['claude', '--model', 'sonnet']), ...tasksMcpFlags('claude')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(claude, ['claude', '--model', 'sonnet']), ...tasksMcpFlags('claude')]);
   memory['devkits.profile-sessions'][codex.key] = { model: 'a', effort: 'high' };
   memory['devkits.session-options'] = { codex: { models: ['a'] } };
   settings('codex');
@@ -1761,10 +1759,10 @@ test('model and effort defaults are independent per profile and explicit session
   ui.nodes.get('defaults-model-option-b').click({}, cx);
   assert.deepEqual(memory['devkits.profile-sessions'][codex.key], { model: 'b', effort: null });
   await view.startThread(codex, space);
-  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(codex, [...codex.run, '-m', 'b']), ...tasksMcpFlags('codex')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(codex, [...codex.run, '-m', 'b']), ...tasksMcpFlags('codex')]);
   view.render(cx); pick('model', 'default');
   await view.startThread(codex, space);
-  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(codex, codex.run), ...tasksMcpFlags('codex')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(codex, codex.run), ...tasksMcpFlags('codex')]);
 });
 
 test('Fast is a checkbox saved independently for each profile and used by task sessions', async () => {
@@ -1790,7 +1788,7 @@ test('Fast is a checkbox saved independently for each profile and used by task s
   assert.equal(memory['devkits.profile-sessions'].codex.serviceTier, 'fast');
   assert.equal(memory['devkits.profile-sessions'][work.key].serviceTier, null);
   await view.startThread(work, { space: 'api', folder: '/Code/api' });
-  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(work, work.run), ...tasksMcpFlags('codex')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(work, work.run), ...tasksMcpFlags('codex')]);
   await view.startThread(codex, { space: 'api', folder: '/Code/api', task: { gid: 'task', name: 'Do work' } }, { model: 'b', effort: null });
   assert.deepEqual(commands.findLast(([name]) => name === 'tab.new')[1].argv,
     ['codex', '-m', 'b', '-c', 'service_tier="fast"', ...tasksMcpFlags('codex'), 'Do work']);
@@ -1856,7 +1854,7 @@ test('Add opens a profile draft; Create saves independent setups used by launche
   assert.ok(ui.textOf(`agent-profile-row-${second}`).includes('Astra'));
   const available = await h.view.cachedAgents(null), space = { space: 'api', folder: '/Code/api' };
   await h.view.startThread(available.find(agent => agent.key === first), space);
-  assert.deepEqual(h.commands.at(-1)[1].argv, [...reportingArgv(h.accounts[1], [...h.accounts[1].run, '-m', 'a', '-c', 'model_reasoning_effort="high"', '-c', 'service_tier="fast"']), ...tasksMcpFlags('codex')]);
+  assert.deepEqual(h.commands.at(-1)[1].argv, [...rulesArgv(h.accounts[1], [...h.accounts[1].run, '-m', 'a', '-c', 'model_reasoning_effort="high"', '-c', 'service_tier="fast"']), ...tasksMcpFlags('codex')]);
   assert.equal(h.view.defaultThreadAgent(projects[0], available).key, first);
   await h.view.startThread(available.find(agent => agent.key === second), { ...space, task: { gid: 'new', name: 'Task' } });
   assert.deepEqual(h.commands.findLast(([name]) => name === 'tab.new')[1].argv, [...h.accounts[1].run, '-m', 'b', ...tasksMcpFlags('codex'), 'Task']);
@@ -2267,7 +2265,7 @@ test('Codex account sessions synchronize MCP without running plugin synchronizat
   assert.deepEqual(closed, []);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', {
-    space: 'one', folder: '/project', name: 'Work', argv: [...reportingArgv({ key: 'codex' }, ['env', 'CODEX_HOME=/account', 'codex']), ...tasksMcpFlags('codex')],
+    space: 'one', folder: '/project', name: 'Work', argv: [...rulesArgv({ key: 'codex' }, ['env', 'CODEX_HOME=/account', 'codex']), ...tasksMcpFlags('codex')],
   }]);
   await pending;
   assert.deepEqual(closed, ['launcher']);
@@ -2293,8 +2291,8 @@ test('the launcher stays alive until rules are read and suppresses duplicate sta
     assert.deepEqual(closed, ['launcher']);
     const starts = commands.filter(([name]) => name === 'tab.new');
     assert.equal(starts.length, 1);
-    assert.ok(starts[0][1].argv.join(' ').includes('Use hc run.'));
-    assert.ok(starts[0][1].argv.join(' ').includes('tasks-cli.cjs'));
+    assert.deepEqual(starts[0][1].argv, [...rulesArgv(agent, [key], {file:'/herdr/data/devkits/AGENTS.md',text:'Use hc run.'}), ...tasksMcpFlags(key)]);
+    assert.ok(!starts[0][1].argv.join(' ').includes('tasks-cli.cjs'));
   }
 });
 
@@ -3033,6 +3031,29 @@ test('Claude and Codex threads show an archive button; terminals keep a close bu
   assert.ok(ui.nodes.has('close-thread-run') && !ui.nodes.has('archive-thread-run'));
 });
 
+test('the global Agent Guide seeds visible task reporting once and preserves edits or intentional emptiness', async () => {
+  let guide = null;
+  const writes = [], root = 'C:\\Guide space\\Herdr';
+  const { ensureRules, RulesPreview } = await evaluateNative('../mods/devkits/global-rules.js', {
+    appHome: () => root, readTextFile: async () => guide,
+    writeTextFile: async (file, text, expected) => { writes.push({ file, text, expected }); guide = text; },
+  }, 'ensureRules, RulesPreview');
+  await ensureRules();
+  assert.match(guide, /## Herdr task progress/);
+  assert.ok(guide.includes('node "C:/Guide space/Herdr/mods/devkits-tasks/tasks-cli.cjs" --skill'));
+  assert.match(guide, /HC_TERMINAL_ID/);
+  assert.match(guide, /whole task is complete/);
+  assert.equal(writes[0].expected, null);
+  const preview = new RulesPreview();
+  let loaded;
+  preview.start({ spawn(fn) { loaded = fn({ notify() {} }); }, timer: { every() {} } });
+  await loaded; assert.equal(preview.text, guide, 'Settings shows the exact startup Guide');
+  for (const edited of ['My custom reporting policy', '']) {
+    guide = edited; await ensureRules(); assert.equal(guide, edited);
+  }
+  assert.equal(writes.length, 1, 'An existing Guide is never rewritten on startup');
+});
+
 test('global rules join Claude and Codex system prompts in local sessions only', async () => {
   const claude = { key: 'devkits-claude-work', run: ['env', 'CLAUDE_CONFIG_DIR=/a', 'claude', '--permission-mode', 'plan'] };
   const codex = { key: 'codex', run: ['codex', '-m', 'gpt'] };
@@ -3048,8 +3069,9 @@ test('global rules join Claude and Codex system prompts in local sessions only',
       readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? text : null });
     await new View().launchThread(claude, { space: 'api', folder: '/Code/api' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
-    assert.equal(argv.includes('--append-system-prompt'), !machine);
-    assert.equal(argv.join(' ').includes('Rules'), expected);
+    assert.equal(argv.includes('--append-system-prompt-file'), expected);
+    assert.ok(!argv.join(' ').includes('tasks-cli.cjs'), 'Reporting policy must come only from the editable global Guide');
+    assert.equal(argv.includes('/herdr/data/devkits/AGENTS.md'), expected);
   }
 });
 
@@ -3067,7 +3089,7 @@ test('new profile sessions append their latest instructions after global rules w
       const agent = { key, profileKey: provider, run: [provider], instructions: 'Stale cached value' };
       await new View().launchThread(agent, { space: 'api', folder: '/Code/api' }, {});
       const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
-      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra + '\n\n' + taskReportingInstructions('/herdr');
+      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra;
       assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`, ...tasksMcpFlags(provider)]
         : [provider, '--append-system-prompt', expected, ...tasksMcpFlags(provider)]);
       commands.length = 0;
@@ -3911,6 +3933,24 @@ test('task archive events recheck runtime activity instead of trusting an old en
   assert.equal(archives, 0); assert.ok(!memory['devkits.agent-board'][key][gid].archived);
 });
 
+test('copying the Agent Guide uses its latest editable content and never supplies hidden fallback rules', async () => {
+  const board = await taskBoardFor({ 'thread:chat': { gid: 'thread:chat', source: 'thread', threadId: 'chat', name: 'Chat', status: 'todo' } });
+  board.project.tabs = [{ id: 'chat', name: 'Chat' }];
+  board.runtime.agents = [{ address: 't-chat', tab: 'chat', status: 'idle' }];
+  board.view.selected = 'thread:chat'; board.render();
+  const copied = [];
+  const cx = { ...board.cx, write_to_clipboard: text => copied.push(text), spawn(fn) { return fn(cx); } };
+  for (const guide of ['## Herdr task progress\nCustom policy', 'Edited again']) {
+    board.runtime.guide = guide;
+    await board.ui.nodes.get('board-copy-reporting').click({}, cx);
+    assert.equal(copied.at(-1), guide);
+    assert.equal(board.runtime.guidePath, '/herdr/data/devkits/AGENTS.md');
+  }
+  board.runtime.guide = '';
+  await board.ui.nodes.get('board-copy-reporting').click({}, cx);
+  assert.equal(copied.length, 2); assert.match(board.view.relatedError, /empty or unavailable/);
+});
+
 async function taskBoardFor(records = {}) {
   const ui = fakeElements(), model = await import('../mods/devkits-tasks/agent-board-model.js');
   const project = { id: 'p', name: 'Project', folder: '/project', tabs: [] };
@@ -3923,11 +3963,12 @@ async function taskBoardFor(records = {}) {
       on(event, handler) { events.set(event, handler); }, set_auto_grow() {}, focus() {},
       blur() { events.get('blur')?.({}, renderContext); } };
   } };
-  const host = { ...ui, ...model, taskTokenId, taskReportingInstructions, appHome: () => '/herdr', folderKey, launcherLabel, launcherOption, configuredAgents, threadTitle, InputState: field, TextareaState: field,
+  const host = { ...ui, ...model, taskTokenId, appHome: () => '/herdr', folderKey, launcherLabel, launcherOption, configuredAgents, threadTitle, InputState: field, TextareaState: field,
     Input: { new: () => ui.element() }, Textarea: { new: () => ui.element() },
     TextView: { markdown: () => ui.element() },
     shared: key => memory[key], setShared: (key, value) => { memory[key] = structuredClone(value); },
     currentAgents: () => runtime.agents, currentSpaces: () => projects, terminals: () => [],
+    readTextFile: async path => { runtime.guidePath = path; return runtime.guide; },
     withTaskInputEvidence: agents => agents, savedTasks: () => [],
     SourceTaskReader: class { init() {} show(task) { runtime.tokenReads = (runtime.tokenReads || 0) + 1; this.detailError = runtime.token ? null : 'Connect Asana'; } },
     TaskSession: class { init() {} render(task) { launches.push(task); return ui.element(); } },
