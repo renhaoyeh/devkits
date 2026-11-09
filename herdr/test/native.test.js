@@ -60,6 +60,34 @@ test('sidebar records the internal terminal ID, hides its row and shows the empt
   assert.ok(!commands.some(([name]) => name === 'tab.close' || name === 'terminal.kill'));
 });
 
+test('reopening empty projects keeps the internal terminal covered after native selection resets the stack', async () => {
+  const ui = fakeElements(), commands = [], memory = {};
+  const stack = { id: 'workspace-view', type: 'stack', active: 'main' };
+  const spaces = ['one', 'two'].map(id => ({ id, active: id === 'one', tabs: [
+    { id: `default-${id}`, name: '__devkits_default_terminal__', active: true },
+  ] }));
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), agents: () => [],
+    spaces: () => spaces, layout: () => stack,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (name, args) => {
+      commands.push([name, args]);
+      if (name === 'space.select') for (const space of spaces) space.active = space.id === args.id;
+      if (name === 'layout.select' && args.stack === stack.id) stack.active = args.child;
+    }, setAgentOrder() {} });
+  const view = new View(); view.folded = new Set(); view.render();
+  assert.equal(stack.active, 'project-empty');
+  for (const project of [spaces[1], spaces[0]]) {
+    view.selectProject(project);
+    view.render();
+    assert.equal(stack.active, 'project-empty');
+    assert.ok(!ui.nodes.has(`thread-default-${project.id}`));
+  }
+  stack.active = 'main'; // A restored native layout may reveal the terminal again.
+  view.render();
+  assert.equal(stack.active, 'project-empty');
+  assert.ok(!commands.some(([name]) => name === 'tab.close' || name === 'terminal.kill'));
+});
+
 test('sidebar reads native panes and terminals once per frame and releases them for event-time checks', async () => {
   const ui = fakeElements(), reads = { panes: 0, terminals: 0 };
   const tabs = Array.from({ length: 30 }, (_, i) => ({ id: `shell-${i}`, name: `Shell ${i}` }));
@@ -2505,17 +2533,24 @@ test('a project start list shows Add session\'s visible launchers and starts onl
     ['terminal', { space: 'api', folder: '/Code/api', projectName: 'api' }, undefined]]);
 });
 
-test('empty projects offer the start list and launch only when an agent is chosen', async () => {
+test('empty conversation areas stay blank while the editor offers the start list', async () => {
   const ui = fakeElements();
   const saved = ['/Code/new'];
   let catalog = projectCatalog([], saved, {}, 'project:/Code/new');
   assert.equal(catalog[0].pending, true);
   assert.deepEqual(catalog[0].tabs, []);
   const commands = [], overlays = [];
+  let currentView = 'project-empty';
   const View = await viewFor({ ...ui, spaces: () => [], shared: key => key === 'devkits.projects' ? saved : key === 'devkits.selected-project' ? 'project:/Code/new' : undefined,
-    props: () => ({ view: 'project-empty', space: null, folder: '/Code/new', projectName: 'new', overlay: 'popup' }), theme: () => ({}),
+    props: () => ({ view: currentView, space: null, folder: '/Code/new', projectName: 'new', overlay: 'popup' }), theme: () => ({}),
     run: (...args) => commands.push(args), openOverlay: value => overlays.push(value), closeOverlay() {} });
   const view = new View();
+  view.render({ spawn() {}, notify() {} });
+  assert.ok(!ui.nodes.has('project-start'));
+  assert.ok(!ui.texts.includes('Start a thread'));
+  assert.deepEqual(commands, []);
+  currentView = 'editor';
+  view.editor = { render: (_project, _cx, { empty }) => empty() };
   view.render({ spawn() {}, notify() {} });
   assert.ok(ui.nodes.has('project-start') && ui.texts.includes('Start a thread'));
   assert.ok(ui.nodes.has('project-start-settings'));
