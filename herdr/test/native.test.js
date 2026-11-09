@@ -78,7 +78,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp', 'shared-mcp-settings', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
   const usageOwner = await Promise.all(['monitor', 'details'].map(name => readFile(new URL(`../mods/devkits-usage/${name}.js`, import.meta.url), 'utf8')));
@@ -1165,6 +1165,45 @@ test('profile permissions apply independently from Settings to the selected acco
   ui.nodes.get('manage-launchers-done').click();
   assert.equal(closed.at(-1), 'settings');
 });
+test('shared MCP settings save only on confirmation, preserve other profiles and report concurrent edits', async () => {
+  const ui = fakeElements(), editors = [], writes = [], notices = [], closed = [];
+  const original = JSON.stringify({ version: 1, servers: { vs: { command: 'bridge' } }, profiles: { other: { vs: false } } });
+  const target = { view: 'shared-mcp', overlay: 'mcp', agent: { key: 'codex', name: 'Codex' } };
+  let pending, conflict = true;
+  const cx = { ...renderContext, spawn: fn => { pending = fn(cx); } };
+  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}),
+    EditorState: { new: () => { let value = ''; const editor = { value: () => value, set_value: next => { value = next; } }; editors.push(editor); return editor; } },
+    Editor: { new: ui.element }, readTextFile: async () => original,
+    writeTextFile: async (...args) => { if (conflict) throw new Error('File changed. Reopen settings.'); writes.push(args); },
+    notify: note => notices.push(note), closeOverlay: id => closed.push(id), openOverlay() {} });
+  const view = new View(); view.init({}, cx); await pending; view.render(cx);
+  editors[0].set_value('{bad'); view.saveSharedMcp(cx); await pending;
+  assert.equal(writes.length, 0); assert.ok(view.mcpError);
+  editors[0].set_value('{"vs":{"command":"new-bridge"}}'); editors[1].set_value('{"vs":false}');
+  view.saveSharedMcp(cx); await pending;
+  assert.match(view.mcpError, /File changed/); assert.equal(closed.length, 0);
+  conflict = false; view.saveSharedMcp(cx); await pending;
+  assert.equal(writes.length, 1); assert.equal(writes[0][2], original);
+  const saved = JSON.parse(writes[0][1]);
+  assert.deepEqual(saved.profiles.other, { vs: false }); assert.deepEqual(saved.profiles.codex, { vs: false });
+  assert.equal(notices.length, 1); assert.deepEqual(closed, ['mcp']);
+});
+
+test('new local Codex sessions receive shared MCP settings and remote sessions do not read them', async () => {
+  const commands = [], reads = [];
+  const View = await viewFor({ spaces: () => [{ id: 'local', tabs: [] }, { id: 'remote', machine: 'server', tabs: [] }],
+    run: (...args) => commands.push(args), readTextFile: async path => {
+      reads.push(path); return path.endsWith('/codex-mcp.json') ? '{"version":1,"servers":{"vs":{"command":"bridge"}}}' : null;
+    } });
+  const view = new View(), agent = { key: 'codex', run: ['codex'] };
+  await view.startThread(agent, { space: 'local', folder: '/local' });
+  assert.ok(commands.find(([name]) => name === 'tab.new')[1].argv.includes('mcp_servers.vs={"command"="bridge"}'));
+  const before = reads.length; commands.length = 0;
+  await view.startThread(agent, { space: 'remote', folder: '/remote' });
+  assert.equal(reads.length, before);
+  assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv, ['codex']);
+});
+
 test('Codex sharing is manual, scoped to a local saved account, reports results and ignores duplicate clicks', async () => {
   const ui = fakeElements(), calls = [], notices = [], overlays = [];
   let finish, pending;
