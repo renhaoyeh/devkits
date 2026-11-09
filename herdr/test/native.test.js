@@ -3979,19 +3979,22 @@ async function taskBoardFor(records = {}) {
       card: '#1a1a1b', cardHover: '#212223', cardBorder: '#ffffff0c', cardSelected: '#242426', cardSelectedBorder: '#454548' }),
     readTaskOutput: async () => runtime.output || '', readAsanaToken: async () => { runtime.tokenReads = (runtime.tokenReads || 0) + 1; return runtime.token || null; },
     taskIdentifier: task => task.gid, outputMarkdown: text => text,
-    openTaskComposer: (...args) => dialogs.push(args), openOverlay: spec => dialogs.push(spec),
+    openTaskComposer: (...args) => dialogs.push(args),
+    openDeleteTask: (project, task) => dialogs.push({ view: 'delete-task', gid: task.gid }), openOverlay: spec => dialogs.push(spec),
   };
   const sources = await Promise.all(['components/button', 'components/dropdown-menu', 'components/select', 'components/icon', 'components/side-panel', 'agent-board-state', 'agent-board']
     .map(name => readFile(new URL(`../mods/${name.startsWith('components/') ? 'devkits' : 'devkits-tasks'}/${name}.js`, import.meta.url), 'utf8')));
   const Board = new Function(...Object.keys(host), sources.join('\n')
     .replace(/^import .*;\r?\n/gm, '').replace(/^export \{.*\} from .*;\r?\n/gm, '')
-    .replace('export default class', 'class').replace(/^export /gm, '') + '\nreturn AgentBoard;')(...Object.values(host));
+    .replace('export default class', 'class').replace(/^export /gm, '') + '\nreturn Object.assign(AgentBoard, { deleteLocalTask });')(...Object.values(host));
   const view = new Board(), cx = { ...renderContext, timer: { every() {} }, spawn: fn => fn(renderContext) };
   view.init(cx);
   const launchers = [{ key: 'profile', name: 'Rick', icon: 'icons/codex.svg', tint: false }];
   const render = () => { ui.nodes.clear(); return view.render(project, runtime.agents, launchers, {}, cx); };
   render();
-  return { ui, view, project, projects, runtime, memory, key, cx, render, dialogs, launches, Board };
+  // Pressing Delete in the confirmation dialog opened by the last delete request.
+  const confirmDelete = () => { const request = dialogs.at(-1); if (request?.view === 'delete-task') Board.deleteLocalTask(project, request.gid, runtime.agents); };
+  return { ui, view, project, projects, runtime, memory, key, cx, render, dialogs, launches, Board, confirmDelete };
 }
 
 test('Tasks separates attention, dates and calendar scheduling, and card deletion asks for confirmation', async () => {
@@ -4005,8 +4008,7 @@ test('Tasks separates attention, dates and calendar scheduling, and card deletio
   board.ui.nodes.get('board-active').click({}, board.cx); board.render();
   board.ui.nodes.get(`board-card-actions-${task.gid}`).click({}, board.cx); board.render();
   board.ui.nodes.get(`board-card-menu-${task.gid}-delete`).click({}, board.cx); board.render();
-  assert.equal(board.view.deleteCandidate, task.gid); assert.ok(board.memory['devkits.agent-board'][board.key][task.gid]);
-  board.ui.nodes.get('board-cancel-delete').click({}, board.cx);
+  assert.deepEqual(board.dialogs.at(-1), { view: 'delete-task', gid: task.gid }); assert.ok(board.memory['devkits.agent-board'][board.key][task.gid]);
   board.view.dueDate.edit('2026-11-12'); board.view.dueDate.blur(); board.render();
   assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].dueDate, '2026-11-12');
   board.ui.nodes.get('board-schedule-task').click({}, board.cx);
@@ -4114,7 +4116,7 @@ test('deleting a parent from Tasks retains its children as independent cards', a
     c: { gid: 'c', source: 'local', name: 'Child', notes: 'Keep me', status: 'todo', parentId: 'p' } });
   board.view.selected = 'p'; board.render();
   board.ui.nodes.get('board-delete-task').click({}, board.cx); board.render();
-  board.ui.nodes.get('board-delete-task').click({}, board.cx); board.render();
+  board.confirmDelete(); board.render();
   assert.equal(board.ui.nodes.has('board-card-p'), false); assert.ok(board.ui.nodes.has('board-card-c'));
   assert.equal(board.memory['devkits.agent-board'][board.key].c.parentId, null);
   assert.equal(board.memory['devkits.agent-board'][board.key].c.notes, 'Keep me');
@@ -4259,8 +4261,8 @@ test('deleting a local task removes its card and sidebar row across reloads whil
   const board = await taskBoardFor({ [task.gid]: task, ...others });
   board.view.selected = task.gid; board.render();
   board.ui.nodes.get('board-delete-task').click({}, board.cx);
-  assert.ok(board.memory['devkits.agent-board'][board.key][task.gid], 'The first click requests confirmation');
-  board.ui.nodes.get('board-delete-task').click({}, board.cx);
+  assert.ok(board.memory['devkits.agent-board'][board.key][task.gid], 'Delete opens a confirmation first');
+  board.confirmDelete();
   board.render();
   assert.ok(!board.ui.nodes.has(`board-card-${task.gid}`));
   assert.ok(!board.ui.nodes.has('board-detail'));
@@ -4297,7 +4299,7 @@ test('deletion preserves open and archived conversations and detaches only the s
   memory['devkits.archived-threads'] = [archive, unrelated];
   view.selected = task.gid; board.render();
   board.ui.nodes.get('board-delete-task').click({}, cx);
-  board.ui.nodes.get('board-delete-task').click({}, cx);
+  board.confirmDelete();
   board.render();
   assert.equal(memory['devkits.agent-board'][key][task.gid], undefined);
   assert.equal(project.tabs[0].id, 'conversation'); assert.equal(runtime.agents[0].address, 't1');
@@ -4322,19 +4324,19 @@ test('archived local tasks may be deleted, while busy, waiting, launching and ex
   }
   const pending = await taskBoardFor({ [task.gid]: task });
   pending.memory['devkits.pending-profiles'] = [{ at: Date.now(), task: { gid: task.gid, folder: '/project' } }];
-  pending.view.deleteTask(pending.project, task.gid, pending.cx);
+  pending.view.deleteTask(pending.project, task.gid); pending.confirmDelete();
   assert.ok(pending.memory['devkits.agent-board'][pending.key][task.gid]);
   for (const source of ['asana']) {
     const external = await taskBoardFor({ [task.gid]: { ...task, source } });
     external.view.selected = task.gid; external.render();
     assert.ok(!external.ui.nodes.has('board-delete-task'));
-    external.view.deleteTask(external.project, task.gid, external.cx);
+    external.view.deleteTask(external.project, task.gid); external.confirmDelete();
     assert.ok(external.memory['devkits.agent-board'][external.key][task.gid]);
   }
   const archived = await taskBoardFor({ [task.gid]: { ...task, archived: true } });
   archived.view.archived = true; archived.view.selected = task.gid; archived.render();
   archived.ui.nodes.get('board-delete-task').click({}, archived.cx);
-  archived.ui.nodes.get('board-delete-task').click({}, archived.cx);
+  archived.confirmDelete();
   assert.equal(archived.memory['devkits.agent-board'][archived.key][task.gid], undefined);
 });
 
@@ -4345,8 +4347,7 @@ test('an output read already in flight cannot recreate a deleted local task', as
   // Retain the real queued continuation, then delete before it runs.
   let continuation;
   board.view.loadOutput({ ...task, agents: [{ address: 't1' }] }, board.project, { spawn: fn => { continuation = fn; } });
-  board.view.deleteTask(board.project, task.gid, board.cx);
-  board.view.deleteTask(board.project, task.gid, board.cx);
+  board.view.deleteTask(board.project, task.gid); board.confirmDelete();
   await continuation(board.cx);
   assert.equal(board.memory['devkits.agent-board'][board.key][task.gid], undefined);
 });
