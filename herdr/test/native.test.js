@@ -3040,8 +3040,9 @@ test('the global Agent Guide seeds visible task reporting once and preserves edi
   }, 'ensureRules, RulesPreview');
   await ensureRules();
   assert.match(guide, /## Herdr task progress/);
-  assert.ok(guide.includes('node "C:/Guide space/Herdr/mods/devkits-tasks/tasks-cli.cjs" --skill'));
-  assert.match(guide, /HC_TERMINAL_ID/);
+  assert.match(guide, /herdr_tasks/);
+  assert.match(guide, /report_task/);
+  assert.ok(!guide.includes(root) && !guide.includes('tasks-cli.cjs'), 'Guide discovers MCP tools without a local script path');
   assert.match(guide, /whole task is complete/);
   assert.equal(writes[0].expected, null);
   const preview = new RulesPreview();
