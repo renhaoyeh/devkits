@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/github/gitignore",
+  "revision": "41862c835a7bd7e03373f1dbe1d2350f47063b71",
+  "files": [
+    {
+      "file": "VisualStudio.gitignore",
+      "url": "https://raw.githubusercontent.com/github/gitignore/41862c835a7bd7e03373f1dbe1d2350f47063b71/VisualStudio.gitignore",
+      "sha256": "7d65c0d70990cec92b7eedbbc1d6ea5a07a5e4c26cd5336cd46e52720d616b4b"
+    },
+    {
+      "file": "Qt.gitignore",
+      "url": "https://raw.githubusercontent.com/github/gitignore/41862c835a7bd7e03373f1dbe1d2350f47063b71/Qt.gitignore",
+      "sha256": "dec188b42c2ff537c5639ee8262e58b2dee5a841b622916b9c0bd0343283af0f"
+    },
+    {
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/github/gitignore/41862c835a7bd7e03373f1dbe1d2350f47063b71/LICENSE",
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673"
+    }
+  ]
+}
