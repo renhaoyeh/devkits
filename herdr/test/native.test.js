@@ -8,8 +8,11 @@ import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 import { evaluateNative } from './source-harness.js';
 import { terminalArgv } from '../mods/devkits/shell-command.js';
+import { taskTokenId, taskReportingInstructions } from '../mods/devkits/components/tasks-model.js';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+const reportingArgv = (agent, argv, rules = null, extra = '') => rulesArgv(agent, argv, rules,
+  [extra, taskReportingInstructions('/herdr')].filter(Boolean).join('\n\n'));
 const tasksMcpFlags = provider => provider === 'codex'
   ? ['-c', 'mcp_servers.herdr_tasks={command="node",args=["/herdr/mods/devkits-tasks/mcp-server.cjs"],env={HERDR_APP_HOME="/herdr"}}']
   : ['--mcp-config', JSON.stringify({ mcpServers: { herdr_tasks: { command: 'node', args: ['/herdr/mods/devkits-tasks/mcp-server.cjs'], env: { HERDR_APP_HOME: '/herdr' } } } })];
@@ -754,7 +757,7 @@ test('Windows starts legacy account launchers locally and preserves commands on 
     await new View().launchThread(agent, { space: 'api', folder: 'C:/Project' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
     assert.equal(argv[0], machine ? 'env' : 'git');
-    assert.deepEqual(argv, machine ? agent.run : terminalArgv([...agent.run, ...tasksMcpFlags('codex')], 'windows'));
+    assert.deepEqual(argv, machine ? agent.run : terminalArgv([...reportingArgv(agent, agent.run), ...tasksMcpFlags('codex')], 'windows'));
   }
   assert.deepEqual(launcherArgv({ key: 'codex', run: ['C:\\bin\\codex.cmd'] }, 'read-only').slice(1),
     ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
@@ -1168,11 +1171,11 @@ test('profile permissions apply independently from Settings to the selected acco
   target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
-    ['codex', ...tasksMcpFlags('codex'), '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+    [...reportingArgv(codex, ['codex']), ...tasksMcpFlags('codex'), '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
   // Another profile retains its own launcher permissions.
   target = { ...target, space: null, projectName: 'New project' }; await view.startThread(work);
   assert.deepEqual(commands.find(([name]) => name === 'space.new')[1].argv,
-    ['env', 'CODEX_HOME=/accounts/work', 'codex', ...tasksMcpFlags('codex'), '--no-daemon']);
+    [...reportingArgv(work, ['env', 'CODEX_HOME=/accounts/work', 'codex']), ...tasksMcpFlags('codex'), '--no-daemon']);
   settings('codex');
   pick('permissions', 'default');
   assert.deepEqual(memory['devkits.codex-permissions'], {});
@@ -1742,11 +1745,11 @@ test('model and effort defaults are independent per profile and explicit session
   assert.deepEqual(memory['devkits.profile-sessions'], { claude: { model: 'opus', effort: 'high' } });
   const space = { space: 'api', folder: '/Code/api' };
   await view.startThread(work, space);
-  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CLAUDE_CONFIG_DIR=/work', 'claude', ...tasksMcpFlags('claude')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(work, work.run), ...tasksMcpFlags('claude')]);
   await view.startThread(claude, space, { model: 'sonnet' });
-  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', '--effort', 'high', ...tasksMcpFlags('claude')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(claude, ['claude', '--model', 'sonnet', '--effort', 'high']), ...tasksMcpFlags('claude')]);
   await view.startThread(claude, space, { model: 'sonnet', effort: null });
-  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', ...tasksMcpFlags('claude')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(claude, ['claude', '--model', 'sonnet']), ...tasksMcpFlags('claude')]);
   memory['devkits.profile-sessions'][codex.key] = { model: 'a', effort: 'high' };
   memory['devkits.session-options'] = { codex: { models: ['a'] } };
   settings('codex');
@@ -1758,10 +1761,10 @@ test('model and effort defaults are independent per profile and explicit session
   ui.nodes.get('defaults-model-option-b').click({}, cx);
   assert.deepEqual(memory['devkits.profile-sessions'][codex.key], { model: 'b', effort: null });
   await view.startThread(codex, space);
-  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CODEX_HOME=/work', 'codex', '-m', 'b', ...tasksMcpFlags('codex')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(codex, [...codex.run, '-m', 'b']), ...tasksMcpFlags('codex')]);
   view.render(cx); pick('model', 'default');
   await view.startThread(codex, space);
-  assert.deepEqual(commands.at(-1)[1].argv, [...codex.run, ...tasksMcpFlags('codex')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(codex, codex.run), ...tasksMcpFlags('codex')]);
 });
 
 test('Fast is a checkbox saved independently for each profile and used by task sessions', async () => {
@@ -1787,7 +1790,7 @@ test('Fast is a checkbox saved independently for each profile and used by task s
   assert.equal(memory['devkits.profile-sessions'].codex.serviceTier, 'fast');
   assert.equal(memory['devkits.profile-sessions'][work.key].serviceTier, null);
   await view.startThread(work, { space: 'api', folder: '/Code/api' });
-  assert.deepEqual(commands.at(-1)[1].argv, [...work.run, ...tasksMcpFlags('codex')]);
+  assert.deepEqual(commands.at(-1)[1].argv, [...reportingArgv(work, work.run), ...tasksMcpFlags('codex')]);
   await view.startThread(codex, { space: 'api', folder: '/Code/api', task: { gid: 'task', name: 'Do work' } }, { model: 'b', effort: null });
   assert.deepEqual(commands.findLast(([name]) => name === 'tab.new')[1].argv,
     ['codex', '-m', 'b', '-c', 'service_tier="fast"', ...tasksMcpFlags('codex'), 'Do work']);
@@ -1853,7 +1856,7 @@ test('Add opens a profile draft; Create saves independent setups used by launche
   assert.ok(ui.textOf(`agent-profile-row-${second}`).includes('Astra'));
   const available = await h.view.cachedAgents(null), space = { space: 'api', folder: '/Code/api' };
   await h.view.startThread(available.find(agent => agent.key === first), space);
-  assert.deepEqual(h.commands.at(-1)[1].argv, [...h.accounts[1].run, '-m', 'a', '-c', 'model_reasoning_effort="high"', '-c', 'service_tier="fast"', ...tasksMcpFlags('codex')]);
+  assert.deepEqual(h.commands.at(-1)[1].argv, [...reportingArgv(h.accounts[1], [...h.accounts[1].run, '-m', 'a', '-c', 'model_reasoning_effort="high"', '-c', 'service_tier="fast"']), ...tasksMcpFlags('codex')]);
   assert.equal(h.view.defaultThreadAgent(projects[0], available).key, first);
   await h.view.startThread(available.find(agent => agent.key === second), { ...space, task: { gid: 'new', name: 'Task' } });
   assert.deepEqual(h.commands.findLast(([name]) => name === 'tab.new')[1].argv, [...h.accounts[1].run, '-m', 'b', ...tasksMcpFlags('codex'), 'Task']);
@@ -2264,7 +2267,7 @@ test('Codex account sessions synchronize MCP without running plugin synchronizat
   assert.deepEqual(closed, []);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', {
-    space: 'one', folder: '/project', name: 'Work', argv: ['env', 'CODEX_HOME=/account', 'codex', ...tasksMcpFlags('codex')],
+    space: 'one', folder: '/project', name: 'Work', argv: [...reportingArgv({ key: 'codex' }, ['env', 'CODEX_HOME=/account', 'codex']), ...tasksMcpFlags('codex')],
   }]);
   await pending;
   assert.deepEqual(closed, ['launcher']);
@@ -2290,7 +2293,8 @@ test('the launcher stays alive until rules are read and suppresses duplicate sta
     assert.deepEqual(closed, ['launcher']);
     const starts = commands.filter(([name]) => name === 'tab.new');
     assert.equal(starts.length, 1);
-    assert.ok(starts[0][1].argv.includes(key === 'codex' ? 'developer_instructions="Use hc run."' : '--append-system-prompt-file'));
+    assert.ok(starts[0][1].argv.join(' ').includes('Use hc run.'));
+    assert.ok(starts[0][1].argv.join(' ').includes('tasks-cli.cjs'));
   }
 });
 
@@ -2997,7 +3001,7 @@ test('a session without a conversation closes without an archive entry; an unrea
   assert.match(notes[1].body, /Could not find/);
 });
 
-test('restoring an archived thread resumes it in its project and leaves the archive', async () => {
+test('resuming an archived thread preserves its archive until the new native tab is confirmed', async () => {
   const commands = [], entry = { id: 'claude:abc', title: 'Fix login', folder: '/Code/api', projectName: 'API',
     profile: 'devkits-claude-work', argv: ['claude', '--resume', 'abc'], task: null, at: 0 };
   const memory = { 'devkits.archived-threads': [entry, { ...entry, id: 'other' }] };
@@ -3012,10 +3016,11 @@ test('restoring an archived thread resumes it in its project and leaves the arch
   ui.nodes.get('remove-archived-other').click({}, { stop_propagation() {} });
   assert.deepEqual(memory['devkits.archived-threads'].map(item => item.id), ['claude:abc']);
   ui.nodes.get('archived-claude:abc').click();
-  assert.deepEqual(memory['devkits.archived-threads'], []);
+  assert.deepEqual(memory['devkits.archived-threads'], [entry]);
   assert.equal(view.archiveOpen, false);
   assert.deepEqual(commands.at(-1), ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--resume', 'abc'] }]);
   assert.equal(memory['devkits.pending-profiles'][0].key, 'devkits-claude-work');
+  assert.equal(memory['devkits.pending-profiles'][0].restoreArchiveId, entry.id);
 });
 
 test('Claude and Codex threads show an archive button; terminals keep a close button', async () => {
@@ -3043,7 +3048,8 @@ test('global rules join Claude and Codex system prompts in local sessions only',
       readTextFile: async path => path === '/herdr/data/devkits/AGENTS.md' ? text : null });
     await new View().launchThread(claude, { space: 'api', folder: '/Code/api' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
-    assert.equal(argv.includes('--append-system-prompt-file'), expected);
+    assert.equal(argv.includes('--append-system-prompt'), !machine);
+    assert.equal(argv.join(' ').includes('Rules'), expected);
   }
 });
 
@@ -3061,12 +3067,12 @@ test('new profile sessions append their latest instructions after global rules w
       const agent = { key, profileKey: provider, run: [provider], instructions: 'Stale cached value' };
       await new View().launchThread(agent, { space: 'api', folder: '/Code/api' }, {});
       const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
-      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra;
+      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra + '\n\n' + taskReportingInstructions('/herdr');
       assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`, ...tasksMcpFlags(provider)]
         : [provider, '--append-system-prompt', expected, ...tasksMcpFlags(provider)]);
       commands.length = 0;
       await new View().launchThread({ key: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
-      assert.ok(!commands.find(([name]) => name === 'tab.new')[1].argv.join(' ').includes('Agent profile instructions'));
+      assert.ok(!commands.find(([name]) => name === 'tab.new')[1].argv.join(' ').includes(extra));
     }
   }
 });
@@ -3760,9 +3766,9 @@ test('restoring an unfinished archived task retains progress and reconnects the 
   view.openThread = (...args) => { reopened = args; };
   view.restoreThread(entry); view.drainTasks();
   assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
-  assert.equal(memory['devkits.agent-board'][key][task.gid].archived, false);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].archived, true, 'A mocked launch has not confirmed a new native tab');
   assert.equal(reopened[4].gid, 'thread:previous');
-  assert.deepEqual(memory['devkits.archived-threads'], []);
+  assert.deepEqual(memory['devkits.archived-threads'], [entry]);
 });
 
 test('finishing a run keeps unarchived threads visible and navigable; only archive hides them', async () => {
@@ -3777,7 +3783,8 @@ test('finishing a run keeps unarchived threads visible and navigable; only archi
   const view = new View(); view.folded = new Set(); view.render();
   assert.ok(ui.nodes.has('thread-work')); assert.deepEqual(order, ['t1']);
   const key = '["","/project"]';
-  assert.equal(memory['devkits.agent-board'][key]['thread:work'].status, 'done');
+  assert.equal(memory['devkits.agent-board'][key]['thread:work'].status, 'todo');
+  memory['devkits.agent-board'][key]['thread:work'].status = 'done';
   status = 'idle'; ui.nodes.clear(); view.render();
   assert.ok(ui.nodes.has('thread-work')); assert.deepEqual(order, ['t1']);
   assert.equal(memory['devkits.archived-threads'], undefined);
@@ -3824,7 +3831,7 @@ test('status and priority selects show semantic icons in the trigger and every o
   Select('icon-status', state, 'done', boardStatusOptions(t), 'Status', value => { chosen = value; }, t);
   assert.equal(ui.assets.filter(path => path.endsWith('/circle-check.svg')).length, 2);
   assert.ok(ui.assets.some(path => path.endsWith('/circle-half.svg')));
-  assert.ok(ui.assets.some(path => path.endsWith('/clock.svg')));
+  assert.equal(ui.assets.some(path => path.endsWith('/clock.svg')), false, 'Action Required is not a progress option');
   ui.nodes.get('icon-status-option-todo').click({}, { stop_propagation() {}, notify() {} });
   assert.equal(chosen, 'todo');
   Select('icon-priority', state, 'urgent', boardPriorityOptions(t), 'Priority', () => {}, t);
@@ -3916,7 +3923,7 @@ async function taskBoardFor(records = {}) {
       on(event, handler) { events.set(event, handler); }, set_auto_grow() {}, focus() {},
       blur() { events.get('blur')?.({}, renderContext); } };
   } };
-  const host = { ...ui, ...model, folderKey, launcherLabel, launcherOption, configuredAgents, threadTitle, InputState: field, TextareaState: field,
+  const host = { ...ui, ...model, taskTokenId, taskReportingInstructions, appHome: () => '/herdr', folderKey, launcherLabel, launcherOption, configuredAgents, threadTitle, InputState: field, TextareaState: field,
     Input: { new: () => ui.element() }, Textarea: { new: () => ui.element() },
     TextView: { markdown: () => ui.element() },
     shared: key => memory[key], setShared: (key, value) => { memory[key] = structuredClone(value); },
@@ -3930,7 +3937,7 @@ async function taskBoardFor(records = {}) {
       card: '#1a1a1b', cardHover: '#212223', cardBorder: '#ffffff0c', cardSelected: '#242426', cardSelectedBorder: '#454548' }),
     readTaskOutput: async () => runtime.output || '', readAsanaToken: async () => { runtime.tokenReads = (runtime.tokenReads || 0) + 1; return runtime.token || null; },
     taskIdentifier: task => task.gid, outputMarkdown: text => text,
-    openTaskComposer: (...args) => dialogs.push(args),
+    openTaskComposer: (...args) => dialogs.push(args), openOverlay: spec => dialogs.push(spec),
   };
   const sources = await Promise.all(['components/button', 'components/dropdown-menu', 'components/select', 'components/icon', 'components/side-panel', 'agent-board-state', 'agent-board']
     .map(name => readFile(new URL(`../mods/${name.startsWith('components/') ? 'devkits' : 'devkits-tasks'}/${name}.js`, import.meta.url), 'utf8')));
@@ -3944,6 +3951,28 @@ async function taskBoardFor(records = {}) {
   render();
   return { ui, view, project, projects, runtime, memory, key, cx, render, dialogs, launches, Board };
 }
+
+test('Tasks separates attention, dates and calendar scheduling, and card deletion asks for confirmation', async () => {
+  const task = { gid: 'local:plan', name: 'Plan', source: 'local', status: 'todo' };
+  const waiting = { gid: 'local:question', name: 'Question', source: 'local', status: 'doing',
+    execution: { id: 'run:question', status: 'waiting', startedAt: Date.now(), profileName: 'Reviewer', summary: 'Which redirect?' } };
+  const board = await taskBoardFor({ [task.gid]: task, [waiting.gid]: waiting });
+  assert.ok(!board.ui.nodes.has('board-lane-waiting'));
+  board.ui.nodes.get('board-attention').click({}, board.cx); board.render();
+  assert.ok(!board.ui.nodes.has(`board-card-${task.gid}`)); assert.ok(board.ui.nodes.has(`board-card-${waiting.gid}`));
+  board.ui.nodes.get('board-active').click({}, board.cx); board.render();
+  board.ui.nodes.get(`board-card-actions-${task.gid}`).click({}, board.cx); board.render();
+  board.ui.nodes.get(`board-card-menu-${task.gid}-delete`).click({}, board.cx); board.render();
+  assert.equal(board.view.deleteCandidate, task.gid); assert.ok(board.memory['devkits.agent-board'][board.key][task.gid]);
+  board.ui.nodes.get('board-cancel-delete').click({}, board.cx);
+  board.view.dueDate.edit('2026-11-12'); board.view.dueDate.blur(); board.render();
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].dueDate, '2026-11-12');
+  board.ui.nodes.get('board-schedule-task').click({}, board.cx);
+  const event = board.dialogs.at(-1); assert.equal(event.mod, 'devkits-calendar');
+  assert.equal(event.props.draft.startDate, '2026-11-12');
+  assert.equal(event.props.draft.taskLink.id, taskTokenId(board.project, task.gid));
+  assert.equal(board.memory['devkits.agent-board'][board.key][task.gid].status, 'todo');
+});
 
 test('Tasks Archived includes legacy conversations and missing snapshots without recreating deleted tasks', async () => {
   const existing = { gid: 'local:existing', source: 'local', name: 'Current name', status: 'fail', archived: true, archiveId: 'existing' };
@@ -3994,11 +4023,11 @@ test('restoring a legacy archive reconnects the migrated task identity and keeps
   assert.equal(reopened[4].gid, gid);
   assert.equal(reopened[4].source, 'thread');
   assert.deepEqual(reopened[2], entry.argv);
-  assert.equal(board.memory['devkits.agent-board'][board.key][gid].archived, false);
+  assert.equal(board.memory['devkits.agent-board'][board.key][gid].archived, true);
   assert.equal(board.memory['devkits.agent-board'][board.key][gid].status, 'fail');
-  assert.deepEqual(board.memory['devkits.archived-threads'], []);
+  assert.deepEqual(board.memory['devkits.archived-threads'], [entry]);
   board.render();
-  assert.ok(board.ui.nodes.has(`board-card-${gid}`));
+  assert.ok(!board.ui.nodes.has(`board-card-${gid}`));
 });
 
 test('task details create subtasks in a separate composer and navigate between parent and child tasks', async () => {
@@ -4042,6 +4071,7 @@ test('deleting a parent from Tasks retains its children as independent cards', a
   const board = await taskBoardFor({ p: { gid: 'p', source: 'local', name: 'Parent', status: 'todo' },
     c: { gid: 'c', source: 'local', name: 'Child', notes: 'Keep me', status: 'todo', parentId: 'p' } });
   board.view.selected = 'p'; board.render();
+  board.ui.nodes.get('board-delete-task').click({}, board.cx); board.render();
   board.ui.nodes.get('board-delete-task').click({}, board.cx); board.render();
   assert.equal(board.ui.nodes.has('board-card-p'), false); assert.ok(board.ui.nodes.has('board-card-c'));
   assert.equal(board.memory['devkits.agent-board'][board.key].c.parentId, null);
@@ -4118,7 +4148,7 @@ test('card dragging changes manual task progress, suppresses the click and never
   assert.equal(view.drag, null);
   drag('todo');
   assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
-  for (const status of ['doing', 'waiting']) {
+  for (const status of ['doing']) {
     drag(status);
     assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
   }
@@ -4177,8 +4207,7 @@ test('dragging respects movement thresholds, cancellation and live state at rele
   project.tabs = [{ id: 'running' }]; memory['devkits.agent-board'][key][task.gid].threadId = 'running';
   runtime.agents = [{ address: 't1', tab: 'running', status: 'working' }];
   ui.nodes.get('board-lane-done').mouseUp({}, cx);
-  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'doing');
-  assert.equal(memory['devkits.agent-board'][key][task.gid].manual, false);
+  assert.equal(memory['devkits.agent-board'][key][task.gid].status, 'todo');
   assert.equal(view.drag, null);
 });
 
@@ -4187,6 +4216,8 @@ test('deleting a local task removes its card and sidebar row across reloads whil
   const others = { saved: { gid: 'saved', name: 'Saved task', source: 'asana', status: 'todo' } };
   const board = await taskBoardFor({ [task.gid]: task, ...others });
   board.view.selected = task.gid; board.render();
+  board.ui.nodes.get('board-delete-task').click({}, board.cx);
+  assert.ok(board.memory['devkits.agent-board'][board.key][task.gid], 'The first click requests confirmation');
   board.ui.nodes.get('board-delete-task').click({}, board.cx);
   board.render();
   assert.ok(!board.ui.nodes.has(`board-card-${task.gid}`));
@@ -4224,10 +4255,11 @@ test('deletion preserves open and archived conversations and detaches only the s
   memory['devkits.archived-threads'] = [archive, unrelated];
   view.selected = task.gid; board.render();
   board.ui.nodes.get('board-delete-task').click({}, cx);
+  board.ui.nodes.get('board-delete-task').click({}, cx);
   board.render();
   assert.equal(memory['devkits.agent-board'][key][task.gid], undefined);
   assert.equal(project.tabs[0].id, 'conversation'); assert.equal(runtime.agents[0].address, 't1');
-  assert.ok(board.ui.nodes.has('board-card-thread:conversation'));
+  assert.ok(!board.ui.nodes.has('board-card-thread:conversation'), 'A kept conversation does not recreate the deleted card');
   assert.deepEqual(Object.keys(memory['devkits.thread-tasks']), ['other']);
   assert.deepEqual(memory['devkits.archived-threads'][0], { ...archive, task: null, boardTask: null });
   assert.deepEqual(memory['devkits.archived-threads'][1], unrelated);
@@ -4250,7 +4282,7 @@ test('archived local tasks may be deleted, while busy, waiting, launching and ex
   pending.memory['devkits.pending-profiles'] = [{ at: Date.now(), task: { gid: task.gid, folder: '/project' } }];
   pending.view.deleteTask(pending.project, task.gid, pending.cx);
   assert.ok(pending.memory['devkits.agent-board'][pending.key][task.gid]);
-  for (const source of ['thread', 'asana']) {
+  for (const source of ['asana']) {
     const external = await taskBoardFor({ [task.gid]: { ...task, source } });
     external.view.selected = task.gid; external.render();
     assert.ok(!external.ui.nodes.has('board-delete-task'));
@@ -4259,6 +4291,7 @@ test('archived local tasks may be deleted, while busy, waiting, launching and ex
   }
   const archived = await taskBoardFor({ [task.gid]: { ...task, archived: true } });
   archived.view.archived = true; archived.view.selected = task.gid; archived.render();
+  archived.ui.nodes.get('board-delete-task').click({}, archived.cx);
   archived.ui.nodes.get('board-delete-task').click({}, archived.cx);
   assert.equal(archived.memory['devkits.agent-board'][archived.key][task.gid], undefined);
 });
@@ -4270,6 +4303,7 @@ test('an output read already in flight cannot recreate a deleted local task', as
   // Retain the real queued continuation, then delete before it runs.
   let continuation;
   board.view.loadOutput({ ...task, agents: [{ address: 't1' }] }, board.project, { spawn: fn => { continuation = fn; } });
+  board.view.deleteTask(board.project, task.gid, board.cx);
   board.view.deleteTask(board.project, task.gid, board.cx);
   await continuation(board.cx);
   assert.equal(board.memory['devkits.agent-board'][board.key][task.gid], undefined);
