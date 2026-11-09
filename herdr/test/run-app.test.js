@@ -94,7 +94,7 @@ test('recent commands are scoped to the project, deduplicated, bounded and kept 
   const { RunMenu, recentRuns } = await load({ props: () => ({}), closeOverlay() {},
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; } });
   const menu = new RunMenu(); menu.folder = '/p';
-  assert.deepEqual(recentRuns('/p'), ['legacy command']);
+  assert.deepEqual(recentRuns('/p'), [], 'Saved selection does not synthesize a history entry');
   menu.choose('new command'); menu.choose('legacy command');
   assert.deepEqual(recentRuns('/p'), ['legacy command', 'new command']);
   for (let i = 0; i < 12; i++) menu.choose(`command ${i}`);
@@ -103,7 +103,7 @@ test('recent commands are scoped to the project, deduplicated, bounded and kept 
 });
 
 test('the Recent remove button keeps the menu open and selection intact, including after removing the final record', async () => {
-  const memory = { 'devkits.run-commands': { '/p': 'npm run dev' } }, nodes = new Map(), texts = [];
+  const memory = { 'devkits.run-commands': { '/p': 'npm run dev' }, 'devkits.run-history': { '/p': ['npm run dev'] } }, nodes = new Map(), texts = [];
   const element = () => {
     const data = {};
     const el = new Proxy(data, { get(_target, key) {

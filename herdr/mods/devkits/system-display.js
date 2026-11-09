@@ -7,7 +7,7 @@ import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuS
 import { glyph } from './components/icon.js';
 
 const displayKey = 'devkits.system-display';
-export const systemDisplayConfig = () => systemDisplayPreferences(shared(displayKey), shared('devkits.system-monitor'));
+export const systemDisplayConfig = () => systemDisplayPreferences(shared(displayKey));
 export const saveSystemDisplay = (patch, cx) => {
   const current = systemDisplayConfig();
   setShared(displayKey, systemDisplayPreferences({

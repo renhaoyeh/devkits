@@ -20,7 +20,7 @@ const shownProject = () => spaces().find(s => s.active);
 
 function recentRuns(folder) {
   const history = shared(RECENT_RUNS)?.[folder];
-  const commands = Array.isArray(history) ? history : [savedRun(folder)];
+  const commands = Array.isArray(history) ? history : [];
   return [...new Set(commands.filter(command => typeof command === 'string' && command.trim()))].slice(0, RECENT_LIMIT);
 }
 

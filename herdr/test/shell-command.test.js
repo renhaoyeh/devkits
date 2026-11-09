@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { commandArgv, gitShellCommand, terminalArgv, unwrapTerminalArgv } from '../mods/devkits/shell-command.js';
+import { commandArgv, gitShellCommand, terminalArgv, unwrapTerminalArgv } from '../mods/devkits/components/session-shell.js';
 
 test('Windows account and CLI commands use Git shell, preserving arguments and existing wrappers', () => {
   for (const command of ['env', 'codex', 'claude', 'C:\\Program Files\\Codex\\codex.exe', 'C:/bin/claude.cmd']) {
