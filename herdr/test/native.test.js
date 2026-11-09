@@ -122,7 +122,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/global-rules', '../devkits-agents/discovery', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/global-rules', '../devkits-agents/discovery', '../devkits-agents/account-storage-model', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const agentsOwner = await readFile(new URL('../mods/devkits-agents/main.js', import.meta.url), 'utf8');
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
@@ -1739,6 +1739,52 @@ test('sidebar menus align with the right edge of each button, 8px below its row,
   }
   assert.equal(overlays[0].props.view, 'project-menu');
 });
+test('Storage shows account totals and categories directly and refreshes without changing settings', async () => {
+  const ui = fakeElements(), writes = [], jobs = [];
+  const data = { bytes: 2048, groups: { conversations: 1024, cache: 512, extensions: 256, logs: 128, other: 128 }, partial: false };
+  const View = await viewFor({ ...ui, theme: () => ({}),
+    exec: async () => ({ code: 0, stdout: JSON.stringify(data) }),
+    setShared: (...args) => writes.push(args) });
+  const view = new View(), agent = { key: 'codex', run: ['codex'] };
+  const cx = { notify() {}, spawn(fn) { jobs.push(fn(cx)); } };
+  view.loadAccountStorage(agent, cx);
+  view.accountStoragePanel(agent, {});
+  assert.ok(ui.textOf('account-storage-codex').includes('Calculating…'));
+  assert.equal(ui.nodes.get('account-storage-refresh-codex').disabled, true);
+  await Promise.all(jobs.splice(0));
+  ui.nodes.clear(); view.accountStoragePanel(agent, {});
+  assert.ok(ui.textOf('account-storage-total-codex').includes('2.0 KB'));
+  assert.ok(ui.textOf('account-storage-codex').join(' ').includes('Adding a profile does not duplicate them.'));
+  assert.ok(!ui.nodes.has('account-storage-toggle-codex'));
+  assert.ok(ui.textOf('account-storage-breakdown-codex').includes('Chat & file history'));
+  assert.ok(ui.textOf('account-storage-breakdown-codex').includes('1.0 KB'));
+  data.partial = true;
+  ui.nodes.get('account-storage-refresh-codex').click({}, cx);
+  await Promise.all(jobs.splice(0));
+  ui.nodes.clear(); view.accountStoragePanel(agent, {});
+  assert.ok(ui.textOf('account-storage-codex').includes('At least 2.0 KB'));
+  assert.ok(ui.textOf('account-storage-codex').join(' ').includes('incomplete'));
+  assert.deepEqual(writes, []);
+});
+
+test('Storage stays expanded beside account defaults and moves below them in narrow details', async () => {
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, theme: () => ({}) });
+  const view = new View(), agent = { key: 'codex', run: ['codex'] };
+  view.initSessionMenu(renderContext);
+  view.accountDetail(agent, [], {});
+  ui.nodes.get('account-detail-codex').sizeChange({ width: 600 }, renderContext);
+  ui.nodes.clear(); view.accountDetail(agent, [], {});
+  assert.equal(ui.nodes.get('account-storage-position-codex').width, 250);
+  assert.ok(ui.nodes.has('account-defaults-panel-codex'));
+  assert.ok(ui.nodes.has('account-storage-breakdown-codex'));
+  assert.ok(!ui.nodes.has('account-storage-toggle-codex'));
+  ui.nodes.get('account-detail-codex').sizeChange({ width: 500 }, renderContext);
+  ui.nodes.clear(); view.accountDetail(agent, [], {});
+  assert.equal(ui.nodes.get('account-storage-position-codex').width, undefined);
+  assert.ok(ui.nodes.has('account-storage-breakdown-codex'));
+});
+
 test('Accounts offers Add account once per provider, including when Codex is hidden from the launcher', async () => {
   const ui = fakeElements(), overlays = [], closed = [];
   const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
