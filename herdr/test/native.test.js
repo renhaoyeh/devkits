@@ -58,6 +58,21 @@ test('sidebar records the internal terminal ID, hides its row and shows the empt
   assert.ok(commands.some(([name, args]) => name === 'layout.select' && args.child === 'project-empty'));
   assert.ok(!commands.some(([name]) => name === 'tab.close' || name === 'terminal.kill'));
 });
+
+test('sidebar reads native panes and terminals once per frame and releases them for event-time checks', async () => {
+  const ui = fakeElements(), reads = { panes: 0, terminals: 0 };
+  const tabs = Array.from({ length: 30 }, (_, i) => ({ id: `shell-${i}`, name: `Shell ${i}` }));
+  const project = { id: 'one', folder: '/project', tabs, active: true };
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), spaces: () => [project],
+    panes: () => { reads.panes++; return []; }, terminals: () => { reads.terminals++; return []; }, setAgentOrder() {} });
+  const view = new View(), renderView = view.renderView; view.folded = new Set();
+  view.renderView = function(cx) { reads.panes = reads.terminals = 0; return renderView.call(this, cx); };
+  view.render();
+  assert.deepEqual(reads, { panes: 1, terminals: 1 });
+  assert.equal(view.renderModel, null);
+  view.threadRow({ space: 'one', tab: tabs[0], agents: [] }, {});
+  assert.deepEqual(reads, { panes: 2, terminals: 2 }, 'Actions outside a frame get fresh native state');
+});
 test('working threads rise within their project and return to tab order when finished', () => {
   const spaces = [{ id: 'one', tabs: [
     { id: 'idle', status: 'idle' }, { id: 'busy', status: 'working' },
@@ -2940,6 +2955,28 @@ for (const platform of ['windows', 'macos', 'linux']) test(`${platform} archive 
   assert.equal(ui.nodes.get('archive-thread-tab-0').disabled, false);
   assert.ok(!ui.nodes.has('close-thread-tab-0'));
   assert.deepEqual(commands, []);
+});
+
+test('archive discovery recovers after startup metadata arrives without requiring a new agent status', async () => {
+  const ui = fakeElements(), tasks = [];
+  let found = false, reads = 0;
+  const agent = { ...claudeAgent, app: 'codex', status: 'idle', seq: 0 };
+  const thread = { ...claudeThread, agent, agents: [agent] };
+  const terminal = { address: agent.address, argv: ['codex'], status: 'idle', foreground: { pid: 42 } };
+  const View = await viewFor({ ...ui, spaces: () => projects, window: () => ({ platform: 'windows' }),
+    terminals: () => [terminal], hc: async () => ({ code: 0, stdout: JSON.stringify(terminal) }),
+    exec: async () => { reads++; return { code: 0, stdout: JSON.stringify({ file: found
+      ? 'C:/Account/sessions/rollout-2026-11-08-12345678-1234-1234-1234-123456789abc.jsonl' : null }) }; } });
+  const view = new View(), cx = { notify() {}, spawn: fn => tasks.push(fn(cx)) };
+  view.prepareThreadArchive(thread, cx); await Promise.all(tasks.splice(0));
+  assert.ok(view.closeOnlyThreads.has(thread.tab.id));
+  view.prepareThreadArchive(thread, cx); assert.equal(reads, 1, 'Failed discovery is throttled');
+  found = true; view.archiveChecks.get(thread.tab.id).retryAt = Date.now() - 1;
+  view.prepareThreadArchive(thread, cx); await Promise.all(tasks.splice(0));
+  assert.equal(reads, 2);
+  assert.ok(!view.closeOnlyThreads.has(thread.tab.id));
+  ui.nodes.clear(); view.threadRow(thread, {});
+  assert.equal(ui.nodes.get('archive-thread-tab-0').disabled, false);
 });
 
 test('a session without a conversation closes without an archive entry; an unreadable one stays open', async () => {
