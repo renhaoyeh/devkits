@@ -10,6 +10,9 @@ import { evaluateNative } from './source-harness.js';
 import { terminalArgv } from '../mods/devkits/shell-command.js';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+const tasksMcpFlags = provider => provider === 'codex'
+  ? ['-c', 'mcp_servers.herdr_tasks={command="node",args=["/herdr/mods/devkits-tasks/mcp-server.cjs"],env={HERDR_APP_HOME="/herdr"}}']
+  : ['--mcp-config', JSON.stringify({ mcpServers: { herdr_tasks: { command: 'node', args: ['/herdr/mods/devkits-tasks/mcp-server.cjs'], env: { HERDR_APP_HOME: '/herdr' } } } })];
 const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
 
 const agents = [
@@ -736,7 +739,7 @@ test('Windows starts legacy account launchers locally and preserves commands on 
     await new View().launchThread(agent, { space: 'api', folder: 'C:/Project' }, {});
     const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
     assert.equal(argv[0], machine ? 'env' : 'git');
-    assert.deepEqual(argv, machine ? agent.run : terminalArgv(agent.run, 'windows'));
+    assert.deepEqual(argv, machine ? agent.run : terminalArgv([...agent.run, ...tasksMcpFlags('codex')], 'windows'));
   }
   assert.deepEqual(launcherArgv({ key: 'codex', run: ['C:\\bin\\codex.cmd'] }, 'read-only').slice(1),
     ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
@@ -1149,11 +1152,11 @@ test('profile permissions apply independently from Settings to the selected acco
   target = { view: 'launcher', overlay: 'menu', space: 'api', folder: '/Code/api' }; view.startThread(codex);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv,
-    ['codex', '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
+    ['codex', ...tasksMcpFlags('codex'), '--sandbox', 'read-only', '--ask-for-approval', 'on-request']);
   // Another profile retains its own launcher permissions.
   target = { ...target, space: null, projectName: 'New project' }; await view.startThread(work);
   assert.deepEqual(commands.find(([name]) => name === 'space.new')[1].argv,
-    ['env', 'CODEX_HOME=/accounts/work', 'codex', '--no-daemon']);
+    ['env', 'CODEX_HOME=/accounts/work', 'codex', ...tasksMcpFlags('codex'), '--no-daemon']);
   settings('codex');
   pick('permissions', 'default');
   assert.deepEqual(memory['devkits.codex-permissions'], {});
@@ -1698,11 +1701,11 @@ test('model and effort defaults are independent per profile and explicit session
   assert.deepEqual(memory['devkits.profile-sessions'], { claude: { model: 'opus', effort: 'high' } });
   const space = { space: 'api', folder: '/Code/api' };
   await view.startThread(work, space);
-  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CLAUDE_CONFIG_DIR=/work', 'claude']);
+  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CLAUDE_CONFIG_DIR=/work', 'claude', ...tasksMcpFlags('claude')]);
   await view.startThread(claude, space, { model: 'sonnet' });
-  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', '--effort', 'high']);
+  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', '--effort', 'high', ...tasksMcpFlags('claude')]);
   await view.startThread(claude, space, { model: 'sonnet', effort: null });
-  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet']);
+  assert.deepEqual(commands.at(-1)[1].argv, ['claude', '--model', 'sonnet', ...tasksMcpFlags('claude')]);
   memory['devkits.profile-sessions'][codex.key] = { model: 'a', effort: 'high' };
   memory['devkits.session-options'] = { codex: { models: ['a'] } };
   settings('codex');
@@ -1714,10 +1717,10 @@ test('model and effort defaults are independent per profile and explicit session
   ui.nodes.get('defaults-model-option-b').click({}, cx);
   assert.deepEqual(memory['devkits.profile-sessions'][codex.key], { model: 'b', effort: null });
   await view.startThread(codex, space);
-  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CODEX_HOME=/work', 'codex', '-m', 'b']);
+  assert.deepEqual(commands.at(-1)[1].argv, ['env', 'CODEX_HOME=/work', 'codex', '-m', 'b', ...tasksMcpFlags('codex')]);
   view.render(cx); pick('model', 'default');
   await view.startThread(codex, space);
-  assert.deepEqual(commands.at(-1)[1].argv, codex.run);
+  assert.deepEqual(commands.at(-1)[1].argv, [...codex.run, ...tasksMcpFlags('codex')]);
 });
 
 test('Fast is a checkbox saved independently for each profile and used by task sessions', async () => {
@@ -1743,10 +1746,10 @@ test('Fast is a checkbox saved independently for each profile and used by task s
   assert.equal(memory['devkits.profile-sessions'].codex.serviceTier, 'fast');
   assert.equal(memory['devkits.profile-sessions'][work.key].serviceTier, null);
   await view.startThread(work, { space: 'api', folder: '/Code/api' });
-  assert.deepEqual(commands.at(-1)[1].argv, work.run);
+  assert.deepEqual(commands.at(-1)[1].argv, [...work.run, ...tasksMcpFlags('codex')]);
   await view.startThread(codex, { space: 'api', folder: '/Code/api', task: { gid: 'task', name: 'Do work' } }, { model: 'b', effort: null });
   assert.deepEqual(commands.findLast(([name]) => name === 'tab.new')[1].argv,
-    ['codex', '-m', 'b', '-c', 'service_tier="fast"', 'Do work']);
+    ['codex', '-m', 'b', '-c', 'service_tier="fast"', ...tasksMcpFlags('codex'), 'Do work']);
 });
 
 async function profileTableUi(memory = {}) {
@@ -1809,10 +1812,10 @@ test('Add opens a profile draft; Create saves independent setups used by launche
   assert.ok(ui.textOf(`agent-profile-row-${second}`).includes('Astra'));
   const available = await h.view.cachedAgents(null), space = { space: 'api', folder: '/Code/api' };
   await h.view.startThread(available.find(agent => agent.key === first), space);
-  assert.deepEqual(h.commands.at(-1)[1].argv, [...h.accounts[1].run, '-m', 'a', '-c', 'model_reasoning_effort="high"', '-c', 'service_tier="fast"']);
+  assert.deepEqual(h.commands.at(-1)[1].argv, [...h.accounts[1].run, '-m', 'a', '-c', 'model_reasoning_effort="high"', '-c', 'service_tier="fast"', ...tasksMcpFlags('codex')]);
   assert.equal(h.view.defaultThreadAgent(projects[0], available).key, first);
   await h.view.startThread(available.find(agent => agent.key === second), { ...space, task: { gid: 'new', name: 'Task' } });
-  assert.deepEqual(h.commands.findLast(([name]) => name === 'tab.new')[1].argv, [...h.accounts[1].run, '-m', 'b', 'Task']);
+  assert.deepEqual(h.commands.findLast(([name]) => name === 'tab.new')[1].argv, [...h.accounts[1].run, '-m', 'b', ...tasksMcpFlags('codex'), 'Task']);
   assert.ok(!ui.nodes.has(`agent-profile-visible-${first}`));
   assert.ok(h.view.taskAssignees(projects[0]).some(agent => agent.key === first));
   ui.nodes.get(`remove-agent-profile-${first}`).click({}, cx);
@@ -2220,7 +2223,7 @@ test('Codex account sessions start immediately with existing plugins and no sync
   assert.deepEqual(closed, []);
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', {
-    space: 'one', folder: '/project', name: 'Work', argv: ['env', 'CODEX_HOME=/account', 'codex'],
+    space: 'one', folder: '/project', name: 'Work', argv: ['env', 'CODEX_HOME=/account', 'codex', ...tasksMcpFlags('codex')],
   }]);
   await pending;
   assert.deepEqual(closed, ['launcher']);
@@ -2234,7 +2237,7 @@ test('the launcher stays alive until rules are read and suppresses duplicate sta
     let finishRead;
     const View = await viewFor({ spaces: () => [], run: (...args) => commands.push(args),
       closeOverlay: id => closed.push(id),
-      readTextFile: () => new Promise(resolve => { finishRead = resolve; }) });
+      readTextFile: path => path.endsWith('/AGENTS.md') ? new Promise(resolve => { finishRead = resolve; }) : Promise.resolve(null) });
     const view = new View(), agent = { key, name: key, run: [key] };
     const target = { space: 'one', folder: '/project', overlay: 'launcher' };
     const pending = view.startThread(agent, target);
@@ -2270,7 +2273,7 @@ test('starting a task from Tasks names the thread, adds the model, effort and ta
     { model: 'opus', effort: 'max' });
   await settle();
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'),
-    ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--model', 'opus', '--effort', 'max', 'prompt:Fix login'] }]);
+    ['tab.new', { space: 'api', folder: '/Code/api', name: 'Fix login', argv: ['claude', '--model', 'opus', '--effort', 'max', ...tasksMcpFlags('claude'), 'prompt:Fix login'] }]);
 });
 test('project menus have no separate Asana entry; Tasks remains available in the status bar', async () => {
   const ui = fakeElements();
@@ -2988,15 +2991,15 @@ test('new profile sessions append their latest instructions after global rules w
       const config = { key, profileKey: provider, name: 'Review', instructions: extra };
       const View = await viewFor({ spaces: () => [{ id: 'api', tabs: [] }],
         shared: name => name === 'devkits.agent-configs' ? [config] : undefined,
-        readTextFile: async () => { if (global instanceof Error) throw global; return global; },
+        readTextFile: async path => { if (!path.endsWith('/AGENTS.md')) return null; if (global instanceof Error) throw global; return global; },
         writeTextFile: async () => assert.fail('Launching must not modify rules files'),
         run: (...args) => commands.push(args) });
       const agent = { key, profileKey: provider, run: [provider], instructions: 'Stale cached value' };
       await new View().launchThread(agent, { space: 'api', folder: '/Code/api' }, {});
       const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
       const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra;
-      assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`]
-        : [provider, '--append-system-prompt', expected]);
+      assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`, ...tasksMcpFlags(provider)]
+        : [provider, '--append-system-prompt', expected, ...tasksMcpFlags(provider)]);
       commands.length = 0;
       await new View().launchThread({ key: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
       assert.ok(!commands.find(([name]) => name === 'tab.new')[1].argv.join(' ').includes('Agent profile instructions'));

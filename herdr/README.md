@@ -174,3 +174,17 @@ Imported MantisBT tasks retain their source URL, description, parent and comment
 The Files and Git buttons toggle only the right dock. Switching between them keeps the central document; selecting a file, changed file, commit or View Diff opens its content there. Closing a file tab returns to the most recently active tab. Ctrl+Tab / Ctrl+Shift+Tab in file content cycle recent tabs while Control is held. The Threads sidebar is resizable, and each project also remembers its conversation width. Hiding the conversation returns focus to the editor; selecting a thread focuses its terminal. Run reveals its output even when the conversation was hidden.
 
 Parallel panes belonging to one thread are grouped by a bounded connector bracket in the sidebar. Independent threads remain ordinary separate rows. Real child tasks nest below their own parent, including children started from a parallel terminal. Click one to focus its pane; its hover close button closes only that pane. A secondary split pane’s **⋯** menu contains only **Close terminal**; the primary thread’s menu contains only **Close thread**.
+
+## Tasks MCP
+
+New local Codex and Claude sessions launched by Devkits receive the `herdr_tasks` stdio MCP automatically, including saved account/profile launchers and sessions started from Tasks. Existing sessions need a new launch to discover it. Remote sessions and other agent types are not configured automatically. Herdr must be running with the Devkits layout, and Node.js and `herdr-app` must be on PATH.
+
+Tools: `list_projects`, `list_tasks` and `create_task`. Pass the exact project `key` from `list_projects`; folder paths alone do not distinguish local and remote projects. `create_task` takes `project`, `name`, optional `notes`, `priority` (`none`, `low`, `medium`, `high`, `urgent`) and `parentId` (a task `gid` from `list_tasks`). It creates a local Todo without starting a session. Children require an existing, nonarchived parent in the same project. Edits, status changes and deletion are not exposed yet.
+
+Other MCP clients can launch `node <HERDR_APP_HOME>/mods/devkits-tasks/mcp-server.cjs` using stdio. Set the server's `HERDR_APP_HOME` environment variable when using a custom Herdr home. For example (replace the path):
+
+```json
+{"mcpServers":{"herdr_tasks":{"command":"node","args":["C:/Users/you/.config/herdr-app/mods/devkits-tasks/mcp-server.cjs"]}}}
+```
+
+Requests use the live Tasks owner through Herdr's mod command bus, with per-request files under `data/devkits/tasks-mcp/` for replies and larger descriptions. The server does not edit `shared.json`. Separate client processes use unique request IDs. Calls expire after ten seconds; if a create times out, check `list_tasks` before retrying because the task may already exist. Completed calls remove their request and reply files; an abruptly terminated client can leave files in this directory. The endpoint implements the MCP 2025-06-18 stdio protocol ([transport specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)); Codex's session configuration uses [MCP command/args configuration](https://developers.openai.com/codex/mcp).
