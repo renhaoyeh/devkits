@@ -122,8 +122,9 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'shared-mcp-settings', 'global-rules', 'session-menu', 'start-panel', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/global-rules', '../devkits-agents/discovery', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
+  const agentsOwner = await readFile(new URL('../mods/devkits-agents/main.js', import.meta.url), 'utf8');
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
   const usageOwner = await Promise.all(['monitor', 'details'].map(name => readFile(new URL(`../mods/devkits-usage/${name}.js`, import.meta.url), 'utf8')));
   const domain = await Promise.all(['agent-board-model', 'agent-task-evidence', 'agent-board-state', 'runtime']
@@ -134,7 +135,9 @@ async function loadView(host) {
   const fixture = `
     const Host = Devkits;
     class IntegratedDevkits extends Host {
-      constructor() { super(); this.taskSources = new TaskSources(); this.syncTaskSnapshot(); }
+      constructor() { super(); this.agentClient = { init() {}, close() {}, discover: discoverAgents, prepare: prepareSession }; this.taskSources = new TaskSources(); this.syncTaskSnapshot(); }
+      init(p, cx) { return ['launcher', 'manage-launchers', 'agent-profile-editor', 'account-login', 'shared-mcp', 'rename-account', 'remove-account'].includes(props()?.view) ? AgentOwner.AgentsMod.prototype.init.call(this, p, cx) : super.init(p, cx); }
+      renderView(cx) { return ['launcher', 'manage-launchers', 'agent-profile-editor', 'account-login', 'shared-mcp', 'rename-account', 'remove-account'].includes(props()?.view) ? AgentOwner.AgentsMod.prototype.render.call(this, cx) : super.renderView(cx); }
       syncTaskSnapshot() { Domain.TaskRuntime.prototype.resolveSessions.call(this); setShared('devkits.tasks.snapshot', Domain.TaskRuntime.prototype.snapshot.call(this)); }
       taskAssignees(project) { return Domain.TaskRuntime.prototype.taskAssignees.call(this, project); }
       boardPanel(project, cx) { return Domain.TaskRuntime.prototype.boardPanel.call(this, project, cx); }
@@ -158,6 +161,7 @@ async function loadView(host) {
         service.poll({ spawn: fn => fn({ notify() {} }), notify() {} }); this.syncTaskSnapshot();
       }
     }
+    Object.assign(IntegratedDevkits.prototype, sessionMenu, agentProfiles, accountActions, sharedMcpSettings);
     IntegratedDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;
       ${strip(provider)}
       return SystemMonitorCore; })();
@@ -166,7 +170,7 @@ async function loadView(host) {
   `;
   return new Function('View', ...Object.keys(host), strip([...components, ...features].join('\n')) + '\n' +
     strip(source).replace('default class', 'class') + '\nconst Domain = (() => {\n' + strip(domain.join('\n')) +
-    '\nreturn { TaskRuntime }; })();\nconst UsageOwner = (() => {\n' + strip(usageOwner.join('\n')) + '\nreturn { UsageMonitor, UsageDetails }; })();\n' + fixture);
+    '\nreturn { TaskRuntime }; })();\nconst UsageOwner = (() => {\n' + strip(usageOwner.join('\n')) + '\nreturn { UsageMonitor, UsageDetails }; })();\nconst AgentOwner = (() => {\n' + strip(agentsOwner).replace('default class', 'class') + '\nreturn { AgentsMod }; })();\n' + fixture);
 }
 async function viewFor(host) {
   const memory = {};
@@ -1270,15 +1274,6 @@ test('account actions are direct buttons on Accounts and Shared MCP stays out of
   assert.equal(overlays.at(-1).props.view, 'rename-account');
 });
 
-test('an old permissions dialog returns to Manage after a live update', async () => {
-  const ui = fakeElements(), closed = [], overlays = [];
-  const View = await viewFor({ ...ui, props: () => ({ view: 'codex-permissions', overlay: 'old-dialog', space: 'api' }),
-    closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
-  new View().init({}, renderContext);
-  assert.deepEqual(closed, ['old-dialog']);
-  assert.equal(overlays[0].modal, false);
-  assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
-});
 test('failed account removal stays in the confirmation dialog and preserves preferences for retry', async () => {
   const ui = fakeElements(); let pending;
   const View = await viewFor({ ...ui, props: () => ({ view: 'remove-account', account: { key: 'devkits-codex-work', name: 'Work' } }),
@@ -2777,13 +2772,13 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.match(await readFile(join(home, layout.preview), 'utf8'), /<svg/);
   const mod = join(home, 'mods', 'devkits');
   const system = join(home, 'mods', 'devkits-system');
-  for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage']) {
+  for (const name of ['devkits-agents', 'devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage']) {
     const path = join(home, 'mods', name);
     assert.equal(JSON.parse(await readFile(join(path, 'mod.json'), 'utf8')).place, 'none');
     assert.equal(await readFile(join(path, 'main.js'), 'utf8'), await readFile(new URL(`../mods/${name}/main.js`, import.meta.url), 'utf8'));
   }
   const hostFiles = await readdir(mod);
-  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor', 'agent-board.js', 'agent-board-state.js', 'calendar.js', 'task-composer.js', 'usage.js', 'usage-reader.js', 'analytics.js', 'analytics-reader.js']) assert.ok(!hostFiles.includes(obsolete));
+  for (const obsolete of ['asana.js', 'mantisbt.js', 'system-monitor.js', 'hardware-reader.js', 'vendor', 'agent-board.js', 'agent-board-state.js', 'calendar.js', 'task-composer.js', 'usage.js', 'usage-reader.js', 'analytics.js', 'analytics-reader.js', 'session-menu.js', 'account-login.js', 'account-actions.js', 'agent-profiles.js', 'shared-mcp-settings.js', 'shared-mcp-sync.js', 'codex-config.js', 'global-rules.js']) assert.ok(!hostFiles.includes(obsolete));
   const hardwarePackage = JSON.parse(await readFile(join(system, 'vendor', 'systeminformation', 'package.json'), 'utf8'));
   assert.equal(hardwarePackage.version, '5.33.19');
   assert.equal(hardwarePackage.license, 'MIT');
@@ -2799,6 +2794,8 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   const ids = new Set();
   function visit(node) { assert.ok(!ids.has(node.id)); ids.add(node.id); for (const child of node.children || []) visit(child); }
   visit(layout);
+  assert.ok(ids.has('agents-service'));
+  assert.equal(layout.children[1].children[2].children[0].children.find(node => node.id === 'agents-service').content.mod, 'devkits-agents');
   // The thread, then the editor (Files or Changes, each with its list at the right), then the simulator at the window's edge.
   const row = layout.children[1].children[1], [stack, editor, simulator] = row.children;
   assert.equal(stack.id, 'workspace-view');
@@ -2834,7 +2831,7 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   assert.equal(await readFile(join(home, 'mods', 'devkits', 'main.js'), 'utf8'), before);
 });
 
-for (const name of ['devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage']) test(`installer preserves an existing ${name} mod`, async t => {
+for (const name of ['devkits-agents', 'devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage']) test(`installer preserves an existing ${name} mod`, async t => {
   const home = await mkdtemp(join(tmpdir(), 'devkits-test-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const path = join(home, 'mods', name);
@@ -3250,8 +3247,8 @@ test('Claude and Codex threads show an archive button; terminals keep a close bu
 test('the global Agent Guide seeds visible task reporting once and preserves edits or intentional emptiness', async () => {
   let guide = null;
   const writes = [], root = 'C:\\Guide space\\Herdr';
-  const { ensureRules, sessionRules } = await evaluateNative('../mods/devkits/global-rules.js', {
-    appHome: () => root, readTextFile: async () => guide,
+  const { ensureRules, sessionRules } = await evaluateNative('../mods/devkits-agents/global-rules.js', {
+    appHome: () => root, rulesPath: () => `${root}/data/devkits/AGENTS.md`, readTextFile: async () => guide,
     writeTextFile: async (file, text, expected) => { writes.push({ file, text, expected }); guide = text; },
   }, 'ensureRules, sessionRules');
   await ensureRules();
@@ -3803,7 +3800,7 @@ test('thread header menu opens Global Rules centrally and Shared MCP alongside A
   const view = new View(), cx = { ...renderContext };
   view.paneHeader({}, cx); ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
   ui.nodes.get('thread-actions-p0-settings').click({}, cx);
-  assert.deepEqual(overlays.at(-1), { mod: 'devkits', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.8,
+  assert.deepEqual(overlays.at(-1), { mod: 'devkits-agents', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.8,
     props: { view: 'manage-launchers', space: projects.find(project => project.tabs?.some(tab => tab.id === 'tab-0'))?.id ?? null, page: 'accounts' } });
   assert.deepEqual(commands, []);
   ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
@@ -4697,7 +4694,7 @@ test('empty property searches stay harmless and reopening clears the search draf
 test('Tasks owns the Asana import callback and opens a draft without launching a session', async () => {
   const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] }, drafts = [], closed = [], commands = [];
   const source = { gid: 'a1', name: 'Selected source', notes: 'Source instructions', comments: [] };
-  const { TaskRuntime } = await evaluateNative('../mods/devkits-tasks/runtime.js', {
+  const { TaskRuntime } = await evaluateNative('../mods/devkits-tasks/runtime.js', { AgentClient: class {},
     openTaskComposer: (...args) => drafts.push(args),
     TaskSources: class { constructor(onImport) { this.onImport = onImport; } open(bound, key) { assert.equal(bound, project); assert.equal(key, 'asana'); this.onImport(bound, source); } },
     run: (...args) => commands.push(args),
@@ -4721,7 +4718,7 @@ test('imported local Todo descriptions remain editable and their source links op
 test('MantisBT import routes through the same Tasks draft without launching an agent', async () => {
   const project = { id: 'one', name: 'One', folder: '/Code/one', active: true, tabs: [] }, drafts = [], closed = [], commands = [];
   const source = { source: 'mantisbt', gid: '1', server: 'https://mantis.test', name: 'Selected issue', notes: 'Instructions', comments: [] };
-  const { TaskRuntime } = await evaluateNative('../mods/devkits-tasks/runtime.js', {
+  const { TaskRuntime } = await evaluateNative('../mods/devkits-tasks/runtime.js', { AgentClient: class {},
     openTaskComposer: (...args) => drafts.push(args),
     TaskSources: class { constructor(onImport) { this.onImport = onImport; } open(bound, key) { assert.equal(bound, project); assert.equal(key, 'mantisbt'); this.onImport(bound, source); } },
     run: (...args) => commands.push(args),

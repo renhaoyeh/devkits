@@ -43,6 +43,7 @@
         ] },
         { "id": "status", "type": "column", "size": { "px": 32 }, "resizable": false, "children": [
           { "id": "status-services", "type": "row", "size": { "px": 1 }, "resizable": false, "children": [
+            { "id": "agents-service", "type": "block", "content": { "mod": "devkits-agents", "props": { "view": "service" } } },
             { "id": "system-service", "type": "block", "content": { "mod": "devkits-system", "props": { "view": "service" } } },
             { "id": "tasks-service", "type": "block", "content": { "mod": "devkits-tasks", "props": { "view": "service" } } },
             { "id": "usage-service", "type": "block", "content": { "mod": "devkits-usage", "props": { "view": "service" } } }
