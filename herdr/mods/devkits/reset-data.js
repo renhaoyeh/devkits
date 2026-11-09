@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import { commandArgv } from './components/session-shell.js';
 
 const execFile = promisify(execFileCallback);
@@ -137,7 +138,7 @@ export async function stopAccountSessions(data, execute = execFile) {
   }
 }
 
-export async function idleAccounts(data, execute = execFile, platform = process.platform) {
+export async function idleAccounts(data, execute = execFile, platform = process.platform, stop = false) {
   const options = { timeout: 10000, maxBuffer: 8 * 1024 * 1024, windowsHide: true };
   const { stdout } = await execute('hc', ['ls', '--json'], options);
   const result = JSON.parse(stdout);
@@ -151,18 +152,49 @@ export async function idleAccounts(data, execute = execFile, platform = process.
   const root = dirname(dirname(data));
   let writers;
   if (platform === 'win32') {
-    const result = await execute('cscript', ['//Nologo', join(root, 'mods/devkits/reset-processes-windows.js'), root, String(process.pid)], options);
+    const result = await execute('cscript', ['//Nologo', join(root, 'mods/devkits/reset-processes-windows.js'), root, String(process.pid), ...(stop ? ['stop'] : [])], options);
     writers = JSON.parse(result.stdout);
   } else {
-    const result = await execute('ps', ['-axww', '-o', 'pid=,comm=,args='], options);
-    writers = result.stdout.split('\n').flatMap(line => {
-      const match = /^\s*(\d+)\s+(\S+)\s+(.+)$/.exec(line);
-      return match && Number(match[1]) !== process.pid && /(?:^|\/)node$/.test(match[2])
-        && match[3].includes(`${root}/mods/devkits`) ? [Number(match[1])] : [];
-    });
+    const result = await execute('ps', ['-axww', '-o', 'pid=,ppid=,comm=,args='], options);
+    writers = resetProcessPids(result.stdout, root);
+    if (stop) for (const pid of [...writers].reverse()) {
+      try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
   }
   if (!Array.isArray(writers)) throw new Error('Could not check Devkits background readers.');
-  if (writers.length) throw new Error('Devkits background reads are still finishing. Wait a moment, then Retry.');
+  if (!stop && writers.length) throw new Error('Devkits services are still stopping. Wait a moment, then Retry.');
+}
+
+export function resetProcessPids(source, root, ownPid = process.pid) {
+  const rows = source.split('\n').flatMap(line => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
+    return match ? [{ pid: Number(match[1]), parent: Number(match[2]), name: match[3], args: match[4] }] : [];
+  });
+  const prefix = `${root}/mods/devkits`;
+  const owned = rows.filter(row => {
+    const offset = row.args.indexOf(prefix);
+    return row.pid !== ownPid && /(?:^|\/)node$/.test(row.name) && offset >= 0 &&
+      (offset === 0 || /["\s]/.test(row.args[offset - 1])) && /^(?:\/|-[a-z0-9-]+\/)/.test(row.args.slice(offset + prefix.length));
+  }).map(row => row.pid);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const row of rows) if (row.pid !== ownPid && !owned.includes(row.pid) && owned.includes(row.parent)) {
+      owned.push(row.pid); changed = true;
+    }
+  }
+  return owned;
+}
+
+export async function stopDevkitsServices(data, execute = execFile, platform = process.platform) {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    await idleAccounts(data, execute, platform, true);
+    try { await idleAccounts(data, execute, platform); return; }
+    catch (error) {
+      if (!error.message.startsWith('Devkits services are still stopping.') || Date.now() >= deadline) throw error;
+      await delay(250);
+    }
+  }
 }
 
 // Restore only integrations still owned by this installation. Default account credentials,
@@ -201,6 +233,7 @@ export async function clearReset(directory, confirmation, services = {}) {
   const lock = await acquireLock(lockPath);
   try {
     await (services.stopAccounts || stopAccountSessions)(data);
+    await (services.stopServices || stopDevkitsServices)(data);
     await (services.idleAccounts || idleAccounts)(data);
     const plan = await inspectReset(root);
     const frames = join(root, 'mods', 'devkits-sim-frames');

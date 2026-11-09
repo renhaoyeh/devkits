@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectReset, clearReset, cleanDefaultClaude, signOut, stopAccountSessions, idleAccounts, resetShortcuts } from '../mods/devkits/reset-data.js';
+import { inspectReset, clearReset, cleanDefaultClaude, signOut, stopAccountSessions, idleAccounts, stopDevkitsServices, resetProcessPids, resetShortcuts } from '../mods/devkits/reset-data.js';
 import { KEYS } from '../install.js';
 import { evaluateNative } from './source-harness.js';
 
@@ -32,7 +32,7 @@ async function fixture(t) {
   await writeFile(join(root, 'mods', 'devkits-sim-frames', 'main.js'), 'keep code');
   const calls = [], sensorCache = join(folder, 'sensor-cache');
   await mkdir(sensorCache);
-  const services = { userHome, sensorCache, stopAccounts: async () => {}, idleAccounts: async () => {}, cleanCodex: async () => {},
+  const services = { userHome, sensorCache, stopAccounts: async () => {}, stopServices: async () => {}, idleAccounts: async () => {}, cleanCodex: async () => {},
     signOut: async account => { calls.push(account); } };
   return { folder, root, userHome, data, codex, claude, programs, state, services, calls };
 }
@@ -176,14 +176,14 @@ test('a live reset lock prevents parallel deletion; a dead helper can be explici
 
 test('reset waits for account terminals and finite cache writers without stopping unrelated processes', async () => {
   let terminals = [{ state: 'live', argv: ['env', 'CODEX_HOME=/herdr/data/devkits/codex/account', 'codex'] }];
-  let processes = '999999 node node /herdr/mods/devkits-usage/analytics-reader.js\n';
+  let processes = '999999 1 node node /herdr/mods/devkits-usage/analytics-reader.js\n';
   const run = async command => ({ stdout: command === 'hc' ? JSON.stringify({ terminals }) : processes });
   await assert.rejects(idleAccounts('/herdr/data/devkits', run, 'darwin'), /Close the terminals/);
   terminals = [];
-  await assert.rejects(idleAccounts('/herdr/data/devkits', run, 'darwin'), /background reads/);
-  processes = '999999 node node /another/mods/devkits/reader.js\n999998 zsh zsh /herdr/mods/devkits/reader.js\n';
+  await assert.rejects(idleAccounts('/herdr/data/devkits', run, 'darwin'), /services are still stopping/);
+  processes = '999999 1 node node /another/mods/devkits/reader.js\n999998 1 zsh zsh /herdr/mods/devkits/reader.js\n';
   await idleAccounts('/herdr/data/devkits', run, 'darwin');
-  await assert.rejects(idleAccounts('/herdr/data/devkits', async command => ({ stdout: command === 'hc' ? '{"terminals":[]}' : '[123]' }), 'win32'), /background reads/);
+  await assert.rejects(idleAccounts('/herdr/data/devkits', async command => ({ stdout: command === 'hc' ? '{"terminals":[]}' : '[123]' }), 'win32'), /services are still stopping/);
 });
 
 test('Windows reset process inspection returns only this installation helper PIDs', async () => {
@@ -198,7 +198,8 @@ test('Windows reset process inspection returns only this installation helper PID
     { ProcessId: 1, Name: 'node.exe', CommandLine: 'node C:\\Herdr\\mods\\devkits\\reset-data.js' },
     { ProcessId: 2, Name: 'node.exe', CommandLine: 'node C:\\Herdr\\mods\\devkits-usage\\analytics-reader.js' },
     { ProcessId: 3, Name: 'node.exe', CommandLine: 'node C:\\Other\\mods\\devkits\\reader.js' },
-  ], 'C:\\Herdr', 1), [2]);
+    { ProcessId: 4, Name: 'node.exe', CommandLine: 'node "C:\\Herdr\\mods\\devkits-tasks\\mcp-server.cjs"' },
+  ], 'C:\\Herdr', 1), [2, 4]);
 });
 
 test('confirmed reset stops dedicated account sessions and their children, preserving unrelated terminals', async () => {
@@ -215,6 +216,37 @@ test('confirmed reset stops dedicated account sessions and their children, prese
   });
   assert.deepEqual(killed, ['t2', 't1']);
   assert.deepEqual(terminals.map(item => item.address), ['t3', 't4']);
+});
+
+test('service stop terminates MCP and helpers, then verifies exit before returning', async () => {
+  const calls = []; let live = true;
+  await stopDevkitsServices('/herdr/data/devkits', async (command, args) => {
+    if (command === 'hc') return { stdout: '{"terminals":[]}' };
+    calls.push(args.at(-1));
+    if (args.at(-1) === 'stop') { live = false; return { stdout: '[123]' }; }
+    return { stdout: live ? '[123]' : '[]' };
+  }, 'win32');
+  assert.deepEqual(calls, ['stop', String(process.pid)]);
+});
+
+test('service discovery includes persistent MCP descendants and excludes adjacent installations and reset itself', () => {
+  assert.deepEqual(resetProcessPids([
+    '100 1 node node /herdr/mods/devkits-tasks/mcp-server.cjs',
+    '101 100 sh sh child.sh',
+    '102 1 node node /herdr/mods/devkits-system/hardware-reader.js',
+    '103 1 node node /herdr/mods/devkits-other-copy/reader.js',
+    '104 1 node node /herdr/mods/devkits/reset-data.js',
+    '105 1 node node /else/herdr/mods/devkits/reader.js',
+    '106 1 node node /herdr/mods/devkits-backup/reader.js',
+  ].join('\n'), '/herdr', 104), [100, 102, 103, 106, 101]);
+});
+
+test('failed service shutdown preserves account credentials before sign-out', async t => {
+  const f = await fixture(t);
+  await assert.rejects(clearReset(f.root, 'DEVKITS', { ...f.services,
+    stopServices: async () => { throw new Error('service could not stop'); } }), /service could not stop/);
+  assert.deepEqual(f.calls, []);
+  assert.equal(await readFile(join(f.codex, 'auth.json'), 'utf8'), 'dedicated credentials');
 });
 
 test('a failed account-session stop prevents the reset before account sign-out or file deletion', async t => {

@@ -1,12 +1,27 @@
-// Windows Script Host: report only PIDs of this installation's finite Node helpers.
+// Windows Script Host: find this installation's Node services and their children.
 // Never emit process command lines, which can contain private data.
 function resetWriterPids(rows, root, ownPid) {
+  function contains(values, value) { for (var n = 0; n < values.length; n++) if (values[n] === value) return true; return false; }
   var prefix = String(root).replace(/\\/g, '/').toLowerCase() + '/mods/devkits';
-  var result = [], iterator = new Enumerator(rows);
+  var result = [], all = [], iterator = new Enumerator(rows);
   for (; !iterator.atEnd(); iterator.moveNext()) {
     var row = iterator.item(), pid = Number(row.ProcessId);
-    if (pid !== ownPid && String(row.Name).toLowerCase() === 'node.exe' &&
-        String(row.CommandLine || '').replace(/\\/g, '/').toLowerCase().indexOf(prefix) >= 0) result.push(pid);
+    all.push(row);
+    var command = String(row.CommandLine || '').replace(/\\/g, '/').toLowerCase();
+    var offset = command.indexOf(prefix);
+    if (pid !== ownPid && String(row.Name).toLowerCase() === 'node.exe' && offset >= 0 &&
+        (offset === 0 || /["\s]/.test(command.charAt(offset - 1))) &&
+        /^(?:\/|-[a-z0-9-]+\/)/.test(command.slice(offset + prefix.length))) result.push(pid);
+  }
+  // Append descendants after parents; reverse this order when terminating.
+  for (var changed = true; changed;) {
+    changed = false;
+    for (var i = 0; i < all.length; i++) {
+      var child = Number(all[i].ProcessId);
+      if (child !== ownPid && !contains(result, child) && contains(result, Number(all[i].ParentProcessId))) {
+        result.push(child); changed = true;
+      }
+    }
   }
   return result;
 }
@@ -15,7 +30,18 @@ if (typeof WScript !== 'undefined') {
     var root = String(WScript.Arguments.Item(0)), ownPid = Number(WScript.Arguments.Item(1));
     if (!root || !(ownPid > 0)) throw new Error('Invalid process query');
     var connection = new ActiveXObject('WbemScripting.SWbemLocator').ConnectServer('.', 'root\\cimv2');
-    var rows = connection.ExecQuery("SELECT ProcessId, Name, CommandLine FROM Win32_Process WHERE Name = 'node.exe'");
-    WScript.Echo('[' + resetWriterPids(rows, root, ownPid).join(',') + ']');
+    var rows = connection.ExecQuery('SELECT * FROM Win32_Process');
+    var pids = resetWriterPids(rows, root, ownPid);
+    if (WScript.Arguments.length > 2 && String(WScript.Arguments.Item(2)) === 'stop') {
+      for (var i = pids.length - 1; i >= 0; i--) {
+        // Terminate the inspected WMI object, never a shell command assembled from argv.
+        var iterator = new Enumerator(rows);
+        for (; !iterator.atEnd(); iterator.moveNext()) {
+          var row = iterator.item();
+          if (Number(row.ProcessId) === pids[i]) row.Terminate();
+        }
+      }
+    }
+    WScript.Echo('[' + pids.join(',') + ']');
   } catch (error) { WScript.Echo('[]'); WScript.Quit(1); }
 }
