@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, launcherLabel, launcherOption, codexPermissionModes, isAccountLauncher, autoAgent, autoRank, autoMultipliers, autoMultiplier, planMultiplier, planLabel, autoLauncherKey, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, launcherLabel, launcherOption, accountAddresses, noAccountLabel, codexPermissionModes, isAccountLauncher, autoAgent, autoRank, autoMultipliers, autoMultiplier, planMultiplier, planLabel, autoLauncherKey, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 import { evaluateNative } from './source-harness.js';
@@ -14,7 +14,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 const tasksMcpFlags = provider => provider === 'codex'
   ? ['-c', 'mcp_servers.herdr_tasks={command="node",args=["/herdr/mods/devkits-tasks/mcp-server.cjs"],env={HERDR_APP_HOME="/herdr"}}']
   : ['--mcp-config', JSON.stringify({ mcpServers: { herdr_tasks: { command: 'node', args: ['/herdr/mods/devkits-tasks/mcp-server.cjs'], env: { HERDR_APP_HOME: '/herdr' } } } })];
-const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {} };
+const renderContext = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {}, spawn() {} };
 
 const agents = [
   { address: 't1', title: '✳ Fix login', space_name: 'api', status: 'working', program: { name: 'Claude Code' } },
@@ -94,7 +94,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'shared-mcp-settings', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'shared-mcp-settings', 'global-rules', 'session-menu', 'start-panel', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
   const usageOwner = await Promise.all(['monitor', 'details'].map(name => readFile(new URL(`../mods/devkits-usage/${name}.js`, import.meta.url), 'utf8')));
@@ -145,7 +145,7 @@ async function viewFor(host) {
   const input = host.InputState || { new: () => ({ text: '', events: {}, value() { return this.text; },
     set_value(value) { assert.equal(rendering, false, 'retained input values must change outside render'); this.text = value; },
     on(name, action) { this.events[name] = action; } }) };
-  host = { run() {}, ensureClaudeStatusLine: async () => {}, TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: false, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, autoAgent, autoRank, autoMultipliers, autoMultiplier, planMultiplier, planLabel, autoLauncherKey, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { run() {}, ensureClaudeStatusLine: async () => {}, TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: false, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, accountAddresses, noAccountLabel, isAccountLauncher, autoAgent, autoRank, autoMultipliers, autoMultiplier, planMultiplier, planLabel, autoLauncherKey, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const originalShared = host.shared, originalSetShared = host.setShared;
   let taskSnapshot;
@@ -905,7 +905,8 @@ test('launcher shows installed agents at content height without a scroll contain
   assert.equal(ui.nodes.get('thread-launcher').height, 'auto');
   assert.ok(!ui.nodes.get('thread-launchers').scrollbar);
   assert.ok(ui.nodes.has('start-account-19'));
-  assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
+  // The + menu only starts sessions; Agent settings lives in the thread ⋯ menu.
+  assert.ok(!ui.nodes.has('manage-launchers-open'));
 });
 test('agent discovery shares pending work, caches empty results, and separates machines', async () => {
   const calls = [];
@@ -967,15 +968,8 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   const cx = { notify() {}, stop_propagation() {}, focus_handle: () => ({ focus() {} }),
     spawn(task) { pending ??= task(cx); }, timer: { every() {} } };
   const view = new View(); view.launchers = choices; view.render(renderContext);
-  assert.equal(ui.nodes.get('thread-launcher').children.at(-1), ui.nodes.get('manage-launchers-open').element);
-  ui.nodes.get('manage-launchers-open').click({}, cx);
-  assert.deepEqual(closed, ['menu']);
-  assert.equal(overlays[0].kind, 'dialog');
-  assert.equal(overlays[0].width, 1040);
-  assert.equal(overlays[0].height, 0.8);
-  assert.equal(overlays[0].modal, false);
-  assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: 'api' });
-  target = { ...overlays[0].props, overlay: 'manage-dialog' };
+  assert.ok(!ui.nodes.has('manage-launchers-open'));
+  target = { view: 'manage-launchers', space: 'api', page: 'agents', overlay: 'manage-dialog' };
   const dialog = new View(); dialog.init({}, cx); await pending; dialog.render(renderContext);
   assert.equal(ui.nodes.get('show-agent:codex-work').checked, true);
   ui.nodes.get('show-agent:codex-work').change(false, cx);
@@ -993,8 +987,7 @@ test('Manage persists visibility, retains hidden choices, and numbers only visib
   assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'claude');
   commands.length = 0;
   const reopened = new View(); reopened.launchers = choices; reopened.render(renderContext);
-  ui.nodes.get('manage-launchers-open').click({}, cx);
-  target = { ...overlays.at(-1).props, overlay: 'manage-dialog-2' };
+  target = { view: 'manage-launchers', space: 'api', page: 'agents', overlay: 'manage-dialog-2' };
   const reopenedDialog = new View(); reopenedDialog.init({}, cx); await pending; reopenedDialog.render(renderContext);
   assert.equal(ui.nodes.get('show-agent:codex-work').checked, false);
   assert.equal(ui.nodes.get('show-terminal').checked, false);
@@ -1084,13 +1077,13 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
   await settle();
   assert.equal(commands.find(([name]) => name === 'tab.new')[1].argv[0], 'pi');
 });
-test('profile rename blocks duplicate saves, refreshes labels, and returns to Manage', async () => {
-  const ui = fakeElements(), overlays = [], memory = { 'devkits.agent-cache': { old: [] } };
+test('profile rename blocks duplicate saves, refreshes labels, and closes only itself above Settings', async () => {
+  const ui = fakeElements(), overlays = [], closed = [], memory = { 'devkits.agent-cache': { old: [] } };
   let pending, resolve, calls = 0;
   const View = await viewFor({ ...ui, theme: () => ({}),
     props: () => ({ view: 'rename-account', overlay: 'rename', space: 'project', account: { key: 'devkits-codex-work', name: 'Codex · Work' } }),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
-    closeOverlay() {}, openOverlay: value => overlays.push(value),
+    closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value),
     renameAccountProfile: async (key, name) => {
       calls++; assert.equal(key, 'devkits-codex-work'); assert.equal(name, '工作');
       await new Promise(done => { resolve = done; });
@@ -1098,11 +1091,11 @@ test('profile rename blocks duplicate saves, refreshes labels, and returns to Ma
   const view = new View(); view.renameInput = { value: () => '工作' };
   const cx = { notify() {}, spawn: fn => { pending = fn(cx); } };
   view.saveAccountName(cx); view.saveAccountName(cx); view.finishRename();
-  assert.equal(calls, 1); assert.equal(overlays.length, 0);
+  assert.equal(calls, 1); assert.deepEqual(closed, []);
   resolve(); await pending;
   assert.deepEqual(memory['devkits.agent-cache'], {});
-  assert.equal(overlays[0].props.view, 'manage-launchers');
-  assert.equal(overlays[0].props.space, 'project');
+  assert.equal(memory['devkits.profile-revision'], 1);
+  assert.deepEqual(closed, ['rename']); assert.equal(overlays.length, 0);
 });
 
 test('account removal requires confirmation, blocks duplicate requests, and cleans only the removed preferences', async () => {
@@ -1118,8 +1111,8 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
     openOverlay: value => overlays.push(value), closeOverlay: id => closed.push(id),
     removeAccountProfile: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
   const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
-  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
-  view.manageIndex = 0; view.render(renderContext);
+  const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } }); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
+  view.manageIndex = 0; view.settingsPage = 'accounts'; view.selectedAccount = 'devkits-codex-work'; view.render(renderContext);
   assert.ok(!ui.nodes.has('account-menu-codex'));
   ui.nodes.get('account-actions-devkits-codex-work-remove').click({}, renderContext);
   assert.deepEqual(removed, []);
@@ -1127,8 +1120,9 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   target = { ...overlays[0].props, overlay: 'confirm' };
   const prompt = new View(); prompt.render(renderContext);
   ui.nodes.get('cancel-remove-account').click();
-  assert.deepEqual(removed, []); assert.equal(overlays.at(-1).props.view, 'manage-launchers');
-  assert.equal(overlays.at(-1).modal, false);
+  // The confirmation stacks above Settings and closes only itself.
+  assert.equal(overlays[0].modal, true); assert.deepEqual(closed, ['confirm']);
+  assert.deepEqual(removed, []); assert.equal(overlays.length, 1);
   ui.nodes.get('confirm-remove-account').click({}, cx); prompt.render(renderContext);
   ui.nodes.get('confirm-remove-account').click({}, cx);
   ui.nodes.get('cancel-remove-account').click();
@@ -1140,7 +1134,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
   assert.deepEqual(memory['devkits.codex-permissions'], { 'devkits-codex-personal': 'read-only' });
   assert.deepEqual(memory['devkits.profile-sessions'], { 'devkits-codex-personal': { model: 'b' } });
   assert.equal(memory['devkits.profile-revision'], 1);
-  assert.equal(overlays.at(-1).props.view, 'manage-launchers');
+  assert.deepEqual(closed, ['confirm', 'confirm']); assert.equal(overlays.length, 1);
 });
 test('profile permissions apply independently from Settings to the selected account', async () => {
   const ui = fakeElements(), memory = {}, overlays = [], commands = [], closed = [];
@@ -1158,10 +1152,12 @@ test('profile permissions apply independently from Settings to the selected acco
   const pick = (section, key) => { ui.nodes.get(`defaults-${section}-select`).openChange(true, cx); view.render(cx);
     ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
   settings('agents');
-  assert.ok(['agents', 'claude', 'codex', 'rules'].every(page => ui.nodes.has(`settings-page-${page}`)));
+  assert.ok(['accounts', 'agents', 'agent-profiles', 'rules', 'usage'].every(page => ui.nodes.has(`settings-page-${page}`)));
+  assert.ok(!ui.nodes.has('settings-page-models'));
   assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('defaults-') || id.startsWith('permissions-')));
+  // The former Codex page opens Accounts with the default Codex account's defaults.
   settings('codex');
-  assert.ok(ui.nodes.has('defaults-profile'));
+  assert.ok(ui.nodes.has('account-defaults-panel-codex'));
   pick('permissions', 'read-only');
   assert.deepEqual(memory['devkits.codex-permissions'], { codex: 'read-only' });
   assert.ok(ui.textOf('defaults-permissions').includes('Read only'));
@@ -1177,8 +1173,8 @@ test('profile permissions apply independently from Settings to the selected acco
   settings('codex');
   pick('permissions', 'default');
   assert.deepEqual(memory['devkits.codex-permissions'], {});
-  ui.nodes.get('settings-page-claude').click({}, cx); view.render(cx);
-  assert.ok(ui.nodes.has('defaults-profile'));
+  ui.nodes.get('account-claude').click({}, cx); ui.nodes.clear(); view.render(cx);
+  assert.ok(ui.nodes.has('account-defaults-panel-claude') && !ui.nodes.has('account-defaults-panel-codex'));
   ui.nodes.get('manage-launchers-done').click();
   assert.equal(closed.at(-1), 'settings');
 });
@@ -1223,14 +1219,19 @@ test('new local Codex sessions receive shared MCP settings and remote sessions d
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv, ['codex']);
 });
 
-test('account actions are direct buttons and sharing has only the base Codex MCP entry', async () => {
+test('account actions are direct buttons on Accounts and Shared MCP sits once beside Rules', async () => {
   const ui = fakeElements(), overlays = [];
   const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'manage' }),
     spaces: () => [], theme: () => ({}), closeOverlay() {}, openOverlay: value => overlays.push(value) });
-  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] },
-    { key: 'devkits-codex-work', name: 'Work', run: ['codex'] }];
-  view.manageIndex = 0; view.render(renderContext);
+  const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } });
+  view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] }, { key: 'devkits-codex-work', name: 'Work', run: ['codex'] }];
+  view.settingsPage = 'rules'; view.render(renderContext);
   assert.ok(ui.nodes.has('shared-local-mcp'));
+  view.settingsPage = 'accounts'; ui.nodes.clear(); view.render(renderContext);
+  assert.ok(!ui.nodes.has('shared-local-mcp'));
+  // The default account has no Rename or Remove; selecting an added account shows them beside its details.
+  assert.ok(!ui.nodes.has('account-actions-codex-rename'));
+  ui.nodes.get('account-devkits-codex-work').click({}, renderContext); ui.nodes.clear(); view.render(renderContext);
   assert.ok(ui.nodes.has('account-actions-devkits-codex-work-rename'));
   assert.ok(ui.nodes.has('account-actions-devkits-codex-work-remove'));
   assert.ok(!ui.nodes.has('account-menu-devkits-codex-work'));
@@ -1263,15 +1264,14 @@ test('failed account removal stays in the confirmation dialog and preserves pref
   assert.equal(ui.nodes.get('confirm-remove-account').disabled, false);
   assert.ok(ui.nodes.has('remove-account-error'));
 });
-test('hiding every agent keeps Settings available so the menu can be restored', async () => {
+test('hiding every agent says where Agent settings can restore the menu', async () => {
   const ui = fakeElements();
   const View = await viewFor({ ...ui, props: () => ({ view: 'launcher' }), spaces: () => [], theme: () => ({}),
     shared: () => ['terminal', 'agent:codex'] });
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', installed: true }]; view.render();
   assert.ok(!ui.nodes.has('new-terminal'));
   assert.ok(!ui.nodes.has('start-codex'));
-  assert.ok(ui.nodes.has('manage-launchers-open'));
-  assert.ok(ui.texts.includes('All agents are hidden. Use Settings to show them.'));
+  assert.ok(ui.texts.includes('All agents are hidden. Show them in Agent settings → Add session.'));
 });
 test('usage follows its independent profile selection and launcher order, shows actual quota windows, always has meters, and opens details', async () => {
   const ui = fakeElements(), overlays = [];
@@ -1480,10 +1480,10 @@ test('account removal stays reflected in Settings and the cache while native dis
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     knownAgents: async () => [base, removed, personal, custom],
     readTextFile: async () => JSON.stringify({ programs: { [personal.key]: { name: personal.name } } }) });
-  const view = new View();
+  const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } }); 
   view.launchers = await view.cachedAgents(null);
-  view.render(renderContext);
-  assert.ok(!ui.nodes.has(`account-actions-${removed.key}-remove`));
+  view.settingsPage = 'accounts'; view.selectedAccount = personal.key; view.render(renderContext);
+  assert.ok(!ui.nodes.has(`account-${removed.key}`));
   assert.ok(ui.nodes.has(`account-actions-${personal.key}-remove`));
   assert.deepEqual(view.launchers.map(agent => agent.key), [base.key, personal.key, custom.key]);
   assert.deepEqual(memory['devkits.agent-cache'].null.map(agent => agent.key), [base.key, personal.key, custom.key]);
@@ -1528,7 +1528,7 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
       const keys = JSON.parse(args[1][1]).map(account => account.key);
       calls.push(keys);
       return failed ? { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, error: 'Rate limited' }))) }
-        : { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, plan: null, windows: [{ usedPercent: 42 }], fetchedAt: 1 }))) };
+        : { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, plan: null, email: null, windows: [{ usedPercent: 42 }], fetchedAt: 1 }))) };
     } });
   const cx = { spawn(task) { pending = task(cx); }, notify() {} };
   const view = new View();
@@ -1563,7 +1563,7 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
 test('the Usage master switch hides the section and pauses reads while preserving account choices', async () => {
   const ui = fakeElements(), reads = [], tasks = [];
   const memory = { 'devkits.hidden-usage-profiles': ['work'], 'devkits.launcher-order': ['agent:work', 'agent:codex'],
-    'devkits.usage-cache': { codex: { key: 'codex', checkedAt: Date.now(), plan: null, windows: [] } } };
+    'devkits.usage-cache': { codex: { key: 'codex', checkedAt: Date.now(), plan: null, email: null, windows: [] } } };
   const View = await viewFor({ ...ui, spaces: () => projects,
     props: () => ({ view: 'ui-settings', page: 'usage' }), theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
@@ -1655,42 +1655,109 @@ test('sidebar menus align with the right edge of each button, 8px below its row,
   }
   assert.equal(overlays[0].props.view, 'project-menu');
 });
-test('only the base Codex row offers Add account, including when Codex is hidden from the launcher', async () => {
+test('Accounts offers Add account once per provider, including when Codex is hidden from the launcher', async () => {
   const ui = fakeElements(), overlays = [], closed = [];
   const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
   const View = await viewFor({ ...ui, props: () => target, spaces: () => projects,
     theme: () => ({}), shared: key => key === 'devkits.hidden-launchers' ? ['agent:codex'] : undefined,
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
-  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
-  view.manageIndex = 0; view.render(renderContext);
-  assert.ok(ui.textOf('manage-agent:codex').includes('Add account'));
-  assert.ok(!ui.textOf('manage-agent:devkits-codex-work').includes('Add account'));
+  const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } }); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
+  view.manageIndex = 0; view.settingsPage = 'accounts'; view.render(renderContext);
+  assert.ok(ui.nodes.has('add-codex-account'));
+  assert.ok(!ui.textOf('account-devkits-codex-work').includes('Add account'));
+  assert.ok(!ui.nodes.has('add-claude-account'));
   ui.nodes.get('add-codex-account').click();
-  assert.deepEqual(closed, ['manage-dialog']);
-  assert.equal(overlays[0].props.view, 'account-login');
-  assert.equal(overlays[0].props.provider, 'codex');
+  // Sign-in stacks above Settings instead of closing and reopening it.
+  assert.deepEqual(closed, []);
+  assert.deepEqual(overlays[0].props, { view: 'account-login', provider: 'codex' });
   assert.equal(overlays[0].modal, true);
-  assert.deepEqual(overlays[0].props.returnTo, { view: 'manage-launchers', space: 'api' });
   ui.nodes.clear(); view.launcher({});
   assert.ok(!ui.nodes.has('add-codex-account'));
 });
-test('the base Claude row offers Add account and Claude accounts join Your accounts', async () => {
+test('Settings stays open under account dialogs, reloads on profile-revision and selects a newly added account', async () => {
+  const ui = fakeElements(), memory = {}, pending = [];
+  const work = { key: 'devkits-codex-work', name: 'Codex · Work', installed: true, run: ['codex'] };
+  let found = [{ key: 'codex', name: 'Codex', installed: true, run: ['codex'] }];
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'settings', page: 'accounts' }), spaces: () => [],
+    theme: () => ({}), shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    knownAgents: async () => found, readTextFile: async () => JSON.stringify({ programs: { [work.key]: { name: work.name } } }) });
+  const view = new View(), cx = { ...renderContext, spawn: fn => pending.push(fn(cx)), timer: { every() {} } };
+  view.initSessionMenu(cx); await Promise.all(pending.splice(0));
+  view.render(cx); assert.equal(view.selectedAccount, undefined);
+  found = [...found, work]; memory['devkits.agent-cache'] = {}; memory['devkits.profile-revision'] = 1;
+  view.render(cx); await Promise.all(pending.splice(0));
+  assert.equal(view.selectedAccount, work.key);
+  ui.nodes.clear(); view.render(cx);
+  assert.ok(ui.nodes.has(`account-detail-${work.key}`));
+});
+
+test('Accounts reads the address of an account hidden from Usage once, through the usage reader', async () => {
+  const ui = fakeElements(), calls = [], pending = [];
+  const memory = { 'devkits.usage.snapshot': { contexts: { null: { usage: [{ key: 'devkits-codex-work', email: 'work@example.com' }] } } } };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'settings', page: 'accounts' }), spaces: () => [],
+    theme: () => ({}), shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, appHome: () => '/herdr',
+    exec: async (command, args) => { calls.push([command, args[0], JSON.parse(args[1]).map(account => account.key)]);
+      return { code: 0, stdout: JSON.stringify([{ key: 'codex', email: 'me@example.com', plan: 'pro' }]) }; } });
+  const view = new View(), cx = { ...renderContext, spawn: fn => pending.push(fn(cx)), timer: { every() {} } };
+  view.initSessionMenu({ ...cx, spawn() {} });
+  view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] }, { key: 'devkits-codex-work', name: 'Work', run: ['codex'] }];
+  view.render(cx); await Promise.all(pending.splice(0)); view.render(cx); await Promise.all(pending.splice(0));
+  assert.deepEqual(calls, [['node', '/herdr/mods/devkits-usage/usage-reader.js', ['codex']]]);
+  ui.nodes.clear(); view.render(cx);
+  // The Default account is named by its address; its detail line keeps only the plan.
+  assert.ok(ui.textOf('account-list-name-codex').includes('me@example.com'));
+  assert.ok(ui.textOf('account-email-codex').includes('Pro'));
+});
+
+test('a Default account is named by its shared address in Add session, Settings and the thread header', async () => {
+  const ui = fakeElements();
+  const memory = { 'devkits.account-identities': { codex: { email: 'me@example.com', plan: 'pro' } },
+    'devkits.agent-cache': { null: [{ key: 'codex', name: 'Codex', installed: true, run: ['codex'] }, { key: 'claude', name: 'Claude', installed: true, run: ['claude'] }] },
+    'devkits.thread-profiles': { 'tab-0': 'codex' } };
+  let target = { view: 'launcher', space: 'api', overlay: 'menu' };
+  const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}), keys: () => [],
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    agents: () => [{ address: 't1', space: projects[0].id, tab: 'tab-0', app: 'codex', program: {} }],
+    panes: () => [{ pane: 'p0', tab: 'tab-0', title: 'New thread' }] });
+  const view = new View(); view.launchers = memory['devkits.agent-cache'].null; view.render(renderContext);
+  assert.ok(ui.textOf('start-codex').includes('me@example.com') && !ui.textOf('start-codex').includes('Default account'));
+  assert.ok(ui.textOf('start-claude').includes('No account'));
+  target = { view: 'manage-launchers', overlay: 'settings', page: 'accounts' }; ui.nodes.clear();
+  const settings = new View(); settings.initSessionMenu({ ...renderContext, timer: { every() {} } });
+  settings.launchers = memory['devkits.agent-cache'].null; settings.selectedAccount = 'codex'; settings.render(renderContext);
+  assert.ok(ui.textOf('account-list-name-codex').includes('me@example.com'));
+  assert.ok(ui.textOf('account-list-name-claude').includes('No account'));
+  assert.ok(ui.textOf('account-email-codex').includes('Pro'));
+  for (const page of ['agents', 'usage']) {
+    settings.settingsPage = page; ui.nodes.clear(); settings.render(renderContext);
+    const row = page === 'agents' ? 'manage-agent:' : 'usage-profile-';
+    assert.ok(ui.textOf(`${row}codex`).includes('me@example.com') && ui.textOf(`${row}claude`).includes('No account'));
+  }
+  target = { pane: 'p0' }; ui.nodes.clear(); const before = ui.texts.length;
+  new View().paneHeader({}, renderContext);
+  const header = ui.texts.slice(before);
+  assert.ok(header.includes('me@example.com') && !header.includes('Default account'));
+});
+
+test('the Claude section offers Add account and lists Claude accounts after the default', async () => {
   const ui = fakeElements(), overlays = [], memory = {};
   const target = { view: 'manage-launchers', space: 'api', overlay: 'manage-dialog' };
   const View = await viewFor({ ...ui, props: () => target, spaces: () => projects, theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     closeOverlay() {}, openOverlay: value => overlays.push(value) });
-  const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
-  view.manageIndex = 0; view.render(renderContext);
-  assert.ok(ui.textOf('manage-agent:claude').includes('Add account'));
-  assert.ok(ui.nodes.has('manage-section-2'));
+  const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } }); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
+  view.manageIndex = 0; view.settingsPage = 'accounts'; view.render(renderContext);
+  assert.ok(ui.nodes.has('add-claude-account'));
+  assert.ok(ui.nodes.has('account-claude') && ui.nodes.has('account-devkits-claude-work'));
+  assert.ok(!ui.nodes.has('add-codex-account'));
+  ui.nodes.get('account-devkits-claude-work').click({}, renderContext); ui.nodes.clear(); view.render(renderContext);
   assert.ok(ui.nodes.has('account-actions-devkits-claude-work-rename')); assert.ok(ui.nodes.has('account-actions-devkits-claude-work-remove'));
   assert.ok(!ui.nodes.has('permissions-devkits-claude-work') && !ui.nodes.has('permissions-claude'));
   ui.nodes.get('add-claude-account').click();
   assert.equal(overlays[0].props.view, 'account-login');
   assert.equal(overlays[0].props.provider, 'claude');
 });
-test('each provider page of Settings chooses which of its models and efforts are offered', async () => {
+test('the selected account shows its provider\'s shared Models card choosing the models and efforts offered', async () => {
   const ui = fakeElements(), memory = {};
   const launchers = [{ key: 'claude', name: 'Claude', run: ['claude'] }, { key: 'codex', name: 'Codex', run: ['codex'] }, { key: 'aider', name: 'Aider', run: ['aider'] }];
   let target = {};
@@ -1703,10 +1770,12 @@ test('each provider page of Settings chooses which of its models and efforts are
     ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
   settings('agents');
   assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('session-')));
-  settings('claude');
-  assert.ok(ui.texts.includes('MODELS AND EFFORT'));
+  // An old Models link opens Accounts; the first account is selected with its provider's card beside its defaults.
+  settings('models');
+  assert.equal(view.settingsPage, 'accounts');
+  assert.ok(ui.texts.includes('MODELS IN MENUS · ALL CLAUDE ACCOUNTS'));
   assert.ok(ui.nodes.has('session-claude-models-haiku') && ui.nodes.has('session-claude-efforts-max'));
-  assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('session-codex-')));
+  assert.ok(!ui.nodes.has('session-options-codex'));
   ui.nodes.get('session-claude-models-haiku').change(false, cx);
   assert.deepEqual(memory['devkits.session-options'], { claude: { models: ['haiku'] } });
   ui.nodes.get('session-claude-models-haiku').change(true, cx);
@@ -1717,7 +1786,7 @@ test('each provider page of Settings chooses which of its models and efforts are
   assert.deepEqual(memory['devkits.session-options'].claude.order, ['sonnet', 'fable', 'opus', 'haiku']);
   assert.equal(view.modelDrag, null);
   settings('codex');
-  view.codexModelList = [{ key: 'gpt-6-luna', label: 'GPT-6 Luna', efforts: ['low', 'high'] }]; view.render(cx);
+  view.codexModelList = [{ key: 'gpt-6-luna', label: 'GPT-6 Luna', efforts: ['low', 'high'] }]; ui.nodes.clear(); view.render(cx);
   assert.ok(ui.nodes.has('session-codex-models-gpt-6-luna') && !ui.nodes.has('session-claude-models-haiku'));
   ui.nodes.get('session-codex-efforts-low').change(false, cx);
   assert.deepEqual(memory['devkits.session-options'].codex, { efforts: ['low'] });
@@ -1750,7 +1819,7 @@ test('model and effort defaults are independent per profile and explicit session
   assert.deepEqual(commands.at(-1)[1].argv, [...rulesArgv(claude, ['claude', '--model', 'sonnet']), ...tasksMcpFlags('claude')]);
   memory['devkits.profile-sessions'][codex.key] = { model: 'a', effort: 'high' };
   memory['devkits.session-options'] = { codex: { models: ['a'] } };
-  settings('codex');
+  settings('accounts'); ui.nodes.get(`account-${codex.key}`).click({}, cx);
   view.codexModelList = [{ key: 'a', label: 'A', efforts: ['high'] }, { key: 'b', label: 'B', efforts: ['low'] }]; view.render(cx);
   // A model hidden below is no longer offered, and the default falls back to Default.
   assert.ok(ui.textOf('defaults-model').includes('Default'));
@@ -1778,8 +1847,7 @@ test('Fast is a checkbox saved independently for each profile and used by task s
   assert.ok(ui.nodes.has('defaults-fast')); assert.ok(!ui.nodes.has('defaults-speed-select'));
   ui.nodes.get('defaults-fast').change(true, cx); view.render(cx);
   assert.equal(memory['devkits.profile-sessions'].codex.serviceTier, 'fast');
-  ui.nodes.get('defaults-profile-select').openChange(true, cx); view.render(cx);
-  ui.nodes.get('defaults-profile-option-devkits-codex-work').click({}, cx); view.render(cx);
+  ui.nodes.get('account-devkits-codex-work').click({}, cx); view.render(cx);
   assert.equal(ui.nodes.get('defaults-fast').checked, false);
   ui.nodes.get('defaults-model-select').openChange(true, cx); view.render(cx);
   // Model and effort edits never discard this profile's Fast checkbox.
@@ -1896,47 +1964,28 @@ test('profile editing retains its saved account when unchecked in Usage and save
   assert.deepEqual(memory['devkits.hidden-usage-profiles'], ['devkits-codex-work']);
 });
 
-test('profile instructions are optional retained drafts, persist across account changes and clear on Save', async () => {
-  const key = 'devkits-preset-review', instructions = 'Review only.\nUse "繁體中文" and `code`.';
+test('the profile editor has no instructions field and saving keeps instructions stored before the pause', async () => {
+  const key = 'devkits-preset-review', instructions = 'Review only.';
   const h = await profileTableUi({ 'devkits.agent-configs': [{ key, name: 'Review', profileKey: 'codex', instructions }] });
   h.mount('agent-profile-editor', key);
-  assert.equal(h.view.configInstructions.value(), instructions);
-  const state = h.view.configInstructions;
-  state.set_value('Unsaved'); h.pick('profile', 'claude'); h.render();
-  assert.equal(h.view.configInstructions, state);
-  assert.equal(state.value(), 'Unsaved');
-  assert.equal(h.memory['devkits.agent-configs'][0].instructions, instructions);
-  h.ui.nodes.get('cancel-agent-profile').click();
-  h.mount('agent-profile-editor', key);
-  assert.equal(h.view.configInstructions.value(), instructions);
-  h.view.configInstructions.set_value('  Updated\nInstructions  ');
-  h.view.saveAgentProfile(h.cx);
-  assert.equal(h.memory['devkits.agent-configs'][0].instructions, 'Updated\nInstructions');
-  h.mount('agent-profile-editor', key);
-  h.view.configInstructions.set_value('  \n'); h.view.saveAgentProfile(h.cx);
-  assert.equal(h.memory['devkits.agent-configs'][0].instructions, undefined);
-  h.mount('agent-profile-editor'); h.name('Writer'); h.pick('profile', 'claude');
-  h.view.configInstructions.set_value(instructions); h.view.saveAgentProfile(h.cx);
-  assert.equal(h.memory['devkits.agent-configs'][1].instructions, instructions);
+  assert.ok(!h.ui.nodes.has('agent-profile-instructions'));
+  assert.ok(!h.ui.texts.includes('Additional system instructions'));
+  h.name('Reviewer'); h.view.saveAgentProfile(h.cx);
+  assert.deepEqual(h.memory['devkits.agent-configs'][0], { key, profileKey: 'codex', name: 'Reviewer', instructions });
+  h.mount('agent-profile-editor'); h.name('Writer'); h.pick('profile', 'claude'); h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][1].instructions, undefined);
 });
 
-test('new profiles offer only checked Usage accounts in the same saved order and revalidate on Create', async () => {
-  const h = await profileTableUi({ 'devkits.hidden-usage-profiles': ['codex'],
+test('new profiles offer every installed account in saved order, independent of Usage', async () => {
+  const h = await profileTableUi({ 'devkits.hidden-usage-profiles': ['codex', 'devkits-codex-work'],
     'devkits.launcher-order': ['agent:devkits-codex-work', 'agent:claude', 'agent:codex'] });
   const { ui, memory, cx } = h;
   h.mount('agent-profile-editor'); h.name('Review');
-  assert.deepEqual(h.view.profileEditorAccounts().map(account => account.key), ['claude', 'devkits-codex-work']);
+  assert.deepEqual(h.view.profileEditorAccounts().map(account => account.key), ['claude', 'codex', 'devkits-codex-work']);
   ui.nodes.get('defaults-profile-select').openChange(true, cx); h.render();
-  assert.ok(!ui.nodes.has('defaults-profile-option-codex'));
-  assert.ok(ui.nodes.has('defaults-profile-option-claude') && ui.nodes.has('defaults-profile-option-devkits-codex-work'));
   const options = [...ui.nodes.keys()].filter(key => key.startsWith('defaults-profile-option-'));
-  assert.deepEqual(options, ['defaults-profile-option-none', 'defaults-profile-option-claude', 'defaults-profile-option-devkits-codex-work']);
+  assert.deepEqual(options, ['defaults-profile-option-none', 'defaults-profile-option-claude', 'defaults-profile-option-codex', 'defaults-profile-option-devkits-codex-work']);
   h.pick('profile', 'devkits-codex-work');
-  memory['devkits.hidden-usage-profiles'].push('devkits-codex-work');
-  h.view.saveAgentProfile(cx);
-  assert.match(h.view.profileError, /checked in Usage/);
-  assert.equal(memory['devkits.agent-configs'], undefined);
-  memory['devkits.hidden-usage-profiles'] = ['codex']; h.render();
   ui.nodes.get('save-agent-profile').click({}, cx);
   assert.equal(memory['devkits.agent-configs'][0].profileKey, 'devkits-codex-work');
 });
@@ -1947,27 +1996,30 @@ test('profile and Settings account menus share provider-free labels and full-col
   h.mount('agent-profile-editor');
   const { ui, cx } = h;
   ui.nodes.get('defaults-profile-select').openChange(true, cx); h.render();
-  for (const key of ['codex', 'claude']) assert.ok(ui.textOf(`defaults-profile-option-${key}`).includes('Default account'));
+  for (const key of ['codex', 'claude']) assert.ok(ui.textOf(`defaults-profile-option-${key}`).includes('No account'));
   assert.ok(ui.textOf('defaults-profile-option-devkits-codex-work').includes('Work'));
   const menu = ui.textOf('defaults-profile-options').join(' ');
   assert.ok(!/codex|claude/i.test(menu));
   assert.ok(ui.assets.includes('icons/codex.svg') && ui.assets.includes('icons/claude.svg'));
   h.pick('profile', 'codex');
-  assert.ok(ui.textOf('defaults-profile').includes('Default account'));
-  h.mount(); h.view.settingsPage = 'codex'; ui.nodes.clear(); h.render();
-  assert.ok(ui.textOf('defaults-profile-option-codex').includes('Default account'));
-  assert.ok(ui.textOf('defaults-profile-option-devkits-codex-work').includes('Work'));
+  assert.ok(ui.textOf('defaults-profile').includes('No account'));
+  h.mount(); h.view.settingsPage = 'accounts'; ui.nodes.clear(); h.render();
+  // Without a known address, a Default account reads No account in every list.
+  assert.ok(ui.textOf('account-codex').includes('No account'));
+  assert.ok(ui.textOf('account-devkits-codex-work').includes('Work'));
   assert.equal(h.accounts[0].name, 'CODEX');
 });
 
-test('Add is disabled when Usage has no checked account and a stale click cannot open the editor', async () => {
+test('Add ignores Usage and is disabled only without an installed account; a stale click cannot open the editor', async () => {
   const h = await profileTableUi({ 'devkits.hidden-usage-profiles': ['codex', 'claude', 'devkits-codex-work'] });
   h.mount();
+  assert.equal(h.ui.nodes.get('add-agent-configuration').disabled, false);
+  h.view.launchers = []; h.ui.nodes.clear(); h.render();
   assert.equal(h.ui.nodes.get('add-agent-configuration').disabled, true);
   h.ui.nodes.get('add-agent-configuration').click({}, h.cx);
   assert.deepEqual(h.overlays, []);
   assert.equal(h.memory['devkits.agent-configs'], undefined);
-  assert.ok(h.ui.texts.some(text => text.includes('Check an account in Settings → Usage')));
+  assert.ok(h.ui.texts.some(text => text.includes('Install Claude Code or Codex CLI')));
 });
 
 test('optional Agent profiles are a table separate from native settings, with no upfront account choice or Default row', async () => {
@@ -1978,19 +2030,32 @@ test('optional Agent profiles are a table separate from native settings, with no
   assert.ok(!ui.nodes.has('defaults-profile-select'));
   assert.ok(!ui.nodes.has('defaults-model-select'));
   const pageOrder = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.equal(pageOrder.at(-1), 'settings-page-agent-profiles');
+  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules', 'settings-page-usage']);
   const key = 'devkits-preset-one';
   memory['devkits.agent-configs'] = [{ key, name: 'Review', profileKey: 'claude' }]; h.render();
   assert.ok(!ui.textOf('agent-profiles-table').includes('Default agent'));
+  // Profiles join Add session's one visibility and order list.
   h.view.settingsPage = 'agents'; ui.nodes.clear(); h.render();
-  assert.ok(!ui.nodes.has(`manage-agent:${key}`));
-  h.view.settingsPage = 'claude'; ui.nodes.clear(); h.render();
+  assert.ok(ui.nodes.has(`manage-agent:${key}`) && ui.nodes.has('manage-section-3'));
+  h.view.settingsPage = 'accounts'; h.view.selectedAccount = 'claude'; ui.nodes.clear(); h.render();
   assert.ok(ui.nodes.has('defaults-model-select'));
   assert.ok(!ui.nodes.has('agent-profiles-table') && !ui.nodes.has('add-agent-configuration'));
   h.mode('launcher');
   const rows = ui.nodes.get('thread-launchers').children;
   assert.ok(rows.indexOf(ui.nodes.get('start-claude').element) < rows.indexOf(ui.nodes.get('launcher-section-3').element));
   assert.ok(rows.indexOf(ui.nodes.get('launcher-section-3').element) < rows.indexOf(ui.nodes.get(`start-${key}`).element));
+});
+
+test('Usage keeps the Auto table as a one-row empty box until an added account can join it', async () => {
+  const h = await profileTableUi(), { ui, memory } = h;
+  h.mount(); h.view.launchers = h.accounts.filter(agent => agent.key !== 'devkits-codex-work');
+  h.view.settingsPage = 'usage'; ui.nodes.clear(); h.render();
+  assert.ok(ui.nodes.has('auto-account-rules') && ui.nodes.has('auto-account-empty'));
+  assert.ok(ui.texts.includes('No added accounts.'));
+  assert.ok(!ui.nodes.has('auto-open-accounts'));
+  h.view.launchers = h.accounts; memory['devkits.hidden-usage-profiles'] = [];
+  ui.nodes.clear(); h.render();
+  assert.ok(!ui.nodes.has('auto-account-empty') && ui.nodes.has('auto-account-devkits-codex-work'));
 });
 
 test('Add and Edit stack over Settings; Cancel, Escape and Save close only the editor', async () => {
@@ -2020,19 +2085,20 @@ test('Add and Edit stack over Settings; Cancel, Escape and Save close only the e
   assert.equal(h.memory['devkits.agent-configs'][0].name, 'Updated');
 });
 
-test('legacy hidden custom profiles become available while native visibility and Usage choices stay unchanged', async () => {
-  const key = 'devkits-preset-one', memory = { 'devkits.agent-configs': [{ key, name: 'Review', profileKey: 'claude' }] };
+test('legacy hidden custom profiles become available once; afterwards profiles hide like other launchers', async () => {
+  const key = 'devkits-preset-one', memory = { 'devkits.agent-configs': [{ key, name: 'Review', profileKey: 'claude' }],
+    'devkits.hidden-launchers': ['agent:codex', `agent:${key}`], 'devkits.hidden-usage-profiles': ['claude'] };
   const h = await profileTableUi(memory); h.mount();
-  memory['devkits.hidden-launchers'] = ['agent:codex', `agent:${key}`];
-  memory['devkits.hidden-usage-profiles'] = ['claude'];
+  assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:codex']);
+  assert.deepEqual(memory['devkits.hidden-usage-profiles'], ['claude']);
   const assignees = h.view.taskAssignees(projects[0]);
   assert.ok(assignees.some(agent => agent.key === key));
   assert.ok(!assignees.some(agent => agent.key === 'codex'));
-  assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:codex']);
-  assert.deepEqual(memory['devkits.hidden-usage-profiles'], ['claude']);
-  memory['devkits.hidden-launchers'] = ['agent:codex', `agent:${key}`];
+  h.view.settingsPage = 'agents'; h.ui.nodes.clear(); h.render();
+  h.ui.nodes.get(`show-agent:${key}`).change(false, h.cx);
+  assert.deepEqual(memory['devkits.hidden-launchers'], ['agent:codex', `agent:${key}`]);
   h.mode('launcher');
-  assert.ok(h.ui.nodes.has(`start-${key}`));
+  assert.ok(!h.ui.nodes.has(`start-${key}`));
   assert.ok(!h.ui.nodes.has('start-codex'));
 });
 
@@ -2332,7 +2398,41 @@ test('project menus have no separate Asana entry; Tasks remains available in the
   target = { view: 'status' }; new View().render();
   for (const id of ['open-tasks', 'open-asana', 'open-mantisbt']) assert.ok(ui.nodes.has(id));
 });
-test('empty projects stay empty until an agent is explicitly chosen', async () => {
+test('with no project, Welcome opens a folder, lists this computer\'s agents and opens agent settings', async () => {
+  const ui = fakeElements(), overlays = [], memory = { 'devkits.agent-cache': { null: [
+    { key: 'claude', name: 'Claude', installed: true, run: ['claude'] },
+    { key: 'devkits-claude-work', name: 'Claude · Work', installed: true, run: ['claude'] }] } };
+  const View = await viewFor({ ...ui, spaces: () => [], theme: () => ({}), shared: key => memory[key],
+    setShared: (key, value) => { memory[key] = value; }, openOverlay: value => overlays.push(value), closeOverlay() {} });
+  const view = new View();
+  view.welcomeView({}, { spawn() { assert.fail('cached agents need no discovery'); }, notify() {} });
+  assert.ok(ui.nodes.has('welcome-open-folder'));
+  assert.ok(ui.textOf('welcome-agent-claude').includes('Ready'));
+  assert.ok(ui.textOf('welcome-agent-codex').includes('Not installed'));
+  assert.ok(ui.texts.includes('npm install -g @openai/codex') && ui.texts.includes('1 account'));
+  assert.ok(ui.nodes.has('welcome-recheck-agents'));
+  ui.nodes.get('welcome-agent-settings').click({}, renderContext);
+  assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: null, page: 'accounts' });
+});
+
+test('a project start list shows Add session\'s visible launchers and starts only the chosen one', async () => {
+  const ui = fakeElements(), memory = { 'devkits.hidden-launchers': ['agent:claude'], 'devkits.agent-cache': { null: [
+    { key: 'codex', name: 'Codex', installed: true, run: ['codex'] }, { key: 'claude', name: 'Claude', installed: true, run: ['claude'] }] } };
+  const View = await viewFor({ ...ui, spaces: () => [], theme: () => ({}), keys: () => [], shared: key => memory[key],
+    setShared: (key, value) => { memory[key] = value; } });
+  const view = new View(), started = [];
+  view.startThread = async (agent, target, options) => started.push([agent?.key || 'terminal', target, options]);
+  view.projectStartView({ id: 'api', name: 'api', folder: '/Code/api', active: true }, {}, { spawn() {}, notify() {} });
+  assert.ok(ui.nodes.has('start-panel-terminal') && ui.nodes.has('start-panel-codex'));
+  assert.ok(!ui.nodes.has('start-panel-claude'));
+  assert.deepEqual(started, []);
+  ui.nodes.get('start-panel-codex').click({}, renderContext);
+  ui.nodes.get('start-panel-terminal').click({}, renderContext);
+  assert.deepEqual(started, [['codex', { space: 'api', folder: '/Code/api', projectName: 'api' }, undefined],
+    ['terminal', { space: 'api', folder: '/Code/api', projectName: 'api' }, undefined]]);
+});
+
+test('empty projects offer the start list and launch only when an agent is chosen', async () => {
   const ui = fakeElements();
   const saved = ['/Code/new'];
   let catalog = projectCatalog([], saved, {}, 'project:/Code/new');
@@ -2343,10 +2443,10 @@ test('empty projects stay empty until an agent is explicitly chosen', async () =
     props: () => ({ view: 'project-empty', space: null, folder: '/Code/new', projectName: 'new', overlay: 'popup' }), theme: () => ({}),
     run: (...args) => commands.push(args), openOverlay: value => overlays.push(value), closeOverlay() {} });
   const view = new View();
-  view.render();
-  assert.deepEqual(ui.texts, []);
-  assert.deepEqual(ui.assets, []);
-  assert.equal(ui.nodes.size, 0);
+  view.render({ spawn() {}, notify() {} });
+  assert.ok(ui.nodes.has('project-start') && ui.texts.includes('Start a thread'));
+  assert.ok(ui.nodes.has('project-start-settings'));
+  assert.deepEqual(commands, []);
   view.newThread({});
   assert.deepEqual(commands, []);
   assert.equal(overlays[0].props.space, null);
@@ -2400,6 +2500,14 @@ test('sidebar leaves the project list blank when no workspace is open', async ()
   assert.ok(!ui.texts.includes('Open a project'));
   assert.ok(!ui.texts.includes('Open folder…'));
   assert.ok(!ui.nodes.has('settings'));
+});
+test('closing every project hides a conversation area that native layout reports without a hidden flag', async () => {
+  const commands = [];
+  const View = await viewFor({ ...fakeElements(), spaces: () => [], agents: () => [], theme: () => ({}), setAgentOrder() {},
+    layout: () => ({ id: 'root', children: [{ id: 'workspace-view', type: 'stack', active: 'main', children: [] }] }),
+    run: (...args) => commands.push(args) });
+  const view = new View(); view.init(); view.render();
+  assert.ok(commands.some(([name, args]) => name === 'layout.hide' && args.id === 'workspace-view'));
 });
 test('project menu moves persist and boundary actions leave order unchanged', async () => {
   const ui = fakeElements(), memory = {}, commands = [], closed = [];
@@ -3076,26 +3184,22 @@ test('global rules join Claude and Codex system prompts in local sessions only',
   }
 });
 
-test('new profile sessions append their latest instructions after global rules without changing native accounts or files', async () => {
-  const extra = 'Review "繁體中文".\nKeep `code` and \\paths.';
+test('profile sessions use global rules only while profile instructions are paused, without changing files', async () => {
+  const extra = 'Review only.';
   for (const provider of ['codex', 'claude']) {
-    for (const global of ['Global rules', null, '  \n', new Error('unreadable')]) {
+    for (const global of ['Global rules', null]) {
       const commands = [], key = 'devkits-preset-review';
       const config = { key, profileKey: provider, name: 'Review', instructions: extra };
       const View = await viewFor({ spaces: () => [{ id: 'api', tabs: [] }],
         shared: name => name === 'devkits.agent-configs' ? [config] : undefined,
-        readTextFile: async path => { if (!path.endsWith('/AGENTS.md')) return null; if (global instanceof Error) throw global; return global; },
+        readTextFile: async path => path.endsWith('/AGENTS.md') ? global : null,
         writeTextFile: async () => assert.fail('Launching must not modify rules files'),
         run: (...args) => commands.push(args) });
-      const agent = { key, profileKey: provider, run: [provider], instructions: 'Stale cached value' };
-      await new View().launchThread(agent, { space: 'api', folder: '/Code/api' }, {});
-      const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
-      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra;
-      assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`, ...tasksMcpFlags(provider)]
-        : [provider, '--append-system-prompt', expected, ...tasksMcpFlags(provider)]);
-      commands.length = 0;
-      await new View().launchThread({ key: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
-      assert.ok(!commands.find(([name]) => name === 'tab.new')[1].argv.join(' ').includes(extra));
+      await new View().launchThread({ key, profileKey: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
+      const argv = commands.find(([name]) => name === 'tab.new')[1].argv.join(' ');
+      assert.ok(!argv.includes(extra));
+      // Claude reads global rules from their file; Codex receives their text.
+      assert.equal(argv.includes(provider === 'claude' ? '--append-system-prompt-file' : 'Global rules'), global === 'Global rules');
     }
   }
 });
@@ -3290,14 +3394,11 @@ test('System can enable old hidden preferences and quick visibility retains the 
   assert.equal(memory['devkits.system-display'].sidebar.style, 'compact');
 });
 
-test('agent account settings link to the single Usage display switch', async () => {
-  const ui = fakeElements(), opened = [];
-  const View = await viewFor({ ...ui, openOverlay: spec => opened.push(spec) });
+test('agent Usage settings choose accounts only; the Usage display switch stays in Interface settings', async () => {
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui });
   new View().usageProfilesPage([], {});
-  assert.ok(!ui.nodes.has('usage-visible'));
-  ui.nodes.get('usage-interface-settings').click();
-  assert.equal(opened.at(-1).props.view, 'ui-settings');
-  assert.equal(opened.at(-1).props.page, 'usage');
+  assert.ok(!ui.nodes.has('usage-visible') && !ui.nodes.has('usage-interface-settings'));
 });
 
 test('the header branch opens a read-only list of local and remote branches, newest first', async () => {
@@ -3325,7 +3426,7 @@ test('the header branch opens a read-only list of local and remote branches, new
   assert.equal(ui.nodes.get('branch-local-main').click, undefined);
 });
 
-test('Settings is the one place for the rules: a Rules page with icons beside each page, outside thread actions', async () => {
+test('Settings is the one place for the rules: a Rules & MCP page with icons beside each page, outside thread actions', async () => {
   const ui = fakeElements();
   let target = { view: 'pane', pane: 'p1' }, pending;
   const View = await viewFor({ ...ui, props: () => target, theme: () => ({}),
@@ -3342,11 +3443,11 @@ test('Settings is the one place for the rules: a Rules page with icons beside ea
   view.initSessionMenu(cx); view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
   await pending; view.render(cx);
   assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
-  assert.ok(['agents', 'claude', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
+  assert.ok(['accounts', 'agents', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-agents', 'settings-page-rules', 'settings-page-usage', 'settings-page-claude', 'settings-page-agent-profiles']);
+  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules', 'settings-page-usage']);
   assert.ok(!ui.nodes.has('hardware-settings'), 'System monitoring has its own settings outside agent configuration');
-  assert.ok(['assets/icons/terminal.svg', 'assets/icons/book-open.svg', 'icons/claude.svg'].every(icon => ui.assets.some(asset => asset.endsWith(icon))));
+  assert.ok(['user-round', 'square-plus', 'book-open'].every(icon => ui.assets.some(asset => asset.endsWith(`assets/icons/${icon}.svg`))));
 });
 
 test('new thread shortcut repeats the project agent and falls back for missing or hidden profiles', async () => {
@@ -3593,17 +3694,21 @@ test('archive rechecks live status after asynchronous session discovery', async 
 });
 
 
-test('thread header menu contains only Close and targets the exact empty thread', async () => {
+test('thread header menu offers only Agent settings; closing stays in the sidebar', async () => {
   const ui = fakeElements(), commands = [];
+  const overlays = [];
   const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], props: () => ({ pane: 'p0' }),
-    panes: () => [{ pane: 'p0', tab: 'tab-0', title: 'New thread' }], run: (...args) => commands.push(args) });
+    panes: () => [{ pane: 'p0', tab: 'tab-0', title: 'New thread' }], run: (...args) => commands.push(args),
+    openOverlay: value => overlays.push(value) });
   const view = new View(), cx = { ...renderContext };
   view.paneHeader({}, cx); ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
-  assert.ok(!ui.nodes.has('thread-actions-p0-hide'));
-  assert.ok(!ui.nodes.has('thread-actions-p0-stop'));
-  assert.ok(!ui.nodes.has('thread-actions-p0-archive'));
-  ui.nodes.get('thread-actions-p0-close').click({}, cx);
-  assert.deepEqual(commands, [['tab.close', { id: 'tab-0' }]]);
+  ui.nodes.get('thread-actions-p0-settings').click({}, cx);
+  assert.deepEqual(overlays.at(-1), { mod: 'devkits', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.8,
+    props: { view: 'manage-launchers', space: projects.find(project => project.tabs?.some(tab => tab.id === 'tab-0'))?.id ?? null, page: 'accounts' } });
+  assert.deepEqual(commands, []);
+  ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
+  for (const action of ['hide', 'stop', 'archive', 'close']) assert.ok(!ui.nodes.has(`thread-actions-p0-${action}`));
+  assert.deepEqual(commands, []);
 });
 
 test('pane header creates menu focus handles only during initialization', async () => {
@@ -3641,6 +3746,7 @@ test('a split header menu distinguishes Close terminal from Close thread', async
     run: (...args) => commands.push(args) });
   const view = new View(), cx = { ...renderContext };
   view.paneHeader({}, cx); ui.nodes.get('thread-menu-p-shell').click({}, cx); view.paneHeader({}, cx);
+  assert.ok(!ui.nodes.has('thread-actions-p-shell-settings'));
   ui.nodes.get('thread-actions-p-shell-close').click({}, cx);
   assert.deepEqual(commands, [['pane.close', { pane: 'p-shell' }]]);
 });
@@ -3964,7 +4070,7 @@ async function taskBoardFor(records = {}) {
       on(event, handler) { events.set(event, handler); }, set_auto_grow() {}, focus() {},
       blur() { events.get('blur')?.({}, renderContext); } };
   } };
-  const host = { ...ui, ...model, taskTokenId, appHome: () => '/herdr', folderKey, launcherLabel, launcherOption, configuredAgents, threadTitle, InputState: field, TextareaState: field,
+  const host = { ...ui, ...model, taskTokenId, appHome: () => '/herdr', folderKey, launcherLabel, launcherOption, accountAddresses, noAccountLabel, configuredAgents, threadTitle, InputState: field, TextareaState: field,
     Input: { new: () => ui.element() }, Textarea: { new: () => ui.element() },
     TextView: { markdown: () => ui.element() },
     shared: key => memory[key], setShared: (key, value) => { memory[key] = structuredClone(value); },
