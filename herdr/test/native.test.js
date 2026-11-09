@@ -2516,13 +2516,24 @@ test('with no project, Welcome opens a folder, lists this computer\'s agents and
     { key: 'devkits-claude-work', name: 'Claude · Work', installed: true, run: ['claude'] }] } };
   const View = await viewFor({ ...ui, spaces: () => [], theme: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, openOverlay: value => overlays.push(value), closeOverlay() {} });
-  const view = new View();
-  view.welcomeView({}, { spawn() { assert.fail('cached agents need no discovery'); }, notify() {} });
+  // Use the shell without the Agents provider mixins from the integration fixture.
+  const Shell = Object.getPrototypeOf(View), view = new Shell();
+  const cx = { spawn() { assert.fail('cached agents need no discovery'); }, notify() {} };
+  view.welcomeView({}, cx);
   assert.ok(ui.nodes.has('welcome-open-folder'));
   assert.ok(ui.textOf('welcome-agent-claude').includes('Ready'));
   assert.ok(ui.textOf('welcome-agent-codex').includes('Not installed'));
   assert.ok(ui.texts.includes('npm install -g @openai/codex') && ui.texts.includes('1 account'));
   assert.ok(ui.nodes.has('welcome-recheck-agents'));
+  memory['devkits.account-identities'] = { claude: { email: 'saved@example.com' } };
+  view.welcomeView({}, cx);
+  assert.ok(ui.textOf('welcome-agent-claude').includes('saved@example.com'));
+  memory['devkits.usage.snapshot'] = { contexts: { null: { usage: [{ key: 'claude', email: 'usage@example.com' }] } } };
+  view.welcomeView({}, cx);
+  assert.ok(ui.textOf('welcome-agent-claude').includes('usage@example.com'));
+  memory['devkits.usage.snapshot'].contexts.null.usage[0].email = null;
+  view.welcomeView({}, cx);
+  assert.ok(ui.textOf('welcome-agent-claude').includes('saved@example.com'));
   ui.nodes.get('welcome-agent-settings').click({}, renderContext);
   assert.deepEqual(overlays[0].props, { view: 'manage-launchers', space: null, page: 'accounts' });
 });
