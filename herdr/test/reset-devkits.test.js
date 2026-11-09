@@ -4,6 +4,7 @@ import { evaluateNative } from './source-harness.js';
 
 async function fixture() {
   let target = { overlay: 'confirm' }, projects = [], confirmation = '';
+  let autoClose = true, closeError = null, now = Date.now();
   const nodes = new Map(), calls = [], commands = [], closed = [], queue = [], timers = [];
   const memory = { layout: 'devkits', 'devkits.calendar-events': ['private'], 'other-mod': 'keep' };
   const layout = { id: 'root', type: 'block', content: { mod: 'devkits' } }, source = JSON.stringify(layout);
@@ -31,10 +32,15 @@ async function fixture() {
     closeOverlay: id => closed.push(id), openOverlay: spec => spec, window: () => ({ platform: 'macos' }),
     exec: async (command, args) => {
       calls.push([command, args]);
+      if (command === 'herdr-app' && args[0] === 'do') {
+        if (closeError) return { code: 1, stderr: closeError };
+        if (autoClose) projects = projects.filter(project => project.id !== args[3]);
+        return { code: 0, stdout: '{}' };
+      }
       if (command === 'herdr-app') return { code: 0, stdout: JSON.stringify({ overlays: ['devkits', 'devkits'] }) };
       if (args[1] === 'inspect') return { code: 0, stdout: JSON.stringify({ accounts: 2 }) };
       return clearError ? { code: 1, stderr: clearError } : { code: 0, stdout: JSON.stringify({ sharedKeys: ['devkits.calendar-events'] }) };
-    },
+    }, Date: { now: () => now },
   };
   const { ResetDevkits, openDevkitsReset } = await evaluateNative('../mods/devkits/reset-devkits.js', host, 'ResetDevkits, openDevkitsReset');
   const cx = { focus_handle: () => ({ focus() {} }), notify() {}, stop_propagation() {},
@@ -42,7 +48,8 @@ async function fixture() {
   const drain = async () => { while (queue.length) await Promise.all(queue.splice(0)); };
   return { ResetDevkits, openDevkitsReset, cx, drain, nodes, calls, commands, closed, timers, memory, layout, host, element,
     target: value => { target = value; }, projects: value => { projects = value; }, confirmation: value => { confirmation = value; },
-    fail: value => { clearError = value; } };
+    fail: value => { clearError = value; }, deferClose: () => { autoClose = false; },
+    closeError: value => { closeError = value; }, advance: ms => { now += ms; } };
 }
 
 test('Interface settings exposes the reset under Data without clearing anything on navigation', async () => {
@@ -62,7 +69,7 @@ test('Interface settings exposes the reset under Data without clearing anything 
   assert.deepEqual(h.calls, []);
 });
 
-test('clear is a separate modal; opening, typing, open projects and Cancel never delete data', async () => {
+test('typing DEVKITS enables the button with open projects; opening, typing and Cancel never close or clear anything', async () => {
   const h = await fixture(), view = new h.ResetDevkits();
   assert.deepEqual(h.openDevkitsReset(), { mod: 'devkits', kind: 'dialog', frame: 'none', modal: true,
     width: 620, height: 560, props: { view: 'reset-devkits' } });
@@ -71,11 +78,46 @@ test('clear is a separate modal; opening, typing, open projects and Cancel never
   h.confirmation('devkits'); view.begin(h.cx); await h.drain();
   assert.deepEqual(h.commands, []);
   h.confirmation('DEVKITS'); h.projects([{ id: 'open-project' }]); view.render({});
-  assert.equal(h.nodes.get('reset-devkits-clear').disabled, true);
-  view.begin(h.cx); await h.drain(); assert.deepEqual(h.commands, []);
+  assert.equal(h.nodes.get('reset-devkits-clear').disabled, false);
+  assert.deepEqual(h.commands, []);
   h.nodes.get('reset-devkits-cancel').click();
   assert.deepEqual(h.closed, ['confirm']);
   assert.equal(h.calls.filter(([, args]) => args[1] === 'clear').length, 0);
+});
+
+test('confirmed reset closes all projects with explicit confirmation before account deletion', async () => {
+  const h = await fixture(), preview = new h.ResetDevkits();
+  h.projects([{ id: 'local', name: 'Local' }, { id: 'machine/remote', name: 'Remote' }]);
+  preview.init(h.cx); await h.drain(); h.confirmation('DEVKITS');
+  preview.begin(h.cx); await h.drain();
+  assert.equal(h.calls.filter(([, args]) => args[0] === 'do').length, 0, 'Project closing starts only after the old views are removed');
+  h.target(h.commands[0][1].layout.content.props);
+  const view = new h.ResetDevkits(); view.init(h.cx); h.timers[0].callback(h.cx); await h.drain();
+  const closeCalls = h.calls.filter(([, args]) => args[0] === 'do');
+  assert.deepEqual(closeCalls, [
+    ['herdr-app', ['do', 'space.close', '--id', 'local', '--confirmed', 'true']],
+    ['herdr-app', ['do', 'space.close', '--id', 'machine/remote', '--confirmed', 'true']],
+  ]);
+  assert.ok(h.calls.indexOf(closeCalls[1]) < h.calls.findIndex(([, args]) => args[1] === 'clear'));
+  assert.equal(view.complete, true);
+});
+
+test('deletion waits for native project closure and reports failures without clearing account data', async () => {
+  const h = await fixture(); h.projects([{ id: 'one' }]); h.deferClose();
+  h.target({ phase: 'execute', token: 'one', original: h.layout });
+  h.memory['devkits.reset-authorization'] = { token: 'one', expiresAt: Date.now() + 10000 };
+  const view = new h.ResetDevkits(); view.init(h.cx); h.timers[0].callback(h.cx);
+  // Allow the mocked close command to resolve while the native model still has the project.
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(h.calls.filter(([, args]) => args[1] === 'clear').length, 0);
+  h.advance(16000); h.timers.at(-1).callback(h.cx); await h.drain();
+  assert.match(view.error, /still closing/);
+  assert.deepEqual(h.memory['devkits.calendar-events'], ['private']);
+  h.closeError('unreachable'); view.clear(h.cx); await h.drain();
+  assert.match(view.error, /Could not close project/);
+  assert.equal(h.calls.filter(([, args]) => args[1] === 'clear').length, 0);
+  h.projects([]); h.closeError(null); view.clear(h.cx); await h.drain();
+  assert.equal(view.complete, true);
 });
 
 test('confirmed reset removes provider mounts before clearing and clears shared data only through native APIs', async () => {

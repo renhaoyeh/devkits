@@ -42,7 +42,7 @@ export class ResetDevkits {
     });
   }
 
-  ready() { return !this.loading && !this.busy && !this.error && Boolean(this.plan) && this.input?.value() === 'DEVKITS' && spaces().length === 0; }
+  ready() { return !this.loading && !this.busy && !this.error && Boolean(this.plan) && this.input?.value() === 'DEVKITS'; }
 
   begin(cx) {
     if (!this.ready()) return;
@@ -57,7 +57,6 @@ export class ResetDevkits {
           throw new Error('Close other dialogs and windows before clearing data.');
         if (await readTextFile(`${appHome()}/layouts/devkits.json`) !== this.source)
           throw new Error('The layout changed. Close this dialog and start again.');
-        if (spaces().length) throw new Error('Close all projects before clearing data.');
         const token = `reset:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         setShared(authorizationKey, { token, expiresAt: Date.now() + 10000 });
         run('layout.set', { layout: { id: 'devkits-reset-root', type: 'block', theme: this.original.theme,
@@ -73,7 +72,21 @@ export class ResetDevkits {
     this.busy = true; this.error = null; cx.notify();
     cx.spawn(async cx => {
       try {
-        if (spaces().length) throw new Error('A project was opened. Close it before retrying.');
+        this.closing = true; cx.notify();
+        for (const project of spaces()) {
+          const reply = await exec('herdr-app', ['do', 'space.close', '--id', project.id, '--confirmed', 'true']);
+          if (reply.code !== 0) throw new Error(`Could not close project ${project.name || project.id}. No account files were removed; Retry to try again.`);
+        }
+        if (spaces().length) await new Promise((resolve, reject) => {
+          const deadline = Date.now() + 15000;
+          const check = cx => {
+            if (!spaces().length) return resolve();
+            if (Date.now() >= deadline) return reject(new Error('Projects are still closing. No account files were removed; Retry to try again.'));
+            cx.timer.after(100, check);
+          };
+          check(cx);
+        });
+        this.closing = false; cx.notify();
         const result = await exec('node', [helper(), 'clear', appHome(), 'DEVKITS'], { timeout: 600000 });
         if (result.code !== 0) throw new Error(result.stderr?.trim() || 'Could not clear all Devkits data.');
         const { sharedKeys } = JSON.parse(result.stdout);
@@ -83,7 +96,7 @@ export class ResetDevkits {
         setShared(authorizationKey, null);
         this.complete = true;
       } catch (error) { this.error = error.message; }
-      this.busy = false; cx.notify();
+      this.closing = false; this.busy = false; cx.notify();
     });
   }
 
@@ -110,8 +123,7 @@ export class ResetDevkits {
       .when(!this.executing, el => el
         .child(div().text_size(13).text_color(t.muted).child(this.loading ? 'Checking Devkits data…'
           : `${this.plan?.accounts ?? 0} dedicated account directories. This cannot be undone.`))
-        .child(div().text_size(13).text_color(t.muted).child(spaces().length
-          ? 'Close all projects first, including their running sessions. Then reopen this dialog.' : 'Type DEVKITS to confirm.'))
+        .child(div().text_size(13).text_color(t.muted).child('This closes all open projects and stops their sessions and any Devkits account sessions. Type DEVKITS to confirm.'))
         .child(Input.new(this.input).id('reset-devkits-confirmation').accessibility_label('Type DEVKITS to confirm')
           .h(36).px(10).rounded(0).border_b(1).border_color(t.input).text_size(13)))
       .when(Boolean(this.error), el => el.child(div().id('reset-devkits-error').text_size(12).text_color(t.destructive || t.ansi1)
@@ -125,7 +137,7 @@ export class ResetDevkits {
             .disabled(this.executing ? Boolean(this.busy) : !this.ready())
             .opacity((this.executing ? this.busy : !this.ready()) ? 0.45 : 1)
             .on_click((_event, cx) => this.executing ? this.clear(cx) : this.begin(cx))
-            .child(this.busy ? 'Clearing…' : this.executing ? 'Retry' : 'Clear all Devkits data'))));
+            .child(this.busy ? this.closing ? 'Closing projects…' : 'Clearing…' : this.executing ? 'Retry' : 'Clear all Devkits data'))));
     return this.executing ? v_flex().size_full().items_center().justify_center().bg(t.canvas)
       .child(v_flex().w(620).h(500).child(content)) : content;
   }

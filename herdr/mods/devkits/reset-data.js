@@ -100,6 +100,43 @@ export async function signOut({ provider, directory }, execute = execFile, platf
   } catch { throw new Error(`Could not sign out a Devkits ${provider} account. Its files were kept; retry after checking the CLI.`); }
 }
 
+export async function stopAccountSessions(data, execute = execFile) {
+  const options = { timeout: 10000, maxBuffer: 8 * 1024 * 1024, windowsHide: true };
+  const { stdout } = await execute('hc', ['ls', '--json'], options);
+  const listing = JSON.parse(stdout), terminals = Array.isArray(listing) ? listing : listing.terminals;
+  if (!Array.isArray(terminals)) throw new Error('Could not check Devkits account sessions.');
+  const prefix = data.replaceAll('\\', '/') + '/';
+  const owned = new Set(terminals.filter(terminal => terminal.state !== 'finished' &&
+    ['CODEX_HOME=', 'CLAUDE_CONFIG_DIR='].some(variable => JSON.stringify(terminal.argv || []).replaceAll('\\\\', '/').includes(variable + prefix)))
+    .map(terminal => terminal.address));
+  // Include actual child terminals, including children intentionally kept alive.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const terminal of terminals) if (terminal.state !== 'finished' && owned.has(terminal.parent) && !owned.has(terminal.address)) {
+      owned.add(terminal.address); changed = true;
+    }
+  }
+  // Children first, so ending their parent cannot turn a following kill into a stale request.
+  const ordered = terminals.filter(terminal => owned.has(terminal.address));
+  const depth = terminal => {
+    const seen = new Set(); let parent = terminal.parent;
+    while (owned.has(parent) && !seen.has(parent)) { seen.add(parent); parent = terminals.find(item => item.address === parent)?.parent; }
+    return seen.size;
+  };
+  ordered.sort((a, b) => depth(b) - depth(a));
+  for (const terminal of ordered) {
+    if (typeof terminal.address !== 'string' || !/^[a-zA-Z0-9_.-]+$/.test(terminal.address)) throw new Error('Invalid Devkits terminal address.');
+    try { await execute('hc', ['kill', terminal.address], options); }
+    catch (error) {
+      // Another native project close can have finished or removed it in the meantime.
+      const current = JSON.parse((await execute('hc', ['ls', '--json'], options)).stdout);
+      const remaining = Array.isArray(current) ? current : current.terminals;
+      if (!Array.isArray(remaining) || remaining.some(item => item.address === terminal.address && item.state !== 'finished'))
+        throw new Error('Could not stop a Devkits account session. No account files were removed; Retry to try again.');
+    }
+  }
+}
+
 export async function idleAccounts(data, execute = execFile, platform = process.platform) {
   const options = { timeout: 10000, maxBuffer: 8 * 1024 * 1024, windowsHide: true };
   const { stdout } = await execute('hc', ['ls', '--json'], options);
@@ -163,6 +200,7 @@ export async function clearReset(directory, confirmation, services = {}) {
   const lockPath = join(root, '.devkits-reset.lock');
   const lock = await acquireLock(lockPath);
   try {
+    await (services.stopAccounts || stopAccountSessions)(data);
     await (services.idleAccounts || idleAccounts)(data);
     const plan = await inspectReset(root);
     const frames = join(root, 'mods', 'devkits-sim-frames');

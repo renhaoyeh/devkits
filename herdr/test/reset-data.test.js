@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectReset, clearReset, cleanDefaultClaude, signOut, idleAccounts, resetShortcuts } from '../mods/devkits/reset-data.js';
+import { inspectReset, clearReset, cleanDefaultClaude, signOut, stopAccountSessions, idleAccounts, resetShortcuts } from '../mods/devkits/reset-data.js';
 import { KEYS } from '../install.js';
 import { evaluateNative } from './source-harness.js';
 
@@ -32,7 +32,7 @@ async function fixture(t) {
   await writeFile(join(root, 'mods', 'devkits-sim-frames', 'main.js'), 'keep code');
   const calls = [], sensorCache = join(folder, 'sensor-cache');
   await mkdir(sensorCache);
-  const services = { userHome, sensorCache, idleAccounts: async () => {}, cleanCodex: async () => {},
+  const services = { userHome, sensorCache, stopAccounts: async () => {}, idleAccounts: async () => {}, cleanCodex: async () => {},
     signOut: async account => { calls.push(account); } };
   return { folder, root, userHome, data, codex, claude, programs, state, services, calls };
 }
@@ -199,4 +199,27 @@ test('Windows reset process inspection returns only this installation helper PID
     { ProcessId: 2, Name: 'node.exe', CommandLine: 'node C:\\Herdr\\mods\\devkits-usage\\analytics-reader.js' },
     { ProcessId: 3, Name: 'node.exe', CommandLine: 'node C:\\Other\\mods\\devkits\\reader.js' },
   ], 'C:\\Herdr', 1), [2]);
+});
+
+test('confirmed reset stops dedicated account sessions and their children, preserving unrelated terminals', async () => {
+  let terminals = [
+    { address: 't1', state: 'live', argv: ['env', 'CODEX_HOME=/herdr/data/devkits/codex/one', 'codex'] },
+    { address: 't2', state: 'live', parent: 't1', argv: ['node', 'watch.js'] },
+    { address: 't3', state: 'live', argv: ['codex'] },
+    { address: 't4', state: 'live', argv: ['env', 'CODEX_HOME=/another/data/devkits/codex/one', 'codex'] },
+  ];
+  const killed = [];
+  await stopAccountSessions('/herdr/data/devkits', async (_command, args) => {
+    if (args[0] === 'kill') { killed.push(args[1]); terminals = terminals.filter(item => item.address !== args[1]); return {}; }
+    return { stdout: JSON.stringify({ terminals }) };
+  });
+  assert.deepEqual(killed, ['t2', 't1']);
+  assert.deepEqual(terminals.map(item => item.address), ['t3', 't4']);
+});
+
+test('a failed account-session stop prevents the reset before account sign-out or file deletion', async t => {
+  const f = await fixture(t);
+  await assert.rejects(clearReset(f.root, 'DEVKITS', { ...f.services, stopAccounts: async () => { throw new Error('could not stop'); } }), /could not stop/);
+  assert.deepEqual(f.calls, []);
+  assert.equal(await readFile(join(f.codex, 'auth.json'), 'utf8'), 'dedicated credentials');
 });
