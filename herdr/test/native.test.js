@@ -1153,7 +1153,8 @@ test('profile permissions apply independently from Settings to the selected acco
   const pick = (section, key) => { ui.nodes.get(`defaults-${section}-select`).openChange(true, cx); view.render(cx);
     ui.nodes.get(`defaults-${section}-option-${key}`).click({}, cx); view.render(cx); };
   settings('agents');
-  assert.ok(['accounts', 'agents', 'agent-profiles', 'rules', 'usage'].every(page => ui.nodes.has(`settings-page-${page}`)));
+  assert.ok(['accounts', 'agents', 'agent-profiles', 'rules'].every(page => ui.nodes.has(`settings-page-${page}`)));
+  assert.ok(!ui.nodes.has('settings-page-usage'));
   assert.ok(!ui.nodes.has('settings-page-models'));
   assert.ok(![...ui.nodes.keys()].some(id => id.startsWith('defaults-') || id.startsWith('permissions-')));
   // The former Codex page opens Accounts with the default Codex account's defaults.
@@ -1399,7 +1400,7 @@ test('usage follows its independent profile selection and launcher order, shows 
   assert.equal(overlays.at(-1).props.view, 'token-statistics');
   assert.equal(overlays.at(-1).modal, false);
 });
-test('Settings Usage independently selects profiles, never individual agent configurations', async () => {
+test('the Agents page selects Usage accounts in their own column, never individual agent configurations', async () => {
   const ui = fakeElements(), memory = { 'devkits.independent-agent-defaults': true,
     'devkits.hidden-launchers': ['agent:codex'], 'devkits.hidden-usage-profiles': [] }, requests = [];
   const profiles = [{ key: 'codex', name: 'Codex', installed: true, run: ['codex'] },
@@ -1411,8 +1412,10 @@ test('Settings Usage independently selects profiles, never individual agent conf
   const pending = [], cx = { ...renderContext, spawn: task => pending.push(task(cx)), timer: { every() {} } };
   memory['devkits.agent-cache'] = { null: profiles };
   const view = new View(); view.initSessionMenu({ ...cx, spawn() {} }); view.launchers = profiles; view.render(cx);
-  assert.ok(ui.nodes.has('settings-page-usage'));
+  // An old Usage link opens the merged Agents page.
+  assert.equal(view.settingsPage, 'agents');
   assert.ok(ui.nodes.has('usage-profile-codex') && ui.nodes.has('usage-profile-devkits-codex-work'));
+  assert.ok(ui.textOf('manage-usage-agent:devkits-preset-fast').includes('–') && ui.textOf('manage-usage-terminal').includes('–'));
   assert.ok(!ui.nodes.has('usage-profile-devkits-preset-fast'));
   assert.equal(ui.nodes.get('usage-profile-codex').checked, true);
   ui.nodes.get('usage-profile-devkits-codex-work').change(false, cx); view.render(cx);
@@ -1788,11 +1791,8 @@ test('a Default account is named by its shared address in Add session, Settings 
   assert.ok(ui.textOf('account-list-name-codex').includes('me@example.com'));
   assert.ok(ui.textOf('account-list-name-claude').includes('No account'));
   assert.ok(ui.textOf('account-email-codex').includes('Pro'));
-  for (const page of ['agents', 'usage']) {
-    settings.settingsPage = page; ui.nodes.clear(); settings.render(renderContext);
-    const row = page === 'agents' ? 'manage-agent:' : 'usage-profile-';
-    assert.ok(ui.textOf(`${row}codex`).includes('me@example.com') && ui.textOf(`${row}claude`).includes('No account'));
-  }
+  settings.settingsPage = 'agents'; ui.nodes.clear(); settings.render(renderContext);
+  assert.ok(ui.textOf('manage-agent:codex').includes('me@example.com') && ui.textOf('manage-agent:claude').includes('No account'));
   target = { pane: 'p0' }; ui.nodes.clear(); const before = ui.texts.length;
   new View().paneHeader({}, renderContext);
   const header = ui.texts.slice(before);
@@ -2090,7 +2090,7 @@ test('optional Agent profiles are a table separate from native settings, with no
   assert.ok(!ui.nodes.has('defaults-profile-select'));
   assert.ok(!ui.nodes.has('defaults-model-select'));
   const pageOrder = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules', 'settings-page-usage']);
+  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules']);
   const key = 'devkits-preset-one';
   memory['devkits.agent-configs'] = [{ key, name: 'Review', profileKey: 'claude' }]; h.render();
   assert.ok(!ui.textOf('agent-profiles-table').includes('Default agent'));
@@ -2110,7 +2110,10 @@ test('Usage keeps the Auto table as a one-row empty box until an added account c
   const h = await profileTableUi(), { ui, memory } = h;
   h.mount(); h.view.launchers = h.accounts.filter(agent => agent.key !== 'devkits-codex-work');
   h.view.settingsPage = 'usage'; ui.nodes.clear(); h.render();
-  assert.ok(ui.nodes.has('auto-account-rules') && ui.nodes.has('auto-account-empty'));
+  // Auto sits below the merged list; its rules stay collapsed until asked for.
+  assert.ok(!ui.nodes.has('auto-account-rules') && ui.nodes.has('auto-account-empty'));
+  ui.nodes.get('auto-rules-toggle').click({}, h.cx); ui.nodes.clear(); h.render();
+  assert.ok(ui.nodes.has('auto-account-rules'));
   assert.ok(ui.texts.includes('No added accounts.'));
   assert.ok(!ui.nodes.has('auto-open-accounts'));
   h.view.launchers = h.accounts; memory['devkits.hidden-usage-profiles'] = [];
@@ -3457,7 +3460,7 @@ test('System can enable old hidden preferences and quick visibility retains the 
 test('agent Usage settings choose accounts only; the Usage display switch stays in Interface settings', async () => {
   const ui = fakeElements();
   const View = await viewFor({ ...ui });
-  new View().usageProfilesPage([], {});
+  new View().agentsPage([], [], () => {}, () => {}, () => {}, {});
   assert.ok(!ui.nodes.has('usage-visible') && !ui.nodes.has('usage-interface-settings'));
 });
 
@@ -3505,7 +3508,7 @@ test('Settings is the one place for the rules: a Rules & MCP page with icons bes
   assert.ok(ui.texts.includes('# Global rules\n\nUse hc run.'));
   assert.ok(['accounts', 'agents', 'rules'].every(page => ui.textOf(`settings-page-${page}`).length > 0));
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules', 'settings-page-usage']);
+  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-rules']);
   assert.ok(!ui.nodes.has('hardware-settings'), 'System monitoring has its own settings outside agent configuration');
   assert.ok(['user-round', 'square-plus', 'book-open'].every(icon => ui.assets.some(asset => asset.endsWith(`assets/icons/${icon}.svg`))));
 });
@@ -3637,6 +3640,7 @@ test('Auto starts the selected account furthest below quota pace and is remember
   ui.nodes.clear(); view.autoAccountsSection(launcherChoices(agents), {});
   assert.ok(!ui.nodes.has('auto-account-devkits-claude-c') && ui.nodes.has('auto-account-devkits-codex-b'));
   delete memory['devkits.hidden-usage-profiles'];
+  view.autoRulesOpen = true; ui.nodes.clear(); view.autoAccountsSection(launcherChoices(agents), {});
   assert.ok(ui.textOf('auto-account-rules').join(' ').includes('most Room'));
   view.launcher({});
   assert.equal(ui.textOf('start-auto').join(''), 'Auto · C');
