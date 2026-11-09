@@ -3790,6 +3790,29 @@ test('finishing a run keeps unarchived threads visible and navigable; only archi
   assert.ok(!commands.some(([name]) => ['tab.close', 'terminal.kill'].includes(name)));
 });
 
+test('full-width repository select follows measured resizing and keeps keyboard selection', async () => {
+  const ui = fakeElements(), source = await readFile(new URL('../mods/devkits/components/select.js', import.meta.url), 'utf8');
+  const host = { ...ui, DropdownMenuContent: id => ui.element().id(id), DropdownMenuItem: id => ui.element().id(id) };
+  const Select = new Function(...Object.keys(host), source.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '') + '\nreturn Select;')(...Object.values(host));
+  const state = { trigger: { focus() {} }, list: { focus() {} }, open: true, index: 0 };
+  const options = [{ key: 'a', label: 'Repo A' }, { key: 'b', label: 'Repo B' }];
+  let chosen, notified = 0;
+  const cx = { notify() { notified++; }, stop_propagation() {} };
+  const render = () => Select('repository', state, 'a', options, 'Git repository', value => { chosen = value; }, {}, { fullWidth: true });
+  render();
+  for (const width of [280, 480, 200]) {
+    ui.nodes.get('repository').sizeChange({ width }, cx);
+    render();
+    assert.equal(ui.nodes.get('repository-options').width, width);
+    ui.nodes.get('repository').sizeChange({ width }, cx);
+  }
+  assert.equal(notified, 3, 'Equal layout measurements must not cause repeated renders');
+  ui.nodes.get('repository-options').keyDown({ key: 'down' }, cx);
+  ui.nodes.get('repository-options').keyDown({ key: 'enter' }, cx);
+  assert.equal(chosen, 'b');
+  assert.equal(state.open, false);
+});
+
 test('status and priority selects show semantic icons in the trigger and every option', async () => {
   const { boardStatusOptions, boardPriorityOptions } = await import('../mods/devkits-tasks/agent-board-model.js');
   const ui = fakeElements(), source = await readFile(new URL('../mods/devkits/components/select.js', import.meta.url), 'utf8');
