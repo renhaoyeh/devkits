@@ -9,6 +9,7 @@ import { Button } from './components/button.js';
 import { Switch } from './components/switch.js';
 import { Select, SelectState } from './components/select.js';
 import { DialogContent, DialogTitle, DialogDescription, DialogFooter } from './components/dialog.js';
+import { openDevkitsReset } from './reset-devkits.js';
 
 // USAGE presentation, like SYSTEM's: the existing master switch, a sidebar/status bar location, then the sidebar's style.
 export const usageStyle = () => shared('devkits.usage-style') === 'compact' ? 'compact' : 'full';
@@ -36,7 +37,7 @@ export const openInterfaceSettings = (page = 'system') => openOverlay({
 export class InterfaceSettings {
   init(cx) {
     this.handle = cx.focus_handle(); this.handle.focus();
-    this.page = props()?.page === 'usage' ? 'usage' : 'system';
+    this.page = ['usage', 'data'].includes(props()?.page) ? props().page : 'system';
     this.location = new SelectState(cx); this.cpuMode = new SelectState(cx);
     this.heightMode = new SelectState(cx); this.usageStyle = new SelectState(cx); this.usageLocation = new SelectState(cx);
   }
@@ -59,7 +60,7 @@ export class InterfaceSettings {
       .child(DialogTitle().flex_none().child('Interface settings'))
       .child(h_flex().flex_1().min_h(0).items_start().gap(24)
         .child(v_flex().w(144).h_full().flex_none().gap(4)
-          .children([{ key: 'system', label: 'SYSTEM' }, { key: 'usage', label: 'USAGE' }]
+          .children([{ key: 'system', label: 'SYSTEM' }, { key: 'usage', label: 'USAGE' }, { key: 'data', label: 'Data' }]
             .map(page => Button(`interface-page-${page.key}`, t, { variant: 'ghost' }).w_full().justify_start().px(12)
               .bg(this.page === page.key ? t.selected : t.popover)
               .text_color(this.page === page.key ? t.foreground : t.muted)
@@ -111,7 +112,12 @@ export class InterfaceSettings {
                 (location, cx) => { setShared('devkits.usage-location', location); cx.notify(); }, t, { width: 176, boxed: true }))))
             .when(usage && usageLocation() !== 'status', el => el.child(row('Style', 'Full shows 5-hour and weekly meters with reset times; Compact shows one line of percentages per account.',
               Select('interface-usage-style', this.usageStyle, usageStyle(), options([['full', 'Full'], ['compact', 'Compact']]),
-                'Usage style', (style, cx) => { setShared('devkits.usage-style', style); cx.notify(); }, t, { width: 176, boxed: true })))))))
+                'Usage style', (style, cx) => { setShared('devkits.usage-style', style); cx.notify(); }, t, { width: 176, boxed: true })))))
+          .when(this.page === 'data', el => el
+            .child(div().text_size(16).font_medium().child('Devkits data'))
+            .child(row('Clear all Devkits data', 'Delete settings, saved sign-ins, dedicated account history, Tasks, Calendar, connections and caches. Project files and external default accounts are kept.',
+              Button('interface-clear-devkits-data', t, { variant: 'secondary' }).text_color(t.destructive || t.ansi1)
+                .on_click(() => openDevkitsReset()).child('Clear data…'))))))
       .child(DialogFooter().flex_none()
         .when(this.page === 'system', el => el.child(Button('interface-system-reset', t, { variant: 'secondary' })
           .accessibility_label('Reset System settings to defaults')
