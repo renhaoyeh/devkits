@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, launcherLabel, launcherOption, codexPermissionModes, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents } from '../mods/devkits/model.js';
+import { threadTitle, projectGroups, projectCatalog, folderKey, launcherChoices, launcherLabel, launcherOption, codexPermissionModes, isAccountLauncher, autoAgent, autoRank, autoMultipliers, autoMultiplier, planMultiplier, planLabel, autoLauncherKey, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents } from '../mods/devkits/model.js';
 import { install } from '../install.js';
 import { syncShared } from '../sync-shared.js';
 import { evaluateNative } from './source-harness.js';
@@ -129,7 +129,7 @@ async function viewFor(host) {
   const input = host.InputState || { new: () => ({ text: '', events: {}, value() { return this.text; },
     set_value(value) { assert.equal(rendering, false, 'retained input values must change outside render'); this.text = value; },
     on(name, action) { this.events[name] = action; } }) };
-  host = { run() {}, ensureClaudeStatusLine: async () => {}, TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: false, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
+  host = { run() {}, ensureClaudeStatusLine: async () => {}, TaskSources: class { init() {} open(project, source = 'asana') { return host.openOverlay?.({ mod: `devkits-${source}`, kind: 'dialog', modal: false, frame: 'none', width: 0.9, height: 0.86, props: { context: project } }); } }, savedTasks: () => [], agents: () => [], spaces: () => [], projectCatalog, projectGroups, threadTitle, folderKey, launcherChoices, launcherLabel, launcherOption, isAccountLauncher, autoAgent, autoRank, autoMultipliers, autoMultiplier, planMultiplier, planLabel, autoLauncherKey, permissionModes, launcherArgv, sessionArgv, tasksMcpServer, sessionKind, claudeModels, claudeEfforts, codexHome, codexModels, mergeModels, orderedOptions, moveOption, effortLabel, sessionChoices, home: () => '/home', quotaResetLabel, quotaElapsedPercent, resolveThreadProfiles, threadProfile, threadProgram, archivable, agentCommand, commandKind, resumeArgv, codexSessionId, archivedAge, rulesArgv, childTerminals, terminalLabel, terminalWorking, settingsKey, profileSettings, configuredAgents, terminals: () => [], panes: () => [], focused: () => null, writeTextFile: async () => null, notify() {}, accountLabel: launcherLabel, readTextFile: async () => null, window: () => ({}), layout: () => null, keys: () => [], appHome: () => '/herdr', props: () => ({}), shared: key => memory[key],
     setShared: (key, value) => { memory[key] = value; }, exec: async () => ({ code: 0 }), nextCommand: () => new Promise(() => {}), ...host };
   const originalShared = host.shared, originalSetShared = host.setShared;
   let taskSnapshot;
@@ -1512,7 +1512,7 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
       const keys = JSON.parse(args[1][1]).map(account => account.key);
       calls.push(keys);
       return failed ? { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, error: 'Rate limited' }))) }
-        : { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, windows: [{ usedPercent: 42 }], fetchedAt: 1 }))) };
+        : { code: 0, stdout: JSON.stringify(keys.map(key => ({ key, plan: null, windows: [{ usedPercent: 42 }], fetchedAt: 1 }))) };
     } });
   const cx = { spawn(task) { pending = task(cx); }, notify() {} };
   const view = new View();
@@ -1547,7 +1547,7 @@ test('Codex usage is cached across reloads while Devkits Claude accounts reread 
 test('the Usage master switch hides the section and pauses reads while preserving account choices', async () => {
   const ui = fakeElements(), reads = [], tasks = [];
   const memory = { 'devkits.hidden-usage-profiles': ['work'], 'devkits.launcher-order': ['agent:work', 'agent:codex'],
-    'devkits.usage-cache': { codex: { key: 'codex', checkedAt: Date.now(), windows: [] } } };
+    'devkits.usage-cache': { codex: { key: 'codex', checkedAt: Date.now(), plan: null, windows: [] } } };
   const View = await viewFor({ ...ui, spaces: () => projects,
     props: () => ({ view: 'ui-settings', page: 'usage' }), theme: () => ({}),
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
@@ -3371,6 +3371,58 @@ test('new projects inherit the global agent then fall back to the first visible 
   assert.equal(view.defaultThreadAgent(project, [{ key: 'missing', installed: false }]), undefined);
 });
 
+
+test('Auto starts the selected account furthest below quota pace and is remembered as Auto', async () => {
+  const now = Date.now() / 1000;
+  const memory = { 'devkits.auto-accounts': ['codex', 'devkits-codex-a', 'devkits-codex-b', 'devkits-claude-c'],
+    'devkits.usage.snapshot': { contexts: { null: { usage: [
+      { key: 'devkits-codex-a', windows: [{ minutes: 300, usedPercent: 100, resetsAt: now + 3600 }] },
+      { key: 'devkits-codex-b', plan: 'team', windows: [{ minutes: 10080, usedPercent: 60, resetsAt: now + 302400 }] },
+      { key: 'devkits-claude-c', windows: [{ minutes: 10080, usedPercent: 80, resetsAt: now + 60480 }] },
+    ] } } } }, started = [];
+  const ui = fakeElements();
+  const View = await viewFor({ ...ui, props: () => ({ space: 'api', folder: '/Code/api' }), spaces: () => projects,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, keys: () => [] });
+  const view = new View();
+  const agents = [{ key: 'codex', installed: true }, { key: 'devkits-codex-a', installed: true },
+    { key: 'devkits-codex-b', installed: true }, { key: 'devkits-claude-c', name: 'Claude · C', run: ['claude'], installed: true }];
+  // b has 40% left for half a week (0.8); c has 20% left for a tenth of it (2); a is at its 5h limit.
+  assert.equal(view.autoThreadAgent(agents, null).key, 'devkits-claude-c');
+  memory['devkits.auto-multipliers'] = { 'devkits-codex-b': 5 };
+  assert.equal(view.autoThreadAgent(agents, null).key, 'devkits-codex-b', 'a larger plan has more room');
+  delete memory['devkits.auto-multipliers'];
+  assert.equal(view.autoThreadAgent(agents, 'remote'), null);
+  assert.equal(view.autoThreadAgent([agents[0]], null), null, 'default agents are not Auto accounts');
+  view.launchers = agents; view.startThread = async (agent, target, options) => started.push([agent.key, options]);
+  view.autoAccountsSection(launcherChoices(agents), {});
+  assert.ok(!ui.nodes.has('auto-account-codex'), 'only your accounts can join Auto');
+  assert.ok(ui.textOf('auto-standing-devkits-codex-a').join('').startsWith('At limit'));
+  assert.equal(ui.textOf('auto-standing-devkits-codex-b').join(''), 'Room 0.80');
+  assert.equal(ui.textOf('auto-standing-devkits-claude-c').join(''), 'Room 2.00');
+  assert.equal(ui.textOf('auto-plan-devkits-codex-b').join(''), 'Team');
+  ui.nodes.get('auto-multiplier-devkits-codex-b-5').change(true, { notify() {} });
+  assert.deepEqual(memory['devkits.auto-multipliers'], { 'devkits-codex-b': 5 });
+  ui.nodes.get('auto-multiplier-devkits-codex-b-1').change(true, { notify() {} });
+  assert.deepEqual(memory['devkits.auto-multipliers'], {}, 'choosing the detected size follows the plan again');
+  assert.ok(ui.nodes.has('auto-next-devkits-claude-c') && !ui.nodes.has('auto-next-devkits-codex-b'));
+  memory['devkits.hidden-usage-profiles'] = ['devkits-claude-c'];
+  assert.equal(view.autoThreadAgent(agents, null).key, 'devkits-codex-b', 'accounts hidden from Usage leave Auto');
+  ui.nodes.clear(); view.autoAccountsSection(launcherChoices(agents), {});
+  assert.ok(!ui.nodes.has('auto-account-devkits-claude-c') && ui.nodes.has('auto-account-devkits-codex-b'));
+  delete memory['devkits.hidden-usage-profiles'];
+  assert.ok(ui.textOf('auto-account-rules').join(' ').includes('most Room'));
+  view.launcher({});
+  ui.nodes.get('start-auto').click({}, {});
+  assert.deepEqual(started.at(-1), ['devkits-claude-c', { auto: true }]);
+  view.openThread = () => {};
+  await view.launchThread(agents[3], { space: 'api', folder: '/Code/api' }, { auto: true });
+  assert.equal(memory['devkits.last-thread-agents']['["","/Code/api"]'], 'auto');
+  assert.deepEqual(view.defaultThreadChoice({ id: 'api', folder: '/Code/api' }, agents), { agent: agents[3], auto: true });
+  memory['devkits.auto-accounts'] = [];
+  assert.equal(view.defaultThreadAgent({ id: 'api', folder: '/Code/api' }, agents).key, 'codex');
+  ui.nodes.clear(); view.launcher({});
+  assert.ok(!ui.nodes.has('start-auto'), 'Auto is hidden without selected accounts');
+});
 
 test('close-file closes only the shown file in the visible Files editor', async () => {
   let editor = { id: 'editor', hidden: false, active: 'files' };
