@@ -2,8 +2,8 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isDeepStrictEqual } from 'node:util';
-import { openConfig } from './codex-sharing.js';
+import { parseSharedMcp } from './components/shared-mcp-model.js';
+import { openConfig } from './codex-config.js';
 
 export async function migrateSharedMcp({ file, profiles, names }, configService = openConfig) {
   const connections = [];
@@ -11,9 +11,7 @@ export async function migrateSharedMcp({ file, profiles, names }, configService 
     for (const profile of profiles) connections.push({ ...profile, service: await configService(profile.directory) });
     let original = null;
     try { original = await readFile(file, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const shared = original === null ? { version: 1, servers: {}, profiles: {} } : JSON.parse(original);
-    if (shared.version !== 1 || !shared.servers || !shared.profiles) throw new Error('Unsupported shared MCP file.');
-    const comparable = value => { const { enabled = true, ...rest } = value; return { ...rest, enabled }; };
+    const shared = parseSharedMcp(original);
     for (const name of names) {
       if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error('Unsupported MCP server name.');
       const candidates = connections.map(profile => profile.service.config.mcp_servers?.[name]).filter(Boolean);
@@ -23,15 +21,10 @@ export async function migrateSharedMcp({ file, profiles, names }, configService 
         throw new Error(`Cannot share ${name}: expected a local integration without literal credentials.`);
       }
       shared.servers[name] = server;
-      for (const profile of connections) {
-        const own = profile.service.config.mcp_servers?.[name];
-        if (own && !isDeepStrictEqual(comparable(own), comparable(server))) {
-          shared.profiles[profile.key] = { ...shared.profiles[profile.key], [name]: own };
-        }
-      }
     }
     // Validate transport settings before changing any account. Keep the shared file first so a
     // partial migration leaves remaining account entries usable and can safely be run again.
+    parseSharedMcp(JSON.stringify(shared));
     await mkdir(dirname(file), { recursive: true });
     if (original !== null) await writeFile(`${file}.before-migration.bak`, original, { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
     await writeFile(file, `${JSON.stringify(shared, null, 2)}\n`, { mode: 0o600 });

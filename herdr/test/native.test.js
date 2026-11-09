@@ -78,7 +78,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'components/shared-mcp', 'shared-mcp-settings', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'shared-mcp-settings', 'global-rules', 'session-menu', 'agent-profiles', 'account-actions', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
   const usageOwner = await Promise.all(['monitor', 'details'].map(name => readFile(new URL(`../mods/devkits-usage/${name}.js`, import.meta.url), 'utf8')));
@@ -1020,7 +1020,7 @@ test('Manage groups Terminal, agents and accounts; dragging stays within each se
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     run: (...args) => commands.push(args), closeOverlay() {} });
   const cx = { notify() {}, stop_propagation() {} };
-  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
+  const view = new View(); view.launchers = choices; view.manageIndex = 0; view.render(renderContext);
   assert.ok(ui.assets.includes('icons/codex.svg')); assert.ok(ui.assets.includes('icons/claude.svg'));
   assert.ok(ui.assets.includes('mods/devkits/assets/icons/terminal.svg'));
   for (const group of [0, 1, 2]) assert.ok(ui.nodes.has(`manage-section-${group}`));
@@ -1103,7 +1103,7 @@ test('account removal requires confirmation, blocks duplicate requests, and clea
     removeAccountProfile: async key => { removed.push(key); await new Promise(resolve => { release = resolve; }); } });
   const cx = { notify() {}, stop_propagation() {}, spawn(fn) { pending = fn(cx); } };
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · Work' }];
-  view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
+  view.manageIndex = 0; view.render(renderContext);
   assert.ok(!ui.nodes.has('account-menu-codex'));
   ui.nodes.get('account-actions-devkits-codex-work-remove').click({}, renderContext);
   assert.deepEqual(removed, []);
@@ -1165,7 +1165,7 @@ test('profile permissions apply independently from Settings to the selected acco
   ui.nodes.get('manage-launchers-done').click();
   assert.equal(closed.at(-1), 'settings');
 });
-test('shared MCP settings save only on confirmation, preserve other profiles and report concurrent edits', async () => {
+test('shared MCP settings expose one editor, drop legacy exceptions and report concurrent edits', async () => {
   const ui = fakeElements(), editors = [], writes = [], notices = [], closed = [];
   const original = JSON.stringify({ version: 1, servers: { vs: { command: 'bridge' } }, profiles: { other: { vs: false } } });
   const target = { view: 'shared-mcp', overlay: 'mcp', agent: { key: 'codex', name: 'Codex' } };
@@ -1179,13 +1179,15 @@ test('shared MCP settings save only on confirmation, preserve other profiles and
   const view = new View(); view.init({}, cx); await pending; view.render(cx);
   editors[0].set_value('{bad'); view.saveSharedMcp(cx); await pending;
   assert.equal(writes.length, 0); assert.ok(view.mcpError);
-  editors[0].set_value('{"vs":{"command":"new-bridge"}}'); editors[1].set_value('{"vs":false}');
+  assert.equal(editors.length, 1);
+  editors[0].set_value('{"vs":{"command":"new-bridge"}}');
   view.saveSharedMcp(cx); await pending;
   assert.match(view.mcpError, /File changed/); assert.equal(closed.length, 0);
   conflict = false; view.saveSharedMcp(cx); await pending;
   assert.equal(writes.length, 1); assert.equal(writes[0][2], original);
   const saved = JSON.parse(writes[0][1]);
-  assert.deepEqual(saved.profiles.other, { vs: false }); assert.deepEqual(saved.profiles.codex, { vs: false });
+  assert.equal(saved.profiles, undefined);
+  assert.deepEqual(saved.servers, { vs: { command: 'new-bridge' } });
   assert.equal(notices.length, 1); assert.deepEqual(closed, ['mcp']);
 });
 
@@ -1204,59 +1206,22 @@ test('new local Codex sessions receive shared MCP settings and remote sessions d
   assert.deepEqual(commands.find(([name]) => name === 'tab.new')[1].argv, ['codex']);
 });
 
-test('Codex sharing is manual, scoped to a local saved account, reports results and ignores duplicate clicks', async () => {
-  const ui = fakeElements(), calls = [], notices = [], overlays = [];
-  let finish, pending;
-  let target = { view: 'manage-launchers', overlay: 'manage' };
-  const work = { key: 'devkits-codex-work', name: 'Codex · Work', run: ['env', 'CODEX_HOME=/accounts/work', 'codex'] };
-  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}), spaces: () => [],
-    openOverlay: value => overlays.push(value), closeOverlay() {}, notify: value => notices.push(value),
-    exec: async (...args) => { calls.push(args); return new Promise(resolve => { finish = resolve; }); } });
-  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] }, work,
-    { key: 'devkits-claude-work', name: 'Claude · Work', run: ['claude'] }];
-  view.manageIndex = 0;
-  const cx = { ...renderContext, spawn: task => {
-    const before = calls.length, running = task(cx);
-    // Background folder watches do not replace the helper request this test awaits.
-    if (calls.length !== before) pending = running;
-    return running;
-  } };
-  view.prepareAccountMenus(cx); view.render(cx);
-  assert.deepEqual(calls, []);
-  assert.ok(!ui.nodes.has('account-actions-codex-sync'));
-  assert.ok(!ui.nodes.has('account-actions-devkits-claude-work-sync'));
-  ui.nodes.get(`account-actions-${work.key}-sync`).click({}, cx);
-  assert.deepEqual(calls, []);
-  target = { ...overlays.at(-1).props, overlay: 'picker' };
-  const picker = new View(); picker.init(null, cx);
-  assert.deepEqual(calls, [['node', ['/herdr/mods/devkits/codex-sharing.js', '/herdr', work.key, '--list']]]);
-  picker.render(cx);
-  assert.ok(ui.textOf('codex-sharing').includes('Checking shared settings…'));
-  finish({ code: 0, stdout: JSON.stringify({ items: [{ kind: 'plugins', key: 'one@local', label: 'One', selected: false, status: 'not-shared' },
-    { kind: 'skills', key: 'Writing', label: 'Writing', selected: true, status: 'pending' }] }) });
-  await pending; picker.render(cx);
-  assert.ok(ui.textOf('codex-sharing').includes('Not shared'));
-  assert.ok(ui.textOf('codex-sharing').includes('Update needed'));
-  ui.nodes.get('share-all').change(true, cx); picker.render(cx);
-  assert.ok(picker.sharingItems.every(item => item.selected));
-  ui.nodes.get('share-all').change(false, cx); picker.render(cx);
-  assert.ok(picker.sharingItems.every(item => !item.selected));
-  ui.nodes.get('share-all').change(true, cx); picker.render(cx);
-  ui.nodes.get('sharing-apply').click({}, cx);
-  ui.nodes.get('sharing-apply').click({}, cx);
-  picker.render(cx);
-  assert.equal(ui.nodes.get('sharing-apply').disabled, true);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(JSON.parse(calls[1][1][3]), { plugins: ['one@local'], skills: ['Writing'] });
-  finish({ code: 0, stdout: JSON.stringify({ message: 'Synced 2 plugins. Use a new session.' }) });
-  await pending;
-  assert.equal(notices[0].body, 'Synced 2 plugins. Use a new session.');
-  assert.equal(overlays.at(-1).props.view, 'manage-launchers');
-  picker.render(cx);
-  ui.nodes.get('sharing-apply').click({}, cx);
-  finish({ code: 1, stdout: JSON.stringify({ error: 'Existing files were kept.' }) });
-  await pending; picker.render(cx);
-  assert.ok(ui.textOf('codex-sharing').includes('Existing files were kept.'));
+test('account actions are direct buttons and sharing has only the base Codex MCP entry', async () => {
+  const ui = fakeElements(), overlays = [];
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'manage' }),
+    spaces: () => [], theme: () => ({}), closeOverlay() {}, openOverlay: value => overlays.push(value) });
+  const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex', run: ['codex'] },
+    { key: 'devkits-codex-work', name: 'Work', run: ['codex'] }];
+  view.manageIndex = 0; view.render(renderContext);
+  assert.ok(ui.nodes.has('shared-local-mcp'));
+  assert.ok(ui.nodes.has('account-actions-devkits-codex-work-rename'));
+  assert.ok(ui.nodes.has('account-actions-devkits-codex-work-remove'));
+  assert.ok(!ui.nodes.has('account-menu-devkits-codex-work'));
+  assert.ok(!ui.nodes.has('account-actions-devkits-codex-work-mcp'));
+  assert.ok(!ui.nodes.has('account-actions-devkits-codex-work-sync'));
+  assert.ok(!ui.texts.some(text => String(text).includes('Shared plugins and skills')));
+  ui.nodes.get('account-actions-devkits-codex-work-rename').click({}, renderContext);
+  assert.equal(overlays.at(-1).props.view, 'rename-account');
 });
 
 test('an old permissions dialog returns to Manage after a live update', async () => {
@@ -1659,7 +1624,7 @@ test('only the base Codex row offers Add account, including when Codex is hidden
     theme: () => ({}), shared: key => key === 'devkits.hidden-launchers' ? ['agent:codex'] : undefined,
     closeOverlay: id => closed.push(id), openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'codex', name: 'Codex' }, { key: 'devkits-codex-work', name: 'Codex · work' }];
-  view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
+  view.manageIndex = 0; view.render(renderContext);
   assert.ok(ui.textOf('manage-agent:codex').includes('Add account'));
   assert.ok(!ui.textOf('manage-agent:devkits-codex-work').includes('Add account'));
   ui.nodes.get('add-codex-account').click();
@@ -1678,7 +1643,7 @@ test('the base Claude row offers Add account and Claude accounts join Your accou
     shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
     closeOverlay() {}, openOverlay: value => overlays.push(value) });
   const view = new View(); view.launchers = [{ key: 'claude', name: 'Claude' }, { key: 'devkits-claude-work', name: 'Claude · work' }];
-  view.manageIndex = 0; view.prepareAccountMenus(renderContext); view.render(renderContext);
+  view.manageIndex = 0; view.render(renderContext);
   assert.ok(ui.textOf('manage-agent:claude').includes('Add account'));
   assert.ok(ui.nodes.has('manage-section-2'));
   assert.ok(ui.nodes.has('account-actions-devkits-claude-work-rename')); assert.ok(ui.nodes.has('account-actions-devkits-claude-work-remove'));
@@ -2250,12 +2215,12 @@ test('New thread without a project opens the native folder picker; launcher pass
   assert.deepEqual(commands.find(([name]) => name === 'tab.new'), ['tab.new', { space: 'api', folder: '/Code/project name', name: 'Codex', argv: ['codex', '--profile', 'work'] }]);
   assert.deepEqual(closed, ['popup']);
 });
-test('Codex account sessions start immediately with existing plugins and no synchronization', async () => {
+test('Codex account sessions synchronize MCP without running plugin synchronization', async () => {
   const commands = [], closed = [], ui = fakeElements();
   const View = await viewFor({ ...ui, spaces: () => [], run: (...args) => commands.push(args),
     shared: key => key === 'devkits.plugin-syncs' ? { '/account': 1 } : undefined,
     closeOverlay: id => closed.push(id), notify: error => assert.fail(error.body),
-    exec: () => assert.fail('Starting a session must not run a plugin helper') });
+    exec: async (command, args) => { assert.equal(command, 'node'); assert.ok(args[0].endsWith('/shared-mcp-sync.js')); assert.equal(args[1], '/account'); return { code: 0 }; } });
   const view = new View();
   const pending = view.startThread({ key: 'devkits-codex-work', name: 'Work',
     run: ['env', 'CODEX_HOME=/account', 'codex'] }, { space: 'one', folder: '/project', overlay: 'launcher' });
