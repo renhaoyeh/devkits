@@ -2024,16 +2024,28 @@ test('profile editing retains its saved account when unchecked in Usage and save
   assert.deepEqual(memory['devkits.hidden-usage-profiles'], ['devkits-codex-work']);
 });
 
-test('the profile editor has no instructions field and saving keeps instructions stored before the pause', async () => {
-  const key = 'devkits-preset-review', instructions = 'Review only.';
+test('profile instructions are optional retained drafts, persist across account changes and clear on Save', async () => {
+  const key = 'devkits-preset-review', instructions = 'Review only.\nUse "繁體中文" and `code`.';
   const h = await profileTableUi({ 'devkits.agent-configs': [{ key, name: 'Review', profileKey: 'codex', instructions }] });
   h.mount('agent-profile-editor', key);
-  assert.ok(!h.ui.nodes.has('agent-profile-instructions'));
-  assert.ok(!h.ui.texts.includes('Additional system instructions'));
-  h.name('Reviewer'); h.view.saveAgentProfile(h.cx);
-  assert.deepEqual(h.memory['devkits.agent-configs'][0], { key, profileKey: 'codex', name: 'Reviewer', instructions });
-  h.mount('agent-profile-editor'); h.name('Writer'); h.pick('profile', 'claude'); h.view.saveAgentProfile(h.cx);
-  assert.equal(h.memory['devkits.agent-configs'][1].instructions, undefined);
+  assert.equal(h.view.configInstructions.value(), instructions);
+  const state = h.view.configInstructions;
+  state.set_value('Unsaved'); h.pick('profile', 'claude'); h.render();
+  assert.equal(h.view.configInstructions, state);
+  assert.equal(state.value(), 'Unsaved');
+  assert.equal(h.memory['devkits.agent-configs'][0].instructions, instructions);
+  h.ui.nodes.get('cancel-agent-profile').click();
+  h.mount('agent-profile-editor', key);
+  assert.equal(h.view.configInstructions.value(), instructions);
+  h.view.configInstructions.set_value('  Updated\nInstructions  ');
+  h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][0].instructions, 'Updated\nInstructions');
+  h.mount('agent-profile-editor', key);
+  h.view.configInstructions.set_value('  \n'); h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][0].instructions, undefined);
+  h.mount('agent-profile-editor'); h.name('Writer'); h.pick('profile', 'claude');
+  h.view.configInstructions.set_value(instructions); h.view.saveAgentProfile(h.cx);
+  assert.equal(h.memory['devkits.agent-configs'][1].instructions, instructions);
 });
 
 test('new profiles offer every installed account in saved order, independent of Usage', async () => {
@@ -3247,22 +3259,26 @@ test('global rules join Claude and Codex system prompts in local sessions only',
   }
 });
 
-test('profile sessions use global rules only while profile instructions are paused, without changing files', async () => {
-  const extra = 'Review only.';
+test('new profile sessions append their latest instructions after global rules without changing native accounts or files', async () => {
+  const extra = 'Review "繁體中文".\nKeep `code` and \\paths.';
   for (const provider of ['codex', 'claude']) {
-    for (const global of ['Global rules', null]) {
+    for (const global of ['Global rules', null, '  \n', new Error('unreadable')]) {
       const commands = [], key = 'devkits-preset-review';
       const config = { key, profileKey: provider, name: 'Review', instructions: extra };
       const View = await viewFor({ spaces: () => [{ id: 'api', tabs: [] }],
         shared: name => name === 'devkits.agent-configs' ? [config] : undefined,
-        readTextFile: async path => path.endsWith('/AGENTS.md') ? global : null,
+        readTextFile: async path => { if (!path.endsWith('/AGENTS.md')) return null; if (global instanceof Error) throw global; return global; },
         writeTextFile: async () => assert.fail('Launching must not modify rules files'),
         run: (...args) => commands.push(args) });
-      await new View().launchThread({ key, profileKey: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
-      const argv = commands.find(([name]) => name === 'tab.new')[1].argv.join(' ');
-      assert.ok(!argv.includes(extra));
-      // Claude reads global rules from their file; Codex receives their text.
-      assert.equal(argv.includes(provider === 'claude' ? '--append-system-prompt-file' : 'Global rules'), global === 'Global rules');
+      const agent = { key, profileKey: provider, run: [provider], instructions: 'Stale cached value' };
+      await new View().launchThread(agent, { space: 'api', folder: '/Code/api' }, {});
+      const argv = commands.find(([name]) => name === 'tab.new')[1].argv;
+      const expected = (global === 'Global rules' ? 'Global rules\n\n' : '') + '# Agent profile instructions\n\n' + extra;
+      assert.deepEqual(argv, provider === 'codex' ? [provider, '-c', `developer_instructions=${JSON.stringify(expected)}`, ...tasksMcpFlags(provider)]
+        : [provider, '--append-system-prompt', expected, ...tasksMcpFlags(provider)]);
+      commands.length = 0;
+      await new View().launchThread({ key: provider, run: [provider] }, { space: 'api', folder: '/Code/api' }, {});
+      assert.ok(!commands.find(([name]) => name === 'tab.new')[1].argv.join(' ').includes(extra));
     }
   }
 });
