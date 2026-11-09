@@ -3816,7 +3816,7 @@ test('thread header menu opens Global Rules centrally and Shared MCP alongside A
   const view = new View(), cx = { ...renderContext };
   view.paneHeader({}, cx); ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
   ui.nodes.get('thread-actions-p0-settings').click({}, cx);
-  assert.deepEqual(overlays.at(-1), { mod: 'devkits-agents', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.8,
+  assert.deepEqual(overlays.at(-1), { mod: 'devkits-agents', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.86,
     props: { view: 'manage-launchers', space: projects.find(project => project.tabs?.some(tab => tab.id === 'tab-0'))?.id ?? null, page: 'accounts' } });
   assert.deepEqual(commands, []);
   ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
