@@ -1,4 +1,4 @@
-import { access, cp, mkdir, readFile, readdir, rename, rm, writeFile, mkdtemp } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile, mkdtemp } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -81,7 +81,17 @@ export async function reinstall(home) {
       const change = { target, saved, replaced: false, written: false };
       changes.push(change);
       try { await rename(target, saved); change.replaced = true; }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      catch (error) {
+        if (error.code === 'ENOENT') { /* new path */ }
+        // Windows refuses to move a folder while a running mod holds handles inside it; update it in place instead.
+        else if (LOCKED.has(error.code) && (await stat(target)).isDirectory()) {
+          await cp(target, saved, { recursive: true });
+          change.replaced = change.inPlace = true;
+          change.written = true;
+          await syncDir(join(stage, path), target);
+          continue;
+        } else throw error;
+      }
       await rename(join(stage, path), target);
       change.written = true;
     }
@@ -89,6 +99,7 @@ export async function reinstall(home) {
     const failures = [];
     for (const change of changes.reverse()) {
       try {
+        if (change.inPlace) { await syncDir(change.saved, change.target); continue; }
         if (change.written) await rm(change.target, { recursive: true, force: true });
         if (change.replaced) await rename(change.saved, change.target);
       } catch (failure) { failures.push(failure); }
@@ -97,6 +108,16 @@ export async function reinstall(home) {
     throw error;
   } finally { await rm(stage, { recursive: true, force: true }); }
   return { layout: join(home, 'layouts', 'devkits.json'), backup };
+}
+
+const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+// Make target match source without moving target itself.
+async function syncDir(source, target) {
+  const keep = new Set(await readdir(source));
+  for (const name of await readdir(target))
+    if (!keep.has(name)) await rm(join(target, name), { recursive: true, force: true });
+  await cp(source, target, { recursive: true, force: true });
 }
 
 // F5 runs the project command; Cmd+N repeats its last agent. Preserve existing layout overrides and other keys.
