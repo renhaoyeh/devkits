@@ -1,5 +1,6 @@
+import { Input } from './components/input.js';
 import { div } from 'gpui-kit';
-import { v_flex, Input, InputState } from 'gpui-base';
+import { v_flex, InputState } from 'gpui-base';
 import { appHome, props, shared, setShared, spaces, exec, readTextFile, run, openOverlay, closeOverlay, window } from 'herdr';
 import { Button } from './components/button.js';
 import { AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from './components/alert-dialog.js';
@@ -127,8 +128,8 @@ export class ResetDevkits {
         .child(div().text_size(13).text_color(t.muted).child(this.loading ? 'Checking Devkits data…'
           : `${this.plan?.accounts ?? 0} dedicated account directories. This cannot be undone.`))
         .child(div().text_size(13).text_color(t.muted).child('This closes all open projects and stops their sessions and any Devkits account sessions. Type DEVKITS to confirm.'))
-        .child(Input.new(this.input).id('reset-devkits-confirmation').accessibility_label('Type DEVKITS to confirm')
-          .h(36).px(10).rounded(0).border_b(1).border_color(t.input).text_size(13)))
+        .child(Input.new(this.input, t).id('reset-devkits-confirmation').accessibility_label('Type DEVKITS to confirm')
+          ))
       .when(Boolean(this.error), el => el.child(div().id('reset-devkits-error').text_size(12).text_color(t.destructive || t.ansi1)
         .child(`${this.error}${this.executing && this.authorized ? ' Reset is incomplete.' : ''}`)))
       .child(div().flex_1())

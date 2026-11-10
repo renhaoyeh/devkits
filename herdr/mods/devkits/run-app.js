@@ -1,5 +1,6 @@
+import { Input } from './components/input.js';
 import { div } from 'gpui-kit';
-import { h_flex, v_flex, InputState, Input } from 'gpui-base';
+import { h_flex, v_flex, InputState } from 'gpui-base';
 import { exec, run, spaces, terminals, shared, setShared, props, notify, openOverlay, closeOverlay, readTextFile, window } from 'herdr';
 import { DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/dropdown-menu.js';
 import { Button } from './components/button.js';
@@ -171,7 +172,7 @@ export class RunMenu {
       .child(DropdownMenuLabel(t).child('CUSTOM · ENTER TO USE'))
       .child(h_flex().h(36).flex_none().px(8).items_center()
         // The input element takes no flex sizing of its own, so a wrapper fills the row.
-        .child(div().flex_1().min_w(0).child(Input.new(this.input).id('run-custom').accessibility_label('Custom run command')
+        .child(div().flex_1().min_w(0).child(Input.new(this.input, t).id('run-custom').accessibility_label('Custom run command')
           .h(28).px(6).rounded(0).border_b(1).border_color(t.input).text_size(12))));
   }
 }
