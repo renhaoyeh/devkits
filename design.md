@@ -212,3 +212,6 @@
 - Draw the bottom status bar's continuous 1px separator in the layout-owned status-services row; service views stay transparent and never paint workspace borders.
 
 - Hide the conversation area when the selected project has no active visible thread, including pending projects and the internal default terminal. Disable Show conversation until a thread is available; retain its saved visibility preference and reveal newly started or selected threads normally.
+
+- Codex account sign-in supports sharing the sign-in link with another computer. While waiting, offer Copy sign-in link and a field for the full localhost callback URL returned after browser authorization. Validate its destination and pending OAuth state before forwarding it to the local CLI callback listener; let the CLI confirm completion before saving the account.
+- In Codex's waiting sign-in screen, group Open browser and Copy sign-in link beneath the browser instruction. Put the other-computer flow below a subtle separator, with a short heading, callback input and adjacent Connect account action. Keep Cancel and the primary Connect account action in a nonshrinking footer. Let the content scroll within the fixed dialog height so inputs and errors never overlap footer actions. Avoid duplicate waiting instructions and acknowledge copying inline on the existing button.
