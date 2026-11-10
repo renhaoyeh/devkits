@@ -1213,39 +1213,51 @@ test('profile permissions apply independently from Settings to the selected acco
   ui.nodes.get('manage-launchers-done').click();
   assert.equal(closed.at(-1), 'settings');
 });
-test('shared MCP settings expose one current-format editor and report concurrent edits', async () => {
-  const ui = fakeElements(), editors = [], writes = [], notices = [], closed = [];
-  const original = JSON.stringify({ version: 1, servers: { vs: { command: 'bridge' } } });
-  const target = { view: 'shared-mcp', overlay: 'mcp', agent: { key: 'codex', name: 'Codex' } };
-  let pending, conflict = true;
+test('shared MCP details stay read-only and refreshing does not write configuration', async () => {
+  const ui = fakeElements(); let pending;
+  let original = JSON.stringify({ version: 1, servers: {
+    vs: { command: 'bridge', args: ['hello world', 'line\narg'], startup_timeout_sec: 45, env_vars: ['PATH'] },
+    search: { url: 'http://localhost:9000/mcp', enabled: false, env_http_headers: { 'X-Client': 'CLIENT_ID' } },
+  } });
   const cx = { ...renderContext, spawn: fn => { pending = fn(cx); } };
-  const View = await viewFor({ ...ui, props: () => target, theme: () => ({}),
-    EditorState: { new: () => { let value = ''; const editor = { value: () => value, set_value: next => { value = next; } }; editors.push(editor); return editor; } },
-    Editor: { new: ui.element }, readTextFile: async () => original,
-    writeTextFile: async (...args) => { if (conflict) throw new Error('File changed. Reopen settings.'); writes.push(args); },
-    notify: note => notices.push(note), closeOverlay: id => closed.push(id), openOverlay() {} });
+  const View = await viewFor({ ...ui, props: () => ({ view: 'shared-mcp', overlay: 'mcp' }), theme: () => ({}),
+    readTextFile: async () => original, writeTextFile: () => assert.fail('read-only MCP must never write') });
   const view = new View(); view.init({}, cx); await pending; view.render(cx);
-  editors[0].set_value('{bad'); view.saveSharedMcp(cx); await pending;
-  assert.equal(writes.length, 0); assert.ok(view.mcpError);
-  assert.equal(editors.length, 1);
-  editors[0].set_value('{"vs":{"command":"new-bridge"}}');
-  view.saveSharedMcp(cx); await pending;
-  assert.match(view.mcpError, /File changed/); assert.equal(closed.length, 0);
-  conflict = false; view.saveSharedMcp(cx); await pending;
-  assert.equal(writes.length, 1); assert.equal(writes[0][2], original);
-  const saved = JSON.parse(writes[0][1]);
-  assert.equal(saved.profiles, undefined);
-  assert.deepEqual(saved.servers, { vs: { command: 'new-bridge' } });
-  assert.equal(notices.length, 1); assert.deepEqual(closed, ['mcp']);
-  // Embedded saves keep Settings mounted and advance the revision for the next save.
-  target.view = 'manage-launchers';
-  view.saveSharedMcp(cx); await pending;
-  const revision = writes.at(-1)[1];
-  editors[0].set_value('{"vs":{"command":"third-bridge"}}');
-  view.saveSharedMcp(cx); await pending;
-  assert.equal(writes.at(-1)[2], revision);
-  assert.deepEqual(closed, ['mcp']);
+  assert.ok(ui.texts.includes('bridge') && ui.texts.includes('Startup timeout (seconds)') && ui.texts.includes('45'));
+  for (const id of ['mcp-add', 'mcp-transport', 'mcp-arg-add', 'mcp-remove', 'mcp-save', 'mcp-cancel']) assert.ok(!ui.nodes.has(id), id);
+  assert.equal(view.saveSharedMcp, undefined);
+  assert.ok(ui.texts.includes('hello world') && ui.texts.includes('line\narg'));
+  assert.ok(ui.texts.includes('PATH'));
+  assert.ok(!ui.texts.includes(JSON.stringify(['hello world', 'line\narg'], null, 2)));
+  ui.nodes.get('mcp-select-search').click({}, cx); view.render(cx);
+  assert.ok(ui.texts.includes('http://localhost:9000/mcp') && ui.texts.includes('Disabled'));
+  assert.ok(ui.texts.some(text => String(text).includes('CLIENT_ID')));
+  original = JSON.stringify({ version: 1, servers: { search: { url: 'http://localhost:9100/mcp' } } });
+  ui.nodes.get('mcp-refresh').click({}, cx); await pending; view.render(cx);
+  assert.equal(view.mcpSelected, 'search'); assert.ok(ui.texts.includes('http://localhost:9100/mcp'));
+  original = '{invalid'; view.initSharedMcp(cx); await pending;
+  assert.ok(view.mcpError); assert.equal(view.mcpConfig, null);
+});
 
+test('MCP Enable saves only enabled with revision checks, blocks duplicate writes and preserves state on conflicts', async () => {
+  const ui = fakeElements(), writes = []; let pending, finishWrite, conflict = false;
+  const original = JSON.stringify({ version: 1, servers: { vs: { command: 'bridge', args: ['one'], startup_timeout_sec: 30 }, other: { url: 'http://localhost:9000/mcp', enabled: false } } });
+  const cx = { ...renderContext, spawn: fn => { pending = fn(cx); } };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'shared-mcp' }), theme: () => ({}), readTextFile: async () => original,
+    writeTextFile: async (...args) => { writes.push(args); if (conflict) throw Error('File changed'); await new Promise(resolve => { finishWrite = resolve; }); } });
+  const view = new View(); view.init({}, cx); await pending; view.render(cx);
+  const row = view.mcpRows[0];
+  ui.nodes.get('mcp-enabled').click({}, cx);
+  assert.equal(row.enabled, true); assert.equal(view.mcpSaving, true);
+  view.toggleMcpEnabled(row, cx); assert.equal(writes.length, 1);
+  finishWrite(); await pending;
+  assert.equal(row.enabled, false); assert.equal(writes[0][2], original);
+  const expected = JSON.parse(original); expected.servers.vs.enabled = false;
+  assert.deepEqual(JSON.parse(writes[0][1]), expected);
+  conflict = true; view.toggleMcpEnabled(row, cx); await pending;
+  assert.match(view.mcpError, /File changed/); assert.equal(row.enabled, false);
+  assert.equal(writes[1][2], writes[0][1]);
+  assert.deepEqual(view.mcpConfig, expected);
 });
 
 test('new local Codex sessions receive shared MCP settings and remote sessions do not read them', async () => {
