@@ -1260,6 +1260,14 @@ test('shared MCP details stay read-only and refreshing does not write configurat
   original = JSON.stringify({ version: 1, servers: { search: { url: 'http://localhost:9100/mcp' } } });
   ui.nodes.get('mcp-refresh').click({}, cx); await pending; view.render(cx);
   assert.equal(view.mcpSelected, 'search'); assert.ok(ui.texts.includes('http://localhost:9100/mcp'));
+  original = JSON.stringify({ version: 1, servers: {} });
+  ui.nodes.get('mcp-refresh').click({}, cx); await pending; ui.nodes.clear(); view.render(cx);
+  assert.equal(view.mcpSelected, 'builtin:herdr_tasks');
+  assert.ok(ui.nodes.has('mcp-select-builtin:herdr_tasks'));
+  assert.ok(ui.texts.includes('Built-in · Managed automatically by Devkits.'));
+  assert.ok(!ui.nodes.has('mcp-enabled'));
+  view.toggleMcpEnabled(view.mcpRows[0], cx);
+  assert.deepEqual(view.mcpConfig.servers, {});
   original = '{invalid'; view.initSharedMcp(cx); await pending;
   assert.ok(view.mcpError); assert.equal(view.mcpConfig, null);
 });
