@@ -89,6 +89,31 @@ test('reopening empty projects keeps the internal terminal covered after native 
   assert.ok(!commands.some(([name]) => name === 'tab.close' || name === 'terminal.kill'));
 });
 
+test('empty projects hide a restored conversation area without clearing its preference', async () => {
+  const ui = fakeElements(), memory = { 'devkits.conversation-visible': { '["","/Code/one"]': true } };
+  const stack = { id: 'workspace-view', active: 'main', hidden: false };
+  const project = { id: 'one', folder: '/Code/one', active: true, tabs: [] };
+  let liveAgents = [], livePanes = [];
+  const View = await viewFor({ ...ui, props: () => ({}), theme: () => ({}), spaces: () => [project],
+    agents: () => liveAgents, panes: () => livePanes, layout: () => stack,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; },
+    run: (name, args) => {
+      if (args?.id === stack.id && ['layout.show', 'layout.hide'].includes(name)) stack.hidden = name === 'layout.hide';
+      if (name === 'layout.select' && args.stack === stack.id) stack.active = args.child;
+    }, setAgentOrder() {} });
+  const view = new View(); view.folded = new Set();
+  const check = expected => { view.render(); assert.equal(stack.hidden, !expected); };
+  check(false);
+  project.tabs = [{ id: 'default', name: '__devkits_default_terminal__', active: true }];
+  stack.hidden = false; check(false);
+  view.showConversation(true, project); assert.equal(stack.hidden, true);
+  assert.equal(memory['devkits.conversation-visible']['["","/Code/one"]'], true);
+  livePanes = [{ tab: 'default' }, { tab: 'default' }]; check(true);
+  livePanes = []; liveAgents = [{ space: 'one', tab: 'default' }]; check(true);
+  liveAgents = []; project.tabs = [{ id: 'thread', name: 'Terminal', active: true }]; check(true);
+  project.tabs = []; check(false);
+});
+
 test('sidebar reads native panes and terminals once per frame and releases them for event-time checks', async () => {
   const ui = fakeElements(), reads = { panes: 0, terminals: 0 };
   const tabs = Array.from({ length: 30 }, (_, i) => ({ id: `shell-${i}`, name: `Shell ${i}` }));

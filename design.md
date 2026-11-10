@@ -210,3 +210,5 @@
 - Visual Studio builds is a positive preference for installed, available Visual Studio MCP tools. Show its vs-mcp project link as an accent-colored bordered GitHub button beside the selected rule title in Global Rules; keep that link out of injected instructions. Give every rule and Final preview the same 28px title row so the link does not shift content between pages.
 
 - Draw the bottom status bar's continuous 1px separator in the layout-owned status-services row; service views stay transparent and never paint workspace borders.
+
+- Hide the conversation area when the selected project has no active visible thread, including pending projects and the internal default terminal. Disable Show conversation until a thread is available; retain its saved visibility preference and reveal newly started or selected threads normally.
