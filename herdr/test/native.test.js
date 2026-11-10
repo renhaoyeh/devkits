@@ -2845,6 +2845,9 @@ test('installer adds only its own files and refuses to overwrite an existing ins
   function visit(node) { assert.ok(!ids.has(node.id)); ids.add(node.id); for (const child of node.children || []) visit(child); }
   visit(layout);
   assert.ok(ids.has('agents-service'));
+  const separator = layout.children[1].children[2].children[0];
+  assert.equal(separator.size.px, 1);
+  assert.equal(separator.background, 'border');
   assert.equal(layout.children[1].children[2].children[0].children.find(node => node.id === 'agents-service').content.mod, 'devkits-agents');
   // The thread, then the editor (Files or Changes, each with its list at the right), then the simulator at the window's edge.
   const row = layout.children[1].children[1], [stack, editor, simulator] = row.children;
