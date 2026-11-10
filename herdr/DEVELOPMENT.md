@@ -22,7 +22,7 @@ This is the repeatable workflow for developing the custom Herdr interface. Produ
 | Calendar events, views and task references | `mods/devkits-calendar/` |
 | Quota usage, details and token statistics | `mods/devkits-usage/`; public client in `mods/devkits/components/usage.js` |
 | Shared native UI components | `mods/devkits/components/`; other mods carry copies (`COPIES`, `sync-shared.js`) |
-| iOS Simulator panel | `mods/devkits-simulator/` |
+| iOS Simulator panel and Xcode Storage | `mods/devkits-simulator/` |
 | Project and thread data transformations | `mods/devkits/components/session-model.js` |
 | Semantic colors | `themes/devkits.json`, `themes/devkits-light.json` |
 | Icons and preview | `mods/devkits/assets/` |
