@@ -20,4 +20,4 @@ No agent is started automatically. Existing destinations are refused; use
 
 Source: ../mods/devkits-zed. Follow ../../design.md and ../DEVELOPMENT.md for UI
 work. The sample workspace includes snapshots of those instructions for reference.
-Only the workspace shell is shipped. Extension APIs are a later step. Keep the user's requested preview open.
+The default preview contains only the workspace shell. To include the Asana popup entry, use `node prepare.js --extension devkits-asana`. Keep the user's requested preview open.

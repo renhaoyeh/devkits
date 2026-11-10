@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installZed } from '../install-zed.js';
+import { installZedExtension } from '../install-zed-extension.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
-export async function prepare({ home } = {}) {
+export async function prepare({ home, extensions = [] } = {}) {
   // Only a new home may receive the actual installable Devkits source.
   if (home) {
     home = resolve(home);
@@ -14,6 +15,7 @@ export async function prepare({ home } = {}) {
     await mkdir(home, { recursive: true });
   } else home = await mkdtemp(join(tmpdir(), 'zed-shell-'));
   await installZed(home);
+  for (const mod of extensions) await installZedExtension(home, mod);
   const project = join(home, 'workspace'), codeHome = join(home, 'data/preview-codex'), claudeHome = join(home, 'data/preview-claude');
   await mkdir(join(project, 'herdr'), { recursive: true });
   await mkdir(codeHome, { recursive: true }); await mkdir(claudeHome, { recursive: true });
@@ -34,12 +36,13 @@ export async function prepare({ home } = {}) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const args = process.argv.slice(2);
+    const args = process.argv.slice(2), extensions = [];
     let home;
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--home' && args[i + 1]) home = args[++i];
+      else if (args[i] === '--extension' && args[i + 1]) extensions.push(args[++i]);
       else throw new Error(`Unknown or incomplete option: ${args[i]}`);
     }
-    console.log(await prepare({ home }));
+    console.log(await prepare({ home, extensions }));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
