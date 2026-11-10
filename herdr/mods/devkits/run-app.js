@@ -1,6 +1,6 @@
 import { div } from 'gpui-kit';
 import { h_flex, v_flex, InputState, Input } from 'gpui-base';
-import { exec, run, spaces, terminals, shared, setShared, props, notify, openOverlay, closeOverlay, readTextFile } from 'herdr';
+import { exec, run, spaces, terminals, shared, setShared, props, notify, openOverlay, closeOverlay, readTextFile, window } from 'herdr';
 import { DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/dropdown-menu.js';
 import { Button } from './components/button.js';
 import { glyph } from './components/icon.js';
@@ -13,6 +13,9 @@ const RUNS = 'devkits.run-commands';
 const RECENT_RUNS = 'devkits.run-history';
 const RECENT_LIMIT = 10;
 const RUN_SHELL = '"${SHELL:-/bin/zsh}" -lic "$1"; exec "${SHELL:-/bin/zsh}" -l';
+const WINDOWS_RUN_MARKER = '# devkits-run\n';
+// PowerShell's encoded command is UTF-16LE; encoding avoids legacy shell quote loss.
+const utf16 = text => text.split('').map(char => String.fromCharCode(char.charCodeAt(0) & 255, char.charCodeAt(0) >> 8)).join('');
 const MENU_WIDTH = 320;
 
 export const savedRun = folder => (folder && shared(RUNS)?.[folder]) || null;
@@ -31,7 +34,14 @@ function rememberRun(folder, command) {
 
 // Match our launch wrapper, including when Herdr prepends its own login shell.
 const isRunTerminal = terminal => {
-  const argv = (terminal.argv || []).slice(-5);
+  const command = terminal.argv || [];
+  const powershell = command.slice(-4);
+  const encoded = powershell[0] === 'powershell.exe' && powershell[1] === '-NoExit' && powershell[2] === '-EncodedCommand'
+    ? powershell[3] : /^& 'powershell.exe' '-NoExit' '-EncodedCommand' '([A-Za-z0-9+/=]+)'$/.exec(command.at(-1) || '')?.[1];
+  if (encoded) {
+    try { return atob(encoded).startsWith(utf16(WINDOWS_RUN_MARKER)); } catch { return false; }
+  }
+  const argv = command.slice(-5);
   return argv.length === 5 && argv[0] === 'sh' && argv[1] === '-c' && argv[2] === RUN_SHELL && argv[3] === 'sh';
 };
 
@@ -60,7 +70,7 @@ export async function simulatorId() {
 export async function runApp() {
   const space = shownProject();
   const warn = body => notify({ title: 'Run', body, level: 'warning' });
-  if (!space?.folder || space.machine) return warn('Choose a project on this Mac first.');
+  if (!space?.folder || space.machine) return warn('Choose a project on this computer first.');
   const template = savedRun(space.folder);
   if (!template) return warn(`Choose what ${space.name} runs from the run menu at the top.`);
   let command = template;
@@ -73,7 +83,10 @@ export async function runApp() {
     .map(terminal => terminal.labels?.['herdr.tab']));
   for (const tab of space.tabs.filter(tab => previous.has(tab.id))) run('tab.close', { id: tab.id });
   run('devkits.reveal-conversation');
-  run('tab.new', { space: space.id, folder: space.folder, name: command, argv: ['sh', '-c', RUN_SHELL, 'sh', command] });
+  const argv = window()?.platform === 'windows'
+    ? ['powershell.exe', '-NoExit', '-EncodedCommand', btoa(utf16(WINDOWS_RUN_MARKER + command))]
+    : ['sh', '-c', RUN_SHELL, 'sh', command];
+  run('tab.new', { space: space.id, folder: space.folder, name: command, argv });
   rememberRun(space.folder, template);
 }
 

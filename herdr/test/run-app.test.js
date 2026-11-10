@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 // run-app.js with a fake Herdr host; no real session or terminal is touched.
 async function load(host = {}) {
+  host = { window: () => ({ platform: 'macos' }), ...host };
   const source = await readFile(new URL('../mods/devkits/run-app.js', import.meta.url), 'utf8');
   return new Function(...Object.keys(host), source.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '')
     + '\nreturn { projectScripts, simulatorId, runApp, RunMenu, recentRuns };')(...Object.values(host));
@@ -68,7 +71,39 @@ test('Run names its thread after the executed command and replaces its previous 
   await runApp();
   assert.deepEqual(calls, []);
   assert.deepEqual(notes, ['Choose what app runs from the run menu at the top.', 'Choose a simulator in the simulator panel first.',
-    'Choose a project on this Mac first.']);
+    'Choose a project on this computer first.']);
+});
+
+test('Windows Run preserves commands through PowerShell and replaces only the project run', async () => {
+  const calls = [], memory = { 'devkits.run-commands': { 'C:/project': 'npm run dev' } };
+  const space = { id: 's1', name: 'app', active: true, folder: 'C:/project', tabs: [{ id: 'run' }, { id: 'shell' }, { id: 'agent' }] };
+  const live = [];
+  const { runApp } = await load({ window: () => ({ platform: 'windows' }), spaces: () => [space], terminals: () => live,
+    shared: key => memory[key], setShared: (key, value) => { memory[key] = value; }, run: (name, args) => calls.push([name, args]) });
+  await runApp();
+  const argv = calls.at(-1)[1].argv;
+  assert.deepEqual(argv.slice(0, 3), ['powershell.exe', '-NoExit', '-EncodedCommand']);
+  assert.equal(Buffer.from(argv[3], 'base64').toString('utf16le'), '# devkits-run\nnpm run dev');
+  const powershell = ['powershell.exe', '-NoExit', '-Command', '& ' + argv.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ')];
+  live.push({ labels: { 'herdr.space': 's1', 'herdr.tab': 'run' }, argv: powershell },
+    { labels: { 'herdr.space': 's1', 'herdr.tab': 'shell' }, argv: ['powershell.exe', '-NoExit', '-EncodedCommand', Buffer.from('Write-Output unrelated', 'utf16le').toString('base64')] },
+    { labels: { 'herdr.space': 's1', 'herdr.tab': 'agent' }, argv: ['codex'] },
+    { labels: { 'herdr.space': 'other', 'herdr.tab': 'other' }, argv: powershell });
+  const command = `Write-Output 'quoted "text" & 中文 😀'`;
+  memory['devkits.run-commands']['C:/project'] = command; calls.length = 0;
+  await runApp();
+  assert.deepEqual(calls.slice(0, 2), [['tab.close', { id: 'run' }], ['devkits.reveal-conversation', undefined]]);
+  const launched = calls.at(-1)[1];
+  assert.equal(launched.name, command);
+  assert.equal(Buffer.from(launched.argv[3], 'base64').toString('utf16le'), '# devkits-run\n' + command);
+  live[0].argv = launched.argv; calls.length = 0;
+  await runApp();
+  assert.deepEqual(calls[0], ['tab.close', { id: 'run' }], 'Direct PowerShell argv is recognized too');
+  if (process.platform === 'win32') {
+    const script = '[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); & ' + launched.argv.filter(arg => arg !== '-NoExit').map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ');
+    const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-Command', script]);
+    assert.equal(stdout.trim(), 'quoted "text" & 中文 😀');
+  }
 });
 
 test('the run menu saves a script or a typed command for its project', async () => {
