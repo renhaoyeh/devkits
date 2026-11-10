@@ -1237,6 +1237,15 @@ test('shared MCP settings expose one current-format editor and report concurrent
   assert.equal(saved.profiles, undefined);
   assert.deepEqual(saved.servers, { vs: { command: 'new-bridge' } });
   assert.equal(notices.length, 1); assert.deepEqual(closed, ['mcp']);
+  // Embedded saves keep Settings mounted and advance the revision for the next save.
+  target.view = 'manage-launchers';
+  view.saveSharedMcp(cx); await pending;
+  const revision = writes.at(-1)[1];
+  editors[0].set_value('{"vs":{"command":"third-bridge"}}');
+  view.saveSharedMcp(cx); await pending;
+  assert.equal(writes.at(-1)[2], revision);
+  assert.deepEqual(closed, ['mcp']);
+
 });
 
 test('new local Codex sessions receive shared MCP settings and remote sessions do not read them', async () => {
@@ -2170,7 +2179,7 @@ test('optional Agent profiles are a table separate from native settings, with no
   assert.ok(!ui.nodes.has('defaults-profile-select'));
   assert.ok(!ui.nodes.has('defaults-model-select'));
   const pageOrder = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules']);
+  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules', 'settings-page-shared-mcp']);
   const key = 'devkits-preset-one';
   memory['devkits.agent-configs'] = [{ key, name: 'Review', profileKey: 'claude' }]; h.render();
   assert.ok(!ui.textOf('agent-profiles-table').includes('Default agent'));
@@ -3562,14 +3571,14 @@ test('the header branch opens a read-only list of local and remote branches, new
   assert.equal(ui.nodes.get('branch-local-main').click, undefined);
 });
 
-test('Agent settings includes Global Rules after Profiles and keeps Shared MCP separate', async () => {
+test('Agent settings includes Global Rules and Shared MCP after Profiles', async () => {
   const ui = fakeElements();
   const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'settings' }), theme: () => ({}) });
   const view = new View(); view.initSessionMenu({ ...renderContext, spawn() {}, timer: { every() {} } });
   view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
   view.render(renderContext);
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules']);
+  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules', 'settings-page-shared-mcp']);
   assert.ok(ui.nodes.has('settings-page-global-rules') && !ui.nodes.has('shared-local-mcp'));
   assert.ok(!ui.nodes.has('hardware-settings'));
 });
@@ -3819,7 +3828,7 @@ test('archive rechecks live status after asynchronous session discovery', async 
 });
 
 
-test('thread header menu opens Global Rules settings and Shared MCP alongside Agent settings', async () => {
+test('thread header menu consolidates configuration under Agent settings', async () => {
   const ui = fakeElements(), commands = [];
   const overlays = [], requests = [];
   const View = await viewFor({ ...ui, spaces: () => projects, agents: () => [], props: () => ({ pane: 'p0' }),
@@ -3833,16 +3842,9 @@ test('thread header menu opens Global Rules settings and Shared MCP alongside Ag
   assert.deepEqual(overlays.at(-1), { mod: 'devkits-agents', kind: 'dialog', frame: 'none', modal: false, width: 1040, height: 0.86,
     props: { view: 'manage-launchers', space: projects.find(project => project.tabs?.some(tab => tab.id === 'tab-0'))?.id ?? null, page: 'accounts' } });
   assert.deepEqual(commands, []);
-  ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
-  ui.nodes.get('thread-actions-p0-mcp').click({}, cx);
-  assert.equal(overlays.at(-1).props.view, 'shared-mcp');
-  assert.equal(overlays.at(-1).modal, true);
-  ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
-  ui.nodes.get('thread-actions-p0-rules').click({}, cx);
-  assert.deepEqual(requests, []);
-  assert.equal(overlays.at(-1).props.page, 'global-rules');
-  assert.equal(overlays.at(-1).mod, 'devkits-agents');
-  assert.equal(overlays.length, 3);
+  assert.ok(!ui.nodes.has('thread-actions-p0-mcp'));
+  assert.ok(!ui.nodes.has('thread-actions-p0-rules'));
+  assert.equal(overlays.length, 1);
   commands.length = 0;
   ui.nodes.get('thread-menu-p0').click({}, cx); view.paneHeader({}, cx);
   for (const action of ['hide', 'stop', 'archive', 'close']) assert.ok(!ui.nodes.has(`thread-actions-p0-${action}`));
