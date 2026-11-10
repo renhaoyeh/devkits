@@ -3104,11 +3104,12 @@ test('Windows account launchers keep provider icons in the sidebar and pane head
   }
 });
 
-for (const kind of ['codex', 'claude']) test(`Windows ${kind} archive uses shared JS discovery and retains account and resume flags`, async () => {
+for (const resumed of [false, true]) for (const kind of ['codex', 'claude']) test(`Windows ${kind} ${resumed ? 'resumed ' : ''}archive uses shared JS discovery and retains account and resume flags`, async () => {
   const ui = fakeElements(), memory = { 'devkits.thread-profiles': { 'tab-0': 'work-profile' } }, commands = [], tasks = [], lookups = [];
   const id = '12345678-1234-1234-1234-123456789abc', directory = 'C:\\Accounts\\Work account';
   const command = ['env', `${kind === 'codex' ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'}=${directory}`, kind,
-    ...(kind === 'codex' ? ['-m', 'fixture-model', '--sandbox', 'read-only'] : ['--permission-mode', 'bypassPermissions'])];
+    ...(kind === 'codex' ? [...(resumed ? ['resume'] : []), '-m', 'fixture-model', '--sandbox', 'read-only'] : ['--permission-mode', 'bypassPermissions', ...(resumed ? ['--resume'] : [])]),
+    ...(resumed ? [id] : [])];
   const wrapped = terminalArgv(command, 'windows');
   const argv = ['powershell.exe', '-NoExit', '-Command', '& ' + wrapped.map(arg => "'" + arg.replaceAll("'", "''") + "'").join(' ')];
   const agent = { ...claudeAgent, app: kind === 'codex' ? 'codex' : 'claude-code', status: 'idle', seq: 1 };
@@ -3125,7 +3126,7 @@ for (const kind of ['codex', 'claude']) test(`Windows ${kind} archive uses share
   assert.equal(ui.nodes.get('archive-thread-tab-0').disabled, false);
   assert.ok(!ui.nodes.has('close-thread-tab-0'));
   assert.deepEqual(commands, [], 'Checking a conversation never archives or closes it');
-  assert.deepEqual(lookups[0], ['node', ['/herdr/mods/devkits/components/agent-session-windows.js', '42', kind, directory]]);
+  assert.deepEqual(lookups[0], ['node', ['/herdr/mods/devkits/components/agent-session-windows.js', '42', kind, directory, ...(resumed && kind === 'codex' ? [id] : [])]]);
   await view.archiveThread(thread);
   const entry = memory['devkits.archived-threads'][0];
   assert.equal(entry.id, `${kind}:${id}`);
@@ -4210,7 +4211,7 @@ test('copying the Agent Guide uses its latest editable content and never supplie
   assert.equal(copied.length, 2); assert.match(board.view.relatedError, /empty or unavailable/);
 });
 
-async function taskBoardFor(records = {}) {
+async function taskBoardFor(records = {}, actions = {}) {
   const ui = fakeElements(), model = await import('../mods/devkits-tasks/agent-board-model.js');
   const project = { id: 'p', name: 'Project', folder: '/project', tabs: [] };
   const projects = [project], runtime = { agents: [] }, dialogs = [], launches = [];
@@ -4248,7 +4249,7 @@ async function taskBoardFor(records = {}) {
   const view = new Board(), cx = { ...renderContext, timer: { every() {} }, spawn: fn => fn(renderContext) };
   view.init(cx);
   const launchers = [{ key: 'profile', name: 'Rick', icon: 'icons/codex.svg', tint: false }];
-  const render = () => { ui.nodes.clear(); return view.render(project, runtime.agents, launchers, {}, cx); };
+  const render = () => { ui.nodes.clear(); return view.render(project, runtime.agents, launchers, actions, cx); };
   render();
   // Pressing Delete in the confirmation dialog opened by the last delete request.
   const confirmDelete = () => { const request = dialogs.at(-1); if (request?.view === 'delete-task') Board.deleteLocalTask(project, request.gid, runtime.agents); };
@@ -4844,4 +4845,23 @@ test('Tasks deduplicates pending and loaded external detail reads while allowing
   board.view.detail.detailError = 'Offline';
   board.ui.nodes.get('board-card-a').click({}, board.cx); await settle();
   assert.equal(detailReads, 2); assert.equal(board.view.detail.detailError, null);
+});
+
+
+test('a closed conversation is restorable from its Tasks card menu and fixed detail footer', async () => {
+  const task = { gid: 'thread:closed-test', name: 'Run tests', source: 'thread', status: 'todo', hasInput: true,
+    conversation: { id: 'codex:session', argv: ['codex', 'resume', 'session'] } };
+  const resumed = [];
+  const board = await taskBoardFor({ [task.gid]: task }, { resume: current => resumed.push(current.gid) });
+  board.ui.nodes.get(`board-card-actions-${task.gid}`).click({}, board.cx); board.render();
+  const restore = board.ui.nodes.get(`board-card-menu-${task.gid}-resume`);
+  assert.ok(restore);
+  restore.click({}, board.cx); board.render();
+  assert.deepEqual(resumed, [task.gid]);
+  board.ui.nodes.get('board-resume-session').click({}, board.cx);
+  assert.deepEqual(resumed, [task.gid, task.gid]);
+  board.memory['devkits.agent-board'][board.key][task.gid].archived = true;
+  board.view.archived = true; board.view.cardMenuTask = task.gid; board.view.cardMenu.open = true; board.render();
+  assert.ok(!board.ui.nodes.has(`board-card-menu-${task.gid}-resume`));
+  assert.ok(!board.ui.nodes.has('board-resume-session'));
 });
