@@ -10,8 +10,9 @@ export async function install(home) {
   const companionNames = ['devkits-agents', 'devkits-system', 'devkits-asana', 'devkits-mantisbt', 'devkits-tasks', 'devkits-calendar', 'devkits-usage'];
   const companions = companionNames.map(name => join(home, 'mods', name));
   const frames = join(home, 'mods', 'devkits-sim-frames');
+  const ecc = join(home, 'data', 'devkits', 'ecc-source');
   const themes = ['devkits', 'devkits-light'].map(name => join(home, 'themes', `${name}.json`));
-  for (const path of [layout, mod, simulator, frames, ...companions, ...themes]) {
+  for (const path of [layout, mod, simulator, frames, ecc, ...companions, ...themes]) {
     try { await access(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     throw new Error(`Already exists: ${path}. Refusing to overwrite.`);
   }
@@ -19,7 +20,7 @@ export async function install(home) {
   await mkdir(join(home, 'mods'), { recursive: true });
   await mkdir(join(home, 'themes'), { recursive: true });
   const stage = await mkdtemp(join(home, 'mods', '.devkits-'));
-  let installed = false, simulatorInstalled = false, framesInstalled = false, layoutWritten = false;
+  let installed = false, simulatorInstalled = false, framesInstalled = false, eccWritten = false, layoutWritten = false;
   const writtenThemes = [], writtenCompanions = [];
   try {
     await cp(new URL('./mods/devkits/', import.meta.url), stage, { recursive: true,
@@ -32,6 +33,14 @@ export async function install(home) {
       await cp(new URL(`./mods/${name}/`, import.meta.url), companions[index], { recursive: true, errorOnExist: true, force: false,
         filter: source => !source.endsWith('/gpui-kit.d.ts') && !source.endsWith('/jsconfig.json') });
     }
+    // Keep plugin source outside watched mod folders; it is data for native plugin managers.
+    const eccSource = new URL('./vendor/everything-claude-code/', import.meta.url);
+    try { await access(new URL('.claude-plugin/plugin.json', eccSource)); }
+    catch { throw new Error('ECC source is missing. Run git submodule update --init --recursive before installing.'); }
+    await mkdir(dirname(ecc), { recursive: true });
+    eccWritten = true;
+    await cp(eccSource, ecc, { recursive: true,
+      filter: source => !['.git', 'node_modules'].includes(source.split(/[\\/]/).at(-1)) });
     await mkdir(frames);
     framesInstalled = true;
     for (const name of ['mod.json', 'main.js'])
@@ -47,6 +56,7 @@ export async function install(home) {
     if (installed) await rm(mod, { recursive: true });
     if (simulatorInstalled) await rm(simulator, { recursive: true, force: true });
     if (framesInstalled) await rm(frames, { recursive: true });
+    if (eccWritten) await rm(ecc, { recursive: true, force: true });
     for (const path of writtenThemes) await rm(path);
     for (const path of writtenCompanions) await rm(path, { recursive: true, force: true });
     throw error;
@@ -68,7 +78,7 @@ export async function reinstall(home) {
     });
     if (keys !== null) await writeFile(join(stage, 'keys.json'), keys);
     await install(stage);
-    const paths = [];
+    const paths = [join('data', 'devkits', 'ecc-source')];
     for (const folder of ['mods', 'themes', 'layouts'])
       for (const name of await readdir(join(stage, folder))) paths.push(join(folder, name));
     if (keys === null || !keys.equals(await readFile(join(stage, 'keys.json')))) paths.push('keys.json');

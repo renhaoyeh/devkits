@@ -122,7 +122,7 @@ Choose **History** in the right Git panel to browse commits reachable from the c
 
 With no project open, the editor area shows **Welcome**: **Open folder…**, the agents found on this computer (with an install command for a missing Claude Code or Codex CLI) and **Agent settings…**. Nothing needs configuring first: open a folder and pick an agent from **Start a thread**, which a project shows while no file or thread is open and lists the same launchers as Add session.
 
-Open Herdr’s app settings from the gear at the top right of the window header. Open **Settings**, the agent and account settings dialog, from **Agent settings…** in a thread's **⋯** menu, or **Agent settings…** on Welcome and a project's start list; it needs no open project. Its pages, in setup order, are **Accounts**, **Agents** and **Profiles**. The **Agents** page lists Terminal, installed agents, accounts and profiles in one order, with an **Add session** and a **Usage** checkbox for each, and Auto below it (**How Auto chooses** expands its rules). Terminal, built-in agents, **Your accounts** and **Agent profiles** have separate sections in both the dialog and menu. Drag a handle to reorder within a section; leave the dialog or press Escape to cancel a drag. Alternatively, select a row and press Alt + Up/Down to reorder. Visibility and order are saved across projects and app restarts; hiding an entry does not remove its account or stop running sessions. New entries appear after the saved entries in their section, and number shortcuts follow the visible agent order. Click the backdrop, choose **Done**, or press Escape to close Settings.
+Open Herdr’s app settings from the gear at the top right of the window header. Open **Settings**, the agent and account settings dialog, from **Agent settings…** in a thread's **⋯** menu, or **Agent settings…** on Welcome and a project's start list; it needs no open project. Its pages, in setup order, are **Accounts**, **Agents**, **Profiles**, **Global Rules**, **Shared MCP** and **ECC**. The **Agents** page lists Terminal, installed agents, accounts and profiles in one order, with an **Add session** and a **Usage** checkbox for each, and Auto below it (**How Auto chooses** expands its rules). Terminal, built-in agents, **Your accounts** and **Agent profiles** have separate sections in both the dialog and menu. Drag a handle to reorder within a section; leave the dialog or press Escape to cancel a drag. Alternatively, select a row and press Alt + Up/Down to reorder. Visibility and order are saved across projects and app restarts; hiding an entry does not remove its account or stop running sessions. New entries appear after the saved entries in their section, and number shortcuts follow the visible agent order. Click the backdrop, choose **Done**, or press Escape to close Settings.
 
 Choose **Agent settings → Global Rules**. Check Herdr Core, Task progress, Shared MCP installation and Custom rules to choose instructions for new local Claude/Codex sessions. All start checked; these switches control instruction injection only and do not disable Tasks or MCP services. Select a module to read its content, edit Custom rules in the native editor, and select Final preview to inspect the combined text. **Save changes** applies the draft; closing without saving discards it. The source stays in `data/devkits/AGENTS.md`, with switch choices in `devkits.global-rules`. Existing module text and custom instructions are preserved; saving retains unchecked sections and rejects concurrent file edits. Herdr Core asks agents to read `hc --skill`; no skill installation is required. Claude receives the selected text through `--append-system-prompt`; Codex through `-c developer_instructions`. Existing sessions keep their injected instructions. Missing/empty Guides and remote sessions skip global injection.
 
@@ -211,3 +211,32 @@ Other MCP clients can launch `node <HERDR_APP_HOME>/mods/devkits-tasks/mcp-serve
 Requests use the live Tasks owner through Herdr's mod command bus, with per-request files under `data/devkits/tasks-mcp/` for replies and larger descriptions. The server does not edit `shared.json`. Separate client processes use unique request IDs. Calls expire after ten seconds; if a create times out, check `list_tasks` before retrying because the task may already exist. Completed calls remove their request and reply files; an abruptly terminated client can leave files in this directory. The endpoint implements the MCP 2025-06-18 stdio protocol ([transport specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)); Codex's session configuration uses [MCP command/args configuration](https://developers.openai.com/codex/mcp).
 
 Source button artwork: [Asana SVG from Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/asana.svg), [MantisBT logo from its official repository](https://github.com/mantisbt/mantisbt/blob/master/images/mantis_logo_notext.png).
+
+### Global ECC
+
+Initialize the pinned Everything Claude Code source before installing Devkits:
+
+```sh
+git submodule update --init --recursive
+```
+
+**Agent settings → ECC** has an **Overview**, **Claude Code** and **Codex** tab. The Overview explains how ECC's layers fit together. Each provider tab has its own enable switch, searchable component list, individual selections and read-only descriptions. Turning a provider off retains its selections. Settings apply globally to every local account, Profile and Task for that provider; there are no account-specific selections.
+
+| Layer | What it controls | Claude Code | Codex |
+| --- | --- | --- | --- |
+| Rules | Coding, testing and security instructions | Yes | Yes |
+| Agents | Specialist roles such as planner and reviewer | Yes | — |
+| Skills | Reusable knowledge and working steps | Yes | Yes |
+| Commands | ECC slash-command shortcuts | Yes | — |
+| Hooks | Native events and individually gated checks | Yes | SessionStart in this source |
+| MCP | Selected connected tools and their requirements | Yes | Yes |
+| Contexts | One optional development/research/review focus | Yes | Yes |
+| Workflows | Native multi-agent pipeline scripts | Yes, experimental | — |
+
+ECC starts off. Rules, contexts and MCP tools start unselected; enabling ECC does not connect every bundled tool. Native hook profiles still control which selected Claude checks run. MCP templates with unfinished source fields cannot be selected; environment requirements are listed before you opt in. Source descriptions are read-only, and some upstream descriptions remain technical: the layer explanation and provider badge explain how the item is used.
+
+Selection switches change a draft. **Save changes** validates and prepares the selected packages, then saves `data/devkits/ecc.json` with revision checking. **Discard changes** reloads the saved plan. Search-scoped bulk buttons act only on matching results. Context selection is exclusive per provider. ECC uses the pinned submodule bundled under `data/devkits/ecc-source`. Its version is shown read-only; the panel does not offer a custom source path.
+
+Devkits builds immutable packages under `data/devkits/ecc-packages`; it does not edit the upstream checkout. Disabled skills lose their discovery file while retaining scripts needed by hooks. Disabled agents, commands, workflows and native hooks are omitted from their managed package. Selected rules and context are written to a guidance file that new sessions are instructed to read, preserving Global Rules and profile instructions without large command-line arguments. Stdio MCP credentials are resolved from environment variables at runtime rather than written into the generated plan.
+
+New local sessions use the provider's native plugin manager to install the selected package. Each revision has a separate managed marketplace so existing sessions keep their cached source. Setup disables other Devkits-managed revisions, leaves unrelated plugins alone and rejects an enabled external `ecc@ecc` instead of creating duplicates. Codex retains its native hook trust decision. Turning ECC off disables the managed package on the next launch without uninstalling it. Failed setup remains retryable; it never records success before the native operations finish. Remote projects are unchanged.

@@ -123,7 +123,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/global-rules-model', '../devkits-agents/global-rules', '../devkits-agents/global-rules-settings', '../devkits-agents/discovery', '../devkits-agents/account-storage-model', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/ecc-model', '../devkits-agents/ecc', '../devkits-agents/ecc-settings', '../devkits-agents/global-rules-model', '../devkits-agents/global-rules', '../devkits-agents/global-rules-settings', '../devkits-agents/discovery', '../devkits-agents/account-storage-model', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const agentsOwner = await readFile(new URL('../mods/devkits-agents/main.js', import.meta.url), 'utf8');
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
@@ -162,7 +162,7 @@ async function loadView(host) {
         service.poll({ spawn: fn => fn({ notify() {} }), notify() {} }); this.syncTaskSnapshot();
       }
     }
-    Object.assign(IntegratedDevkits.prototype, sessionMenu, agentProfiles, accountActions, sharedMcpSettings, globalRulesSettings);
+    Object.assign(IntegratedDevkits.prototype, sessionMenu, agentProfiles, accountActions, sharedMcpSettings, eccSettings, globalRulesSettings);
     IntegratedDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;
       ${strip(provider)}
       return SystemMonitorCore; })();
@@ -1247,7 +1247,8 @@ test('MCP Enable saves only enabled with revision checks, blocks duplicate write
     writeTextFile: async (...args) => { writes.push(args); if (conflict) throw Error('File changed'); await new Promise(resolve => { finishWrite = resolve; }); } });
   const view = new View(); view.init({}, cx); await pending; view.render(cx);
   const row = view.mcpRows[0];
-  ui.nodes.get('mcp-enabled').click({}, cx);
+  assert.equal(ui.nodes.get('mcp-enabled').click, undefined);
+  ui.nodes.get('mcp-enabled').change(false, cx);
   assert.equal(row.enabled, true); assert.equal(view.mcpSaving, true);
   view.toggleMcpEnabled(row, cx); assert.equal(writes.length, 1);
   finishWrite(); await pending;
@@ -2191,7 +2192,7 @@ test('optional Agent profiles are a table separate from native settings, with no
   assert.ok(!ui.nodes.has('defaults-profile-select'));
   assert.ok(!ui.nodes.has('defaults-model-select'));
   const pageOrder = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules', 'settings-page-shared-mcp']);
+  assert.deepEqual(pageOrder, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules', 'settings-page-shared-mcp', 'settings-page-ecc']);
   const key = 'devkits-preset-one';
   memory['devkits.agent-configs'] = [{ key, name: 'Review', profileKey: 'claude' }]; h.render();
   assert.ok(!ui.textOf('agent-profiles-table').includes('Default agent'));
@@ -3591,9 +3592,57 @@ test('Agent settings includes Global Rules and Shared MCP after Profiles', async
   view.launchers = [{ key: 'claude', name: 'Claude', icon: 'icons/claude.svg' }];
   view.render(renderContext);
   const order = ui.nodes.get('settings-pages').children.map(child => [...ui.nodes.entries()].find(([, data]) => data.element === child)?.[0]);
-  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules', 'settings-page-shared-mcp']);
+  assert.deepEqual(order, ['settings-page-accounts', 'settings-page-agents', 'settings-page-agent-profiles', 'settings-page-global-rules', 'settings-page-shared-mcp', 'settings-page-ecc']);
   assert.ok(ui.nodes.has('settings-page-global-rules') && !ui.nodes.has('shared-local-mcp'));
   assert.ok(!ui.nodes.has('hardware-settings'));
+});
+
+test('ECC architecture panel separates provider selections, explains components and saves one global draft with conflict protection', async () => {
+  const ui = fakeElements(), writes = [], tasks = [];
+  const original = JSON.stringify({ version: 1, enabled: false, source: '/ecc', claudeHooks: 'standard' });
+  const skill = { id: 'skills:alpha', group: 'skills', name: 'alpha', path: 'skills/alpha/SKILL.md', description: 'Alpha workflow', providers: ['claude', 'codex'], defaultEnabled: true };
+  const catalog = { source: '/ecc', version: '2.2.3', items: [skill, { id: 'agents:planner.md', group: 'agents', name: 'planner', path: 'agents/planner.md', description: 'Plan features', providers: ['claude'], defaultEnabled: true }] };
+  let conflict = true;
+  const cx = { ...renderContext, spawn: fn => { tasks.push(fn(cx)); } };
+  const drain = async () => { while (tasks.length) await Promise.all(tasks.splice(0)); };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', overlay: 'settings' }), theme: () => ({}),
+    readTextFile: async path => path.endsWith('/ecc.json') ? original : null,
+    exec: async (_command, args) => ({ code: 0, stdout: JSON.stringify(args[1] === 'catalog' ? catalog : { version: '2.2.3' }) }),
+    mkdir: async () => {}, unlink: async () => {},
+    writeTextFile: async (...args) => { if (!args[0].endsWith('/ecc.json')) return; if (conflict) throw Error('File changed'); writes.push(args); } });
+  const view = new View(); view.initSessionMenu({ ...cx, spawn() {} }); view.launchers = [{ key: 'claude', name: 'Claude' }];
+  view.render(cx); ui.nodes.get('settings-page-ecc').click({}, cx); await drain(); view.render(cx);
+  assert.ok(ui.nodes.has('ecc-tab-overview') && ui.nodes.has('ecc-tab-claude') && ui.nodes.has('ecc-tab-codex'));
+  assert.ok(ui.texts.includes('Understand what each part of ECC does'));
+  assert.ok(!ui.nodes.has('ecc-account'));
+  assert.ok(!ui.nodes.has('ecc-browse') && !ui.nodes.has('ecc-source-options'));
+  assert.equal(view.eccSource, '/herdr/data/devkits/ecc-source');
+  assert.equal(ui.nodes.get('ecc-enabled').disabled, false);
+  assert.equal(ui.nodes.get('ecc-enabled').click, undefined);
+  ui.nodes.get('ecc-enabled').change(true, cx);
+  assert.equal(view.eccDraft.enabled, true);
+  ui.nodes.get('ecc-enabled').change(true, cx);
+  assert.equal(view.eccDraft.enabled, true);
+  ui.nodes.get('ecc-tab-claude').click({}, cx); view.render(cx);
+  ui.nodes.get('ecc-component-skills:alpha').click({}, cx); view.render(cx);
+  assert.equal(ui.nodes.get('ecc-item-enabled').click, undefined);
+  ui.nodes.get('ecc-item-enabled').change(false, cx);
+  assert.equal(view.eccDraft.selection.claude[skill.id], false); assert.equal(writes.length, 0);
+  ui.nodes.get('ecc-tab-codex').click({}, cx); view.render(cx);
+  ui.nodes.get('ecc-component-skills:alpha').click({}, cx); view.render(cx);
+  assert.equal(ui.nodes.get('ecc-item-enabled').checked, true);
+  assert.equal(ui.nodes.get('ecc-provider-enabled').click, undefined);
+  ui.nodes.get('ecc-provider-enabled').change(false, cx);
+  assert.equal(view.eccDraft.providerEnabled.codex, false); assert.equal(view.eccDraft.providerEnabled.claude, true);
+  ui.nodes.get('settings-page-agents').click({}, cx); view.render(cx);
+  ui.nodes.get('settings-page-ecc').click({}, cx); view.render(cx);
+  assert.equal(view.eccDraft.selection.claude[skill.id], false);
+  view.saveEcc(cx); await drain(); assert.match(view.eccError, /File changed/);
+  conflict = false; view.saveEcc(cx); await drain();
+  assert.equal(writes[0][2], original); assert.equal(JSON.parse(writes[0][1]).selection.claude[skill.id], false);
+  assert.deepEqual(JSON.parse(writes[0][1]).selection.codex, {});
+  assert.equal(JSON.parse(writes[0][1]).providerEnabled.codex, false);
+  assert.equal(view.eccSaved, true); assert.equal(view.eccTab, 'codex');
 });
 
 test('new thread shortcut repeats the project agent and falls back for missing or hidden profiles', async () => {
