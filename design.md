@@ -226,3 +226,8 @@
 
 - Codex account sign-in supports sharing the sign-in link with another computer. While waiting, offer Copy sign-in link and a field for the full localhost callback URL returned after browser authorization. Validate its destination and pending OAuth state before forwarding it to the local CLI callback listener; let the CLI confirm completion before saving the account.
 - In Codex's waiting sign-in screen, group Open browser and Copy sign-in link beneath the browser instruction. Put the other-computer flow below a subtle separator, with a short heading, callback input and adjacent Connect account action. Keep Cancel and the primary Connect account action in a nonshrinking footer. Let the content scroll within the fixed dialog height so inputs and errors never overlap footer actions. Avoid duplicate waiting instructions and acknowledge copying inline on the existing button.
+
+## Devkits Zed shell boundary
+
+- Preserve the existing workspace geometry, themes, shared controls, Files/Changes, central previews, native thread creation and native Agent status display. Keep the bottom dock bar and native Herdr settings entry.
+- Keep Agent Settings, account preparation, Rules/MCP injection, task/project trackers, Calendar, Usage, SYSTEM, Simulator, application running, transcript archiving, GitHub account management and data reset out of this shell. Future integrations belong behind extension interfaces. Native program discovery and tab/space commands must work without companion service mods or automatic agent launches.
