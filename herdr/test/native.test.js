@@ -148,7 +148,7 @@ async function loadView(host) {
   const source = await readFile(new URL('../mods/devkits/main.js', import.meta.url), 'utf8');
   const components = await Promise.all(['button', 'checkbox', 'select', 'alert-dialog', 'dialog', 'empty', 'sidebar', 'dropdown-menu', 'progress', 'switch', 'toggle-group', 'icon']
     .map(name => readFile(new URL(`../mods/devkits/components/${name}.js`, import.meta.url), 'utf8')));
-  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/ecc-model', '../devkits-agents/ecc', '../devkits-agents/ecc-settings', '../devkits-agents/global-rules-model', '../devkits-agents/global-rules', '../devkits-agents/global-rules-settings', '../devkits-agents/discovery', '../devkits-agents/account-storage-model', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
+  const features = await Promise.all(['components/session-shell', 'components/shared-mcp-model', 'components/shared-mcp', 'components/agents', 'components/agent-selection', '../devkits-agents/shared-mcp-settings', '../devkits-agents/ecc-model', '../devkits-agents/ecc', '../devkits-agents/ecc-settings', '../devkits-agents/devkits-model', '../devkits-agents/devkits', '../devkits-agents/devkits-settings', '../devkits-agents/mcp-setup-settings', '../devkits-agents/global-rules-model', '../devkits-agents/global-rules', '../devkits-agents/global-rules-settings', '../devkits-agents/discovery', '../devkits-agents/account-storage-model', '../devkits-agents/session-menu', 'start-panel', '../devkits-agents/agent-profiles', '../devkits-agents/account-actions', '../devkits-agents/session-preparation', 'components/usage', 'components/system-monitor-topology', 'components/system-monitor-model', 'components/system-monitor', 'components/tasks-model', 'components/tasks', 'system-display-model', 'system-display', 'ui-settings', 'run-app', 'thread-archive', 'branch-menu', 'project-layout', 'git-result-toast']
     .map(name => readFile(new URL(`../mods/devkits/${name}.js`, import.meta.url), 'utf8')));
   const agentsOwner = await readFile(new URL('../mods/devkits-agents/main.js', import.meta.url), 'utf8');
   const provider = await readFile(new URL('../mods/devkits-system/monitor.js', import.meta.url), 'utf8');
@@ -187,7 +187,7 @@ async function loadView(host) {
         service.poll({ spawn: fn => fn({ notify() {} }), notify() {} }); this.syncTaskSnapshot();
       }
     }
-    Object.assign(IntegratedDevkits.prototype, sessionMenu, agentProfiles, accountActions, sharedMcpSettings, eccSettings, globalRulesSettings);
+    Object.assign(IntegratedDevkits.prototype, sessionMenu, agentProfiles, accountActions, sharedMcpSettings, devkitsSettings, mcpSetupSettings, eccSettings, globalRulesSettings);
     IntegratedDevkits.SystemMonitorCore = (() => { const SystemClient = SystemMonitor;
       ${strip(provider)}
       return SystemMonitorCore; })();
@@ -3331,7 +3331,7 @@ test('Claude and Codex threads show an archive button; terminals keep a close bu
   assert.ok(ui.nodes.has('close-thread-run') && !ui.nodes.has('archive-thread-run'));
 });
 
-test('the global Agent Guide seeds visible task reporting once and preserves edits or intentional emptiness', async () => {
+test('the global Agent Guide seeds an empty custom Guide once and preserves edits or intentional emptiness', async () => {
   let guide = null;
   const writes = [], root = 'C:\\Guide space\\Herdr';
   const model = await import('../mods/devkits-agents/global-rules-model.js');
@@ -3341,13 +3341,13 @@ test('the global Agent Guide seeds visible task reporting once and preserves edi
     writeTextFile: async (file, text, expected) => { writes.push({ file, text, expected }); guide = text; },
   }, 'ensureRules, sessionRules');
   await ensureRules();
-  assert.match(guide, /## Herdr task progress/);
-  assert.match(guide, /herdr_tasks/);
-  assert.match(guide, /report_task/);
+  assert.doesNotMatch(guide, /## Herdr task progress/);
+  assert.doesNotMatch(guide, /herdr_tasks/);
+  assert.doesNotMatch(guide, /report_task/);
   assert.ok(!guide.includes(root) && !guide.includes('tasks-cli.cjs'), 'Guide discovers MCP tools without a local script path');
-  assert.match(guide, /whole task is complete/);
+  assert.equal(guide, '');
   assert.equal(writes[0].expected, null);
-  assert.equal((await sessionRules()).text, guide);
+  assert.equal(await sessionRules(), null);
   for (const edited of ['My custom reporting policy', '']) {
     guide = edited; await ensureRules(); assert.equal(guide, edited);
   }
@@ -4959,4 +4959,225 @@ test('a closed conversation is restorable from its Tasks card menu and fixed det
   board.view.archived = true; board.view.cardMenuTask = task.gid; board.view.cardMenu.open = true; board.render();
   assert.ok(!board.ui.nodes.has(`board-card-menu-${task.gid}-resume`));
   assert.ok(!board.ui.nodes.has('board-resume-session'));
+});
+
+async function devkitsFixture({ platform = 'windows', servers = {}, page, defaults = false } = {}) {
+  const off = { core: false, tasks: false, 'shared-mcp': false, 'visual-studio': false };
+  const initialCapText = defaults ? null : JSON.stringify({ version: 1, skills: off, workflows: off });
+  const ui = fakeElements(), tasks = [], state = { initialCapText, off, capText: initialCapText, mcpText: JSON.stringify({ version: 1, servers }), saves: [], probes: [], conflict: false, probeError: false, bridge: null };
+  const cx = { ...renderContext, spawn: fn => tasks.push(fn(cx)) };
+  const drain = async () => { while (tasks.length) await Promise.all(tasks.splice(0)); };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers', page }), theme: () => ({}),
+    TextView: { markdown: (_id, text) => ui.div().child(text) },
+    readTextFile: async path => path.endsWith('/capabilities.json') ? state.capText : path.endsWith('/codex-mcp.json') ? state.mcpText : path.endsWith('/SKILL.md') ? '---\nname: example\ndescription: Example\n---\n# Bundled skill content' : null,
+    exec: async (_command, args) => {
+      if (args[0].endsWith('/mcp-probe.js')) {
+        if (args[1] === 'info') return { code: 0, stdout: JSON.stringify({ platform, bridgePath: state.bridge, suggestedBridge: platform === 'windows' ? 'C:/Users/test/AppData/Local/VsMcp/Bridge/VsMcp.Bridge.exe' : null }) };
+        state.probes.push(args); return state.probeError ? { code: 1, stderr: 'Cannot connect to bridge.' } : { code: 0, stdout: JSON.stringify({ verifiedAt: 12345, toolsCount: 2, serverName: 'test' }) };
+      }
+      if (args[0].endsWith('/devkits-save.js')) {
+        const payload = JSON.parse(args[2]); state.saves.push(payload);
+        if (state.conflict) return { code: 1, stderr: 'Settings changed in another window.' };
+        assert.equal(payload.capabilities.expected, state.capText); assert.equal(payload.mcp.expected, state.mcpText);
+        state.capText = payload.capabilities.text; state.mcpText = payload.mcp.text;
+        return { code: 0, stdout: JSON.stringify({ saved: true }) };
+      }
+      return { code: 0 };
+    } });
+  const view = new View(); view.initSessionMenu(page === 'shared-mcp' ? cx : { ...cx, spawn() {} });
+  if (page === 'shared-mcp') { while (tasks.length) await Promise.all(tasks.splice(0)); }
+  else { view.render(cx); ui.nodes.get('settings-page-shared-mcp').click({}, cx); await drain(); view.selectDevkitsSection('rules', cx); }
+  const render = () => { ui.nodes.clear(); view.render(cx); };
+  render(); return { ui, view, state, cx, drain, render };
+}
+
+test('Devkits uses ECC Rules Skills MCP categories and stages Rule selections without workflows', async () => {
+  const h = await devkitsFixture();
+  assert.ok(h.ui.nodes.has('devkits-page-overview') && h.ui.nodes.has('devkits-page-components'));
+  for (const tab of ['rules', 'skills', 'mcp']) assert.ok(h.ui.nodes.has(`devkits-tab-${tab}`));
+  assert.ok(!h.ui.nodes.has('devkits-tab-workflows'));
+  h.ui.nodes.get('devkits-tab-rules').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-rules-tasks').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-rules-enabled').change(true, h.cx); h.render();
+  assert.equal(h.view.capConfig.rules.tasks, true); assert.equal(h.state.saves.length, 0);
+  assert.equal(h.view.capShowSource, false);
+  h.ui.nodes.get('devkits-read-description').click({}, h.cx); h.render();
+  assert.ok(h.ui.texts.includes('# Bundled skill content'));
+  h.ui.nodes.get('devkits-save').click({}, h.cx); await h.drain();
+  assert.deepEqual(JSON.parse(h.state.capText), { version: 2, rules: { core: false, tasks: true }, skills: { 'shared-mcp': false, 'visual-studio': false } });
+});
+
+test('Skill/MCP linking is a draft, shared MCP stays enabled when a skill is off, and disabling MCP explains affected users', async () => {
+  const h = await devkitsFixture({ servers: { visual_studio: { command: 'vs', args: ['--stdio'], enabled: false }, browser: { command: 'browser' } } });
+  h.ui.nodes.get('devkits-tab-skills').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-skills-visual-studio').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-skills-enabled').change(true, h.cx); h.render();
+  assert.ok(h.ui.texts.includes('Also enable MCP on Save: visual_studio'));
+  assert.equal(h.view.mcpConfig.servers.visual_studio.enabled, false);
+  h.ui.nodes.get('devkits-plan-accept').click({}, h.cx); h.render();
+  assert.equal(h.view.mcpConfig.servers.visual_studio.enabled, true); assert.equal(h.view.capConfig.skills['visual-studio'], true);
+  assert.equal(h.state.saves.length, 0);
+  h.ui.nodes.get('devkits-skills-enabled').change(false, h.cx); h.render();
+  assert.equal(h.view.mcpConfig.servers.visual_studio.enabled, true);
+  h.ui.nodes.get('devkits-skills-enabled').change(true, h.cx); h.render();
+  h.ui.nodes.get('devkits-link-mcp-visual_studio').click({}, h.cx); h.render();
+  assert.ok(h.ui.texts.includes('Configured · Connection not verified'));
+  h.ui.nodes.get('mcp-enabled').change(false, h.cx); h.render();
+  assert.ok(h.ui.nodes.has('devkits-disable-prompt')); assert.equal(h.view.mcpConfig.servers.visual_studio.enabled, true);
+  h.ui.nodes.get('devkits-disable-confirm').click({}, h.cx); h.render();
+  assert.equal(h.view.capConfig.skills['visual-studio'], true); assert.equal(h.view.mcpConfig.servers.visual_studio.enabled, false);
+  h.ui.nodes.get('devkits-save').click({}, h.cx); await h.drain();
+  assert.deepEqual(JSON.parse(h.state.mcpText).servers.browser, { command: 'browser' });
+  assert.equal(JSON.parse(h.state.mcpText).servers.visual_studio.enabled, false);
+});
+
+test('Windows Setup detects the official bridge, tests before staging and completes the pending linked selection', async () => {
+  const h = await devkitsFixture();
+  h.ui.nodes.get('devkits-tab-skills').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-skills-visual-studio').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-skills-enabled').change(true, h.cx); h.render();
+  assert.ok(h.ui.nodes.has('devkits-setup-required-visual_studio'));
+  h.ui.nodes.get('devkits-setup-required-visual_studio').click({}, h.cx); h.render();
+  assert.ok(h.ui.nodes.has('mcp-setup-detect') && h.ui.nodes.has('mcp-setup-install'));
+  h.state.bridge = 'C:/Installed/VsMcp.Bridge.exe';
+  h.ui.nodes.get('mcp-setup-detect').click({}, h.cx); await h.drain(); h.render();
+  assert.equal(h.view.capSetup.command.value(), h.state.bridge);
+  h.state.probeError = true;
+  h.ui.nodes.get('mcp-setup-test').click({}, h.cx); await h.drain(); h.render();
+  assert.match(h.view.capError, /Cannot connect/); assert.ok(h.view.capSetup);
+  assert.equal(h.view.mcpConfig.servers.visual_studio, undefined); assert.equal(h.state.saves.length, 0);
+  h.state.probeError = false;
+  h.ui.nodes.get('mcp-setup-test').click({}, h.cx); await h.drain(); h.render();
+  assert.equal(h.view.capSetup, null); assert.equal(h.view.capPending, null);
+  assert.equal(h.view.capConfig.skills['visual-studio'], true); assert.equal(h.view.mcpConfig.servers.visual_studio.enabled, true);
+  assert.equal(h.view.mcpConfig.servers.visual_studio.command, h.state.bridge);
+  assert.ok(h.ui.texts.includes('Connection verified · 2 tools discovered'));
+  assert.equal(h.state.saves.length, 0, 'Test and use stages the connection until Save');
+  h.ui.nodes.get('devkits-save').click({}, h.cx); await h.drain(); h.render();
+  assert.equal(h.state.saves.length, 1);
+});
+
+test('macOS and Linux can browse Windows resources but cannot select, configure, verify or launch them', async () => {
+  for (const platform of ['macos', 'linux']) {
+    const h = await devkitsFixture({ platform, servers: { visual_studio: { command: 'C:/VS/bridge.exe', enabled: true } } });
+    h.ui.nodes.get('devkits-tab-skills').click({}, h.cx); h.render();
+    h.ui.nodes.get('devkits-skills-visual-studio').click({}, h.cx); h.render();
+    assert.equal(h.ui.nodes.get('devkits-skills-enabled').disabled, true);
+    h.ui.nodes.get('devkits-skills-enabled').change(true, h.cx);
+    assert.equal(h.view.capConfig.skills['visual-studio'], false);
+    h.ui.nodes.get('devkits-tab-mcp').click({}, h.cx); h.render();
+    h.ui.nodes.get('devkits-mcp-visual_studio').click({}, h.cx); h.render();
+    assert.equal(h.ui.nodes.get('devkits-mcp-setup').disabled, true); assert.equal(h.ui.nodes.get('devkits-mcp-verify').disabled, true);
+    h.view.openMcpSetup('visual_studio', h.cx); h.view.verifyDevkitsMcp(h.view.devkitsMcpRows().find(row => row.name === 'visual_studio'), h.cx);
+    assert.equal(h.view.capSetup, null); assert.equal(h.state.probes.length, 0);
+    assert.ok(h.ui.texts.includes('Windows only. Setup, verification and selection are unavailable on this platform.'));
+  }
+});
+
+test('save conflicts retain both resource and connection drafts; direct MCP links select the top-level MCP tab', async () => {
+  const h = await devkitsFixture({ page: 'shared-mcp' });
+  assert.equal(h.view.capTab, 'mcp'); assert.ok(h.ui.nodes.has('devkits-mcp-herdr_tasks'));
+  h.view.capConfig.rules.tasks = true; h.view.capDirty = true; h.state.conflict = true;
+  h.view.saveDevkits(h.cx); await h.drain();
+  assert.match(h.view.capError, /changed in another window/); assert.equal(h.view.capDirty, true);
+  assert.equal(h.view.capConfig.rules.tasks, true); assert.equal(h.view.capOriginal, h.state.initialCapText);
+  h.state.conflict = false; h.view.loadDevkits(h.cx); await h.drain();
+  assert.deepEqual(h.view.capConfig.rules, { core: false, tasks: false }); assert.equal(h.view.capDirty, false);
+});
+
+test('the standalone MCP inspector also prevents enabling Windows-only connections on macOS', async () => {
+  const ui = fakeElements(); let pending;
+  const cx = { ...renderContext, spawn: fn => { pending = fn(cx); } };
+  const View = await viewFor({ ...ui, props: () => ({ view: 'shared-mcp' }), theme: () => ({}), window: () => ({ platform: 'macos' }),
+    readTextFile: async () => JSON.stringify({ version: 1, servers: { visual_studio: { command: 'C:/VS/bridge.exe', enabled: false } } }),
+    writeTextFile: () => assert.fail('unsupported platforms cannot change the integration') });
+  const view = new View(); view.init({}, cx); await pending; view.render(cx);
+  assert.equal(ui.nodes.get('mcp-enabled').disabled, true);
+  view.toggleMcpEnabled(view.mcpRows[0], cx);
+  assert.equal(view.mcpRows[0].enabled, false);
+});
+
+test('built-in Rules and Skills default on, explicit off survives reload, and missing MCP stays unconfigured', async () => {
+  const h = await devkitsFixture({ defaults: true, platform: 'macos' });
+  assert.ok(Object.values(h.view.capConfig.rules).every(Boolean)); assert.ok(Object.values(h.view.capConfig.skills).every(Boolean));
+  assert.equal(h.state.saves.length, 0);
+  h.ui.nodes.get('devkits-tab-rules').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-rules-core').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-rules-enabled').change(false, h.cx); h.render();
+  h.ui.nodes.get('devkits-save').click({}, h.cx); await h.drain();
+  h.view.loadDevkits(h.cx); await h.drain(); h.render();
+  assert.equal(h.view.capConfig.rules.core, false); assert.equal(h.view.capConfig.rules.tasks, true);
+  h.ui.nodes.get('devkits-tab-skills').click({}, h.cx); h.render();
+  h.ui.nodes.get('devkits-skills-visual-studio').click({}, h.cx); h.render();
+  assert.equal(h.ui.nodes.get('devkits-skills-enabled').checked, false); assert.equal(h.ui.nodes.get('devkits-skills-enabled').disabled, true);
+  const windows = await devkitsFixture({ defaults: true });
+  windows.ui.nodes.get('devkits-tab-skills').click({}, windows.cx); windows.render();
+  windows.ui.nodes.get('devkits-skills-visual-studio').click({}, windows.cx); windows.render();
+  assert.ok(windows.ui.texts.includes('Setup required: visual_studio'));
+  assert.equal(windows.view.mcpConfig.servers.visual_studio, undefined);
+});
+
+test('Global Rules shows only startup policy while both moved instructions are listed as Devkits Skills', async () => {
+  const ui = fakeElements(), jobs = [];
+  const cx = { ...renderContext, spawn: fn => jobs.push(fn(cx)) };
+  const drain = async () => { while (jobs.length) await Promise.all(jobs.splice(0)); };
+  const state = () => ({ text: '', value() { return this.text; }, set_value(value) { this.text = value; }, on() {} });
+  const View = await viewFor({ ...ui, props: () => ({ view: 'manage-launchers' }), theme: () => ({}),
+    EditorState: { new: state }, Editor: { new: () => ui.div() }, TextView: { markdown: (_id, text) => ui.div().child(text) },
+    readTextFile: async path => path.endsWith('/AGENTS.md') ? defaultRules : path.endsWith('/SKILL.md') ? '# Policy skill' : null,
+    exec: async () => ({ code: 0, stdout: JSON.stringify({ platform: 'windows', bridgePath: null, suggestedBridge: null }) }) });
+  const view = new View(); view.initSessionMenu({ ...cx, spawn() {} }); view.render(cx);
+  ui.nodes.get('settings-page-global-rules').click({}, cx); await drain(); ui.nodes.clear(); view.render(cx);
+  assert.ok(!ui.nodes.has('rules-enable-core') && ui.nodes.has('rules-enable-custom'));
+  assert.ok(!ui.nodes.has('rules-enable-tasks') && !ui.nodes.has('rules-enable-mcp') && !ui.nodes.has('rules-enable-visual_studio'));
+  assert.doesNotMatch(view.rulesPreview.value(), /## MCP installation|## Visual Studio builds/);
+  ui.nodes.get('settings-page-shared-mcp').click({}, cx); await drain(); view.render(cx);
+  ui.nodes.get('devkits-open-skills').click({}, cx); ui.nodes.clear(); view.render(cx);
+  assert.ok(ui.nodes.has('devkits-skills-shared-mcp') && ui.nodes.has('devkits-skills-visual-studio'));
+  ui.nodes.get('devkits-tab-rules').click({}, cx); ui.nodes.clear(); view.render(cx);
+  assert.ok(ui.nodes.has('devkits-rules-core') && ui.nodes.has('devkits-rules-tasks'));
+  assert.ok(ui.texts.includes('Shared MCP installation'));
+});
+
+
+test('Devkits follows ECC browsing: Overview, searchable components and optional full descriptions retain drafts', async () => {
+  const h = await devkitsFixture();
+  h.ui.nodes.get('devkits-page-overview').click({}, h.cx); h.render();
+  assert.ok(h.ui.nodes.has('devkits-open-skills')); assert.ok(!h.ui.nodes.has('devkits-tab-skills'));
+  h.ui.nodes.get('devkits-open-skills').click({}, h.cx); h.render();
+  assert.ok(!h.ui.nodes.has('devkits-read-description'));
+  h.view.capSearch.set_value('Shared MCP'); h.render();
+  assert.ok(h.ui.nodes.has('devkits-skills-shared-mcp')); assert.ok(!h.ui.nodes.has('devkits-skills-visual-studio'));
+  h.ui.nodes.get('devkits-group-enable').click({}, h.cx); h.render();
+  assert.equal(h.view.capConfig.skills['shared-mcp'], true); assert.equal(h.view.capConfig.skills['visual-studio'], false);
+  h.ui.nodes.get('devkits-skills-shared-mcp').click({}, h.cx); h.render();
+  assert.ok(!h.ui.nodes.has('devkits-skills-document'));
+  h.ui.nodes.get('devkits-read-description').click({}, h.cx); h.render();
+  assert.ok(h.ui.nodes.has('devkits-skills-document'));
+  h.ui.nodes.get('devkits-tab-rules').click({}, h.cx); h.render();
+  assert.equal(h.view.capSearch.value(), ''); assert.equal(h.view.capShowSource, false);
+  assert.equal(h.view.capConfig.skills['shared-mcp'], true); assert.equal(h.state.saves.length, 0);
+  h.view.capSearch.set_value('no match'); h.render();
+  assert.ok(h.ui.texts.includes('No matching components.'));
+  h.view.capSearch.set_value(''); h.render();
+  h.ui.nodes.get('devkits-group-enable').click({}, h.cx); h.render();
+  assert.deepEqual(h.view.capConfig.rules, { core: true, tasks: true });
+  h.view.capSearch.set_value('Herdr Core'); h.render();
+  h.ui.nodes.get('devkits-group-disable').click({}, h.cx); h.render();
+  assert.deepEqual(h.view.capConfig.rules, { core: false, tasks: true });
+  assert.equal(h.state.saves.length, 0);
+});
+
+test('Devkits bulk selection retains guided MCP setup and never installs or enables unsupported resources', async () => {
+  const h = await devkitsFixture();
+  h.ui.nodes.get('devkits-tab-skills').click({}, h.cx); h.render();
+  h.view.capSearch.set_value('Visual Studio'); h.render();
+  h.ui.nodes.get('devkits-group-enable').click({}, h.cx); h.render();
+  assert.ok(h.ui.nodes.has('devkits-setup-required-visual_studio'));
+  assert.equal(h.view.capConfig.skills['visual-studio'], false); assert.equal(h.view.mcpConfig.servers.visual_studio, undefined);
+  assert.equal(h.state.probes.length, 0); assert.equal(h.state.saves.length, 0);
+  const mac = await devkitsFixture({ platform: 'macos' });
+  mac.ui.nodes.get('devkits-tab-skills').click({}, mac.cx); mac.render();
+  mac.ui.nodes.get('devkits-group-enable').click({}, mac.cx); mac.render();
+  assert.equal(mac.view.capConfig.skills['shared-mcp'], true); assert.equal(mac.view.capConfig.skills['visual-studio'], false);
 });
