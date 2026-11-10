@@ -106,7 +106,7 @@ test('default Claude cleanup restores a chained status line and preserves unrela
   const f = await fixture(t), directory = join(f.userHome, '.claude');
   const previous = { type: 'command', command: 'my-status-line' };
   await writeFile(join(directory, 'settings.json'), JSON.stringify({ theme: 'dark', statusLine: {
-    type: 'command', command: `node "${f.root}/mods/devkits-usage/claude-statusline.js"`,
+    type: 'command', command: `node "${f.root.replaceAll('\\', '/')}/mods/devkits-usage/claude-statusline.js"`,
   } }));
   await writeFile(join(directory, 'devkits-statusline-chain.json'), JSON.stringify(previous));
   await writeFile(join(directory, 'devkits-usage.json'), 'quota');
@@ -120,8 +120,8 @@ test('default Claude cleanup restores a chained status line and preserves unrela
 
 test('logout uses only the dedicated account and removes inherited authentication overrides', async () => {
   const calls = [], execute = async (...args) => calls.push(args);
-  await signOut({ provider: 'claude', directory: '/dedicated/claude' }, execute);
-  await signOut({ provider: 'codex', directory: '/dedicated/codex' }, execute);
+  await signOut({ provider: 'claude', directory: '/dedicated/claude' }, execute, 'darwin');
+  await signOut({ provider: 'codex', directory: '/dedicated/codex' }, execute, 'darwin');
   assert.deepEqual(calls[0].slice(0, 2), ['claude', ['auth', 'logout']]);
   assert.equal(calls[0][2].env.CLAUDE_CONFIG_DIR, '/dedicated/claude');
   assert.equal(calls[0][2].env.CLAUDE_SECURESTORAGE_CONFIG_DIR, '/dedicated/claude');
@@ -200,6 +200,48 @@ test('Windows reset process inspection returns only this installation helper PID
     { ProcessId: 3, Name: 'node.exe', CommandLine: 'node C:\\Other\\mods\\devkits\\reader.js' },
     { ProcessId: 4, Name: 'node.exe', CommandLine: 'node "C:\\Herdr\\mods\\devkits-tasks\\mcp-server.cjs"' },
   ], 'C:\\Herdr', 1), [2, 4]);
+});
+
+test('Windows stop tolerates exited processes and reports live termination failures without command lines', async () => {
+  class Enumerator {
+    constructor(rows) { this.rows = rows; this.index = 0; }
+    atEnd() { return this.index >= this.rows.length; }
+    moveNext() { this.index++; }
+    item() { return this.rows[this.index]; }
+  }
+  const { stopResetWriter } = await evaluateNative('../mods/devkits/reset-processes-windows.js', { Enumerator }, 'stopResetWriter');
+  const row = { ProcessId: 42, CreationDate: 'original', Terminate: () => { throw Object.assign(new Error('private command'), { number: -2147217406 }); } };
+  const connection = rows => ({ ExecQuery(query) {
+    assert.equal(query, 'SELECT ProcessId, CreationDate FROM Win32_Process WHERE ProcessId = 42');
+    return rows;
+  } });
+  stopResetWriter(connection([]), row);
+  stopResetWriter(connection([{ CreationDate: 'replacement' }]), row);
+  assert.throws(() => stopResetWriter(connection([row]), row), /^Error: Could not stop Devkits background process PID 42: WMI error -2147217406\.$/);
+  row.Terminate = () => 2;
+  assert.throws(() => stopResetWriter(connection([row]), row), /PID 42: return code 2/);
+  stopResetWriter(connection([]), row);
+  row.Terminate = () => 0;
+  stopResetWriter({ ExecQuery() { throw new Error('unnecessary query'); } }, row);
+});
+
+test('stop failure preserves account files and describes the pre-sign-out stage', async t => {
+  const f = await fixture(t);
+  f.services.stopServices = async () => { throw new Error('WMI failure'); };
+  await assert.rejects(clearReset(f.root, 'DEVKITS', f.services), error => {
+    assert.match(error.message, /WMI failure.*before account sign-out; account files were kept/);
+    assert.doesNotMatch(error.message, /may already be signed out/);
+    return true;
+  });
+  assert.deepEqual(f.calls, []);
+  assert.equal(await readFile(join(f.codex, 'auth.json'), 'utf8'), 'dedicated credentials');
+});
+
+test('sign-out failure warns about partial sign-out and preserves remaining files', async t => {
+  const f = await fixture(t);
+  f.services.signOut = async () => { throw new Error('Sign-out failed'); };
+  await assert.rejects(clearReset(f.root, 'DEVKITS', f.services), /Sign-out failed.*Some accounts may already be signed out/);
+  assert.equal(await readFile(join(f.codex, 'auth.json'), 'utf8'), 'dedicated credentials');
 });
 
 test('confirmed reset stops dedicated account sessions and their children, preserving unrelated terminals', async () => {

@@ -231,6 +231,7 @@ export async function clearReset(directory, confirmation, services = {}) {
   const { root, data } = await roots(directory);
   const lockPath = join(root, '.devkits-reset.lock');
   const lock = await acquireLock(lockPath);
+  let signOutStarted = false;
   try {
     await (services.stopAccounts || stopAccountSessions)(data);
     await (services.stopServices || stopDevkitsServices)(data);
@@ -238,6 +239,7 @@ export async function clearReset(directory, confirmation, services = {}) {
     const plan = await inspectReset(root);
     const frames = join(root, 'mods', 'devkits-sim-frames');
     await plain(join(root, 'mods')); await plain(frames);
+    signOutStarted = true;
     for (const account of plan.accounts) await (services.signOut || signOut)(account);
     const userHome = services.userHome || homedir();
     await (services.cleanClaude || cleanDefaultClaude)(root, userHome);
@@ -257,6 +259,10 @@ export async function clearReset(directory, confirmation, services = {}) {
     if (sensorStat && !sensorStat.isSymbolicLink() && (process.getuid === undefined || sensorStat.uid === process.getuid()))
       await rm(sensorCache, { recursive: true, force: true });
     return { sharedKeys: latest.sharedKeys };
+  } catch (error) {
+    error.message += signOutStarted ? ' Some accounts may already be signed out.'
+      : ' Reset stopped before account sign-out; account files were kept.';
+    throw error;
   } finally { await lock.close(); await rm(lockPath, { force: true }); }
 }
 

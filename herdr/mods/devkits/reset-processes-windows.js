@@ -25,6 +25,20 @@ function resetWriterPids(rows, root, ownPid) {
   }
   return result;
 }
+function stopResetWriter(connection, row) {
+  var pid = Number(row.ProcessId), failure;
+  try {
+    var code = Number(row.Terminate());
+    if (code === 0) return;
+    failure = 'return code ' + code;
+  } catch (error) { failure = 'WMI error ' + Number(error.number || 0); }
+  // A reader can exit between discovery and termination. A reused PID is no
+  // longer the inspected process either; never terminate its replacement.
+  var current = new Enumerator(connection.ExecQuery('SELECT ProcessId, CreationDate FROM Win32_Process WHERE ProcessId = ' + pid));
+  if (current.atEnd()) return;
+  if (row.CreationDate && current.item().CreationDate && String(row.CreationDate) !== String(current.item().CreationDate)) return;
+  throw new Error('Could not stop Devkits background process PID ' + pid + ': ' + failure + '.');
+}
 if (typeof WScript !== 'undefined') {
   try {
     var root = String(WScript.Arguments.Item(0)), ownPid = Number(WScript.Arguments.Item(1));
@@ -38,10 +52,16 @@ if (typeof WScript !== 'undefined') {
         var iterator = new Enumerator(rows);
         for (; !iterator.atEnd(); iterator.moveNext()) {
           var row = iterator.item();
-          if (Number(row.ProcessId) === pids[i]) row.Terminate();
+          if (Number(row.ProcessId) === pids[i]) stopResetWriter(connection, row);
         }
       }
     }
     WScript.Echo('[' + pids.join(',') + ']');
-  } catch (error) { WScript.Echo('[]'); WScript.Quit(1); }
+  } catch (error) {
+    // Only our own diagnostic includes a message; arbitrary COM messages may
+    // include private process details. Preserve the numeric WMI error instead.
+    WScript.StdErr.WriteLine(/^Could not stop Devkits background process PID \d+:/.test(error.message || '')
+      ? error.message : 'Could not inspect Devkits background processes (WMI error ' + Number(error.number || 0) + ').');
+    WScript.Quit(1);
+  }
 }

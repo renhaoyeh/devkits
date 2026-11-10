@@ -130,7 +130,7 @@ export class ResetDevkits {
         .child(Input.new(this.input).id('reset-devkits-confirmation').accessibility_label('Type DEVKITS to confirm')
           .h(36).px(10).rounded(0).border_b(1).border_color(t.input).text_size(13)))
       .when(Boolean(this.error), el => el.child(div().id('reset-devkits-error').text_size(12).text_color(t.destructive || t.ansi1)
-        .child(`${this.error}${this.executing && this.authorized ? ' Reset is incomplete. Some accounts may already be signed out.' : ''}`)))
+        .child(`${this.error}${this.executing && this.authorized ? ' Reset is incomplete.' : ''}`)))
       .child(div().flex_1())
       .child(AlertDialogFooter()
         .child(AlertDialogCancel('reset-devkits-cancel', t).disabled(Boolean(this.busy)).on_click(done)
